@@ -22,9 +22,11 @@ if not guiParent then
 end
 
 pcall(function()
+    if CoreGui:FindFirstChild("AutoTreat_ivyis") then CoreGui.AutoTreat_ivyis:Destroy() end
     if CoreGui:FindFirstChild("BSS_Final") then CoreGui.BSS_Final:Destroy() end
 end)
 pcall(function()
+    if player.PlayerGui:FindFirstChild("AutoTreat_ivyis") then player.PlayerGui.AutoTreat_ivyis:Destroy() end
     if player.PlayerGui:FindFirstChild("BSS_Final") then player.PlayerGui.BSS_Final:Destroy() end
 end)
 
@@ -723,43 +725,50 @@ local function tweenTo(targetCF)
 end
 
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "BSS_Final"
+screenGui.Name = "AutoTreat_ivyis"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = guiParent
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 240, 0, 195)
-mainFrame.Position = UDim2.new(0.5, -120, 0.35, 0)
-mainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+mainFrame.Size = UDim2.new(0, 480, 0, 310)
+mainFrame.Position = UDim2.new(0.5, -240, 0.3, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
 mainFrame.Parent = screenGui
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
 local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 28)
-titleBar.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+titleBar.Size = UDim2.new(1, 0, 0, 32)
+titleBar.BackgroundColor3 = Color3.fromRGB(29, 56, 107)
 titleBar.BorderSizePixel = 0
 titleBar.Parent = mainFrame
 Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 8)
 
+local barBottom = Instance.new("Frame")
+barBottom.Size = UDim2.new(1, 0, 0, 8)
+barBottom.Position = UDim2.new(0, 0, 1, -8)
+barBottom.BackgroundColor3 = Color3.fromRGB(29, 56, 107)
+barBottom.BorderSizePixel = 0
+barBottom.Parent = titleBar
+
 local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, -36, 1, 0)
-titleLabel.Position = UDim2.new(0, 10, 0, 0)
+titleLabel.Size = UDim2.new(1, -60, 1, 0)
+titleLabel.Position = UDim2.new(0, 12, 0, 0)
 titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "BSS Auto Treat"
-titleLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
+titleLabel.Text = "Auto Treat v1.0 by ivyis"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextSize = 12
+titleLabel.TextSize = 13
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 titleLabel.Parent = titleBar
 
 local minBtn = Instance.new("TextButton")
 minBtn.Size = UDim2.new(0, 22, 0, 20)
-minBtn.Position = UDim2.new(1, -26, 0, 4)
-minBtn.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
+minBtn.Position = UDim2.new(1, -28, 0, 6)
+minBtn.BackgroundColor3 = Color3.fromRGB(42, 70, 125)
 minBtn.Text = "—"
-minBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+minBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
 minBtn.Font = Enum.Font.GothamBold
 minBtn.TextSize = 12
 minBtn.BorderSizePixel = 0
@@ -768,140 +777,430 @@ minBtn.Parent = titleBar
 Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 4)
 
 local bodyFrame = Instance.new("Frame")
-bodyFrame.Size = UDim2.new(1, -16, 1, -34)
-bodyFrame.Position = UDim2.new(0, 8, 0, 30)
+bodyFrame.Size = UDim2.new(1, 0, 1, -32)
+bodyFrame.Position = UDim2.new(0, 0, 0, 32)
 bodyFrame.BackgroundTransparency = 1
 bodyFrame.Parent = mainFrame
 
-local targetRow = Instance.new("Frame")
-targetRow.Size = UDim2.new(1, 0, 0, 22)
-targetRow.Position = UDim2.new(0, 0, 0, 0)
-targetRow.BackgroundTransparency = 1
-targetRow.Parent = bodyFrame
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, 130, 1, 0)
+sidebar.Position = UDim2.new(0, 0, 0, 0)
+sidebar.BackgroundColor3 = Color3.fromRGB(15, 16, 21)
+sidebar.BorderSizePixel = 0
+sidebar.Parent = bodyFrame
 
-local tgtTxt = Instance.new("TextLabel")
-tgtTxt.Size = UDim2.new(0, 42, 1, 0)
-tgtTxt.BackgroundTransparency = 1
-tgtTxt.Text = "Target:"
-tgtTxt.TextColor3 = Color3.fromRGB(180, 180, 180)
-tgtTxt.Font = Enum.Font.Gotham
-tgtTxt.TextSize = 11
-tgtTxt.TextXAlignment = Enum.TextXAlignment.Left
-tgtTxt.Parent = targetRow
+local sideBorder = Instance.new("Frame")
+sideBorder.Size = UDim2.new(0, 1, 1, 0)
+sideBorder.Position = UDim2.new(1, -1, 0, 0)
+sideBorder.BackgroundColor3 = Color3.fromRGB(28, 30, 38)
+sideBorder.BorderSizePixel = 0
+sideBorder.Parent = sidebar
+
+local navLabel = Instance.new("TextLabel")
+navLabel.Size = UDim2.new(1, -16, 0, 22)
+navLabel.Position = UDim2.new(0, 10, 0, 8)
+navLabel.BackgroundTransparency = 1
+navLabel.Text = "NAVIGATION"
+navLabel.TextColor3 = Color3.fromRGB(85, 93, 110)
+navLabel.Font = Enum.Font.GothamBold
+navLabel.TextSize = 10
+navLabel.TextXAlignment = Enum.TextXAlignment.Left
+navLabel.Parent = sidebar
+
+local tabBtnAutoFeed = Instance.new("TextButton")
+tabBtnAutoFeed.Size = UDim2.new(1, -16, 0, 32)
+tabBtnAutoFeed.Position = UDim2.new(0, 8, 0, 34)
+tabBtnAutoFeed.BackgroundColor3 = Color3.fromRGB(37, 72, 130)
+tabBtnAutoFeed.Text = "🍯 Auto Feed"
+tabBtnAutoFeed.TextColor3 = Color3.fromRGB(255, 255, 255)
+tabBtnAutoFeed.Font = Enum.Font.GothamBold
+tabBtnAutoFeed.TextSize = 11
+tabBtnAutoFeed.TextXAlignment = Enum.TextXAlignment.Left
+tabBtnAutoFeed.BorderSizePixel = 0
+tabBtnAutoFeed.Parent = sidebar
+Instance.new("UICorner", tabBtnAutoFeed).CornerRadius = UDim.new(0, 6)
+local p1 = Instance.new("UIPadding", tabBtnAutoFeed); p1.PaddingLeft = UDim.new(0, 10)
+
+local tabBtnSettings = Instance.new("TextButton")
+tabBtnSettings.Size = UDim2.new(1, -16, 0, 32)
+tabBtnSettings.Position = UDim2.new(0, 8, 0, 72)
+tabBtnSettings.BackgroundColor3 = Color3.fromRGB(15, 16, 21)
+tabBtnSettings.Text = "⚙️ Settings"
+tabBtnSettings.TextColor3 = Color3.fromRGB(160, 165, 175)
+tabBtnSettings.Font = Enum.Font.GothamBold
+tabBtnSettings.TextSize = 11
+tabBtnSettings.TextXAlignment = Enum.TextXAlignment.Left
+tabBtnSettings.BorderSizePixel = 0
+tabBtnSettings.Parent = sidebar
+Instance.new("UICorner", tabBtnSettings).CornerRadius = UDim.new(0, 6)
+local p2 = Instance.new("UIPadding", tabBtnSettings); p2.PaddingLeft = UDim.new(0, 10)
+
+local contentArea = Instance.new("Frame")
+contentArea.Size = UDim2.new(1, -130, 1, 0)
+contentArea.Position = UDim2.new(0, 130, 0, 0)
+contentArea.BackgroundColor3 = Color3.fromRGB(20, 22, 29)
+contentArea.BorderSizePixel = 0
+contentArea.Parent = bodyFrame
+
+local autoFeedPage = Instance.new("Frame")
+autoFeedPage.Size = UDim2.new(1, 0, 1, 0)
+autoFeedPage.BackgroundTransparency = 1
+autoFeedPage.Visible = true
+autoFeedPage.Parent = contentArea
+
+local afHeader = Instance.new("Frame")
+afHeader.Size = UDim2.new(1, -24, 0, 24)
+afHeader.Position = UDim2.new(0, 12, 0, 6)
+afHeader.BackgroundTransparency = 1
+afHeader.Parent = autoFeedPage
+
+local afTitle = Instance.new("TextLabel")
+afTitle.Size = UDim2.new(0, 150, 1, 0)
+afTitle.BackgroundTransparency = 1
+afTitle.Text = "Treat Automation"
+afTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+afTitle.Font = Enum.Font.GothamBold
+afTitle.TextSize = 13
+afTitle.TextXAlignment = Enum.TextXAlignment.Left
+afTitle.Parent = afHeader
+
+local afBadge = Instance.new("TextLabel")
+afBadge.Size = UDim2.new(0, 76, 0, 18)
+afBadge.Position = UDim2.new(1, -76, 0, 3)
+afBadge.BackgroundColor3 = Color3.fromRGB(28, 54, 32)
+afBadge.Text = "HIVE LINKED"
+afBadge.TextColor3 = Color3.fromRGB(74, 222, 128)
+afBadge.Font = Enum.Font.GothamBold
+afBadge.TextSize = 9
+afBadge.BorderSizePixel = 0
+afBadge.Parent = afHeader
+Instance.new("UICorner", afBadge).CornerRadius = UDim.new(0, 4)
+
+local afCtrlRow = Instance.new("Frame")
+afCtrlRow.Size = UDim2.new(1, -24, 0, 30)
+afCtrlRow.Position = UDim2.new(0, 12, 0, 32)
+afCtrlRow.BackgroundTransparency = 1
+afCtrlRow.Parent = autoFeedPage
+
+local targetCard = Instance.new("Frame")
+targetCard.Size = UDim2.new(0.48, 0, 1, 0)
+targetCard.BackgroundColor3 = Color3.fromRGB(25, 28, 36)
+targetCard.BorderSizePixel = 0
+targetCard.Parent = afCtrlRow
+Instance.new("UICorner", targetCard).CornerRadius = UDim.new(0, 6)
+
+local targetLabel = Instance.new("TextLabel")
+targetLabel.Size = UDim2.new(1, -50, 1, 0)
+targetLabel.Position = UDim2.new(0, 8, 0, 0)
+targetLabel.BackgroundTransparency = 1
+targetLabel.Text = "Target Level:"
+targetLabel.TextColor3 = Color3.fromRGB(200, 205, 215)
+targetLabel.Font = Enum.Font.GothamBold
+targetLabel.TextSize = 11
+targetLabel.TextXAlignment = Enum.TextXAlignment.Left
+targetLabel.Parent = targetCard
 
 local targetBox = Instance.new("TextBox")
-targetBox.Size = UDim2.new(0, 48, 1, 0)
-targetBox.Position = UDim2.new(0, 44, 0, 0)
-targetBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
+targetBox.Size = UDim2.new(0, 40, 0, 20)
+targetBox.Position = UDim2.new(1, -46, 0.5, -10)
+targetBox.BackgroundColor3 = Color3.fromRGB(15, 17, 23)
 targetBox.Text = tostring(targetLevel)
-targetBox.TextColor3 = Color3.fromRGB(240, 240, 240)
+targetBox.TextColor3 = Color3.fromRGB(255, 255, 255)
 targetBox.Font = Enum.Font.GothamBold
 targetBox.TextSize = 11
 targetBox.BorderSizePixel = 0
 targetBox.ClearTextOnFocus = false
-targetBox.ZIndex = 15
-targetBox.Parent = targetRow
+targetBox.Parent = targetCard
 Instance.new("UICorner", targetBox).CornerRadius = UDim.new(0, 4)
 
-local spdTxt = Instance.new("TextLabel")
-spdTxt.Size = UDim2.new(0, 42, 1, 0)
-spdTxt.Position = UDim2.new(0, 102, 0, 0)
-spdTxt.BackgroundTransparency = 1
-spdTxt.Text = "Speed:"
-spdTxt.TextColor3 = Color3.fromRGB(180, 180, 180)
-spdTxt.Font = Enum.Font.Gotham
-spdTxt.TextSize = 11
-spdTxt.TextXAlignment = Enum.TextXAlignment.Left
-spdTxt.Parent = targetRow
+local autoBuyCard = Instance.new("Frame")
+autoBuyCard.Size = UDim2.new(0.48, 0, 1, 0)
+autoBuyCard.Position = UDim2.new(0.52, 0, 0, 0)
+autoBuyCard.BackgroundColor3 = Color3.fromRGB(25, 28, 36)
+autoBuyCard.BorderSizePixel = 0
+autoBuyCard.Parent = afCtrlRow
+Instance.new("UICorner", autoBuyCard).CornerRadius = UDim.new(0, 6)
 
-local speedBox = Instance.new("TextBox")
-speedBox.Size = UDim2.new(0, 48, 1, 0)
-speedBox.Position = UDim2.new(0, 146, 0, 0)
-speedBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
-speedBox.Text = tostring(WALK_SPEED)
-speedBox.TextColor3 = Color3.fromRGB(240, 240, 240)
-speedBox.Font = Enum.Font.GothamBold
-speedBox.TextSize = 11
-speedBox.BorderSizePixel = 0
-speedBox.ClearTextOnFocus = false
-speedBox.ZIndex = 15
-speedBox.Parent = targetRow
-Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 4)
+local autoBuyLabel = Instance.new("TextLabel")
+autoBuyLabel.Size = UDim2.new(1, -50, 1, 0)
+autoBuyLabel.Position = UDim2.new(0, 8, 0, 0)
+autoBuyLabel.BackgroundTransparency = 1
+autoBuyLabel.Text = "Auto Buy Shop:"
+autoBuyLabel.TextColor3 = Color3.fromRGB(200, 205, 215)
+autoBuyLabel.Font = Enum.Font.GothamBold
+autoBuyLabel.TextSize = 11
+autoBuyLabel.TextXAlignment = Enum.TextXAlignment.Left
+autoBuyLabel.Parent = autoBuyCard
 
-local function makeInfoLabel(yPos)
+local autoBuyEnabled = true
+local autoBuyBtn = Instance.new("TextButton")
+autoBuyBtn.Size = UDim2.new(0, 38, 0, 20)
+autoBuyBtn.Position = UDim2.new(1, -44, 0.5, -10)
+autoBuyBtn.BackgroundColor3 = Color3.fromRGB(28, 54, 32)
+autoBuyBtn.Text = "ON"
+autoBuyBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
+autoBuyBtn.Font = Enum.Font.GothamBold
+autoBuyBtn.TextSize = 10
+autoBuyBtn.BorderSizePixel = 0
+autoBuyBtn.Parent = autoBuyCard
+Instance.new("UICorner", autoBuyBtn).CornerRadius = UDim.new(0, 4)
+
+autoBuyBtn.MouseButton1Click:Connect(function()
+    autoBuyEnabled = not autoBuyEnabled
+    if autoBuyEnabled then
+        autoBuyBtn.Text = "ON"
+        autoBuyBtn.BackgroundColor3 = Color3.fromRGB(28, 54, 32)
+        autoBuyBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
+    else
+        autoBuyBtn.Text = "OFF"
+        autoBuyBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
+        autoBuyBtn.TextColor3 = Color3.fromRGB(248, 113, 113)
+    end
+end)
+
+local statsBox = Instance.new("Frame")
+statsBox.Size = UDim2.new(1, -24, 0, 150)
+statsBox.Position = UDim2.new(0, 12, 0, 68)
+statsBox.BackgroundColor3 = Color3.fromRGB(24, 27, 34)
+statsBox.BorderSizePixel = 0
+statsBox.Parent = autoFeedPage
+Instance.new("UICorner", statsBox).CornerRadius = UDim.new(0, 6)
+
+local function makeStatRow(yPos, labelTxt, defaultVal)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -16, 0, 16)
+    row.Position = UDim2.new(0, 8, 0, yPos)
+    row.BackgroundTransparency = 1
+    row.Parent = statsBox
+
     local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(1, 0, 0, 16)
-    l.Position = UDim2.new(0, 0, 0, yPos)
+    l.Size = UDim2.new(0.6, 0, 1, 0)
     l.BackgroundTransparency = 1
-    l.TextColor3 = Color3.fromRGB(180, 180, 180)
+    l.Text = labelTxt
+    l.TextColor3 = Color3.fromRGB(140, 149, 166)
     l.Font = Enum.Font.Gotham
     l.TextSize = 11
     l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = bodyFrame
-    return l
+    l.Parent = row
+
+    local v = Instance.new("TextLabel")
+    v.Size = UDim2.new(0.4, 0, 1, 0)
+    v.Position = UDim2.new(0.6, 0, 0, 0)
+    v.BackgroundTransparency = 1
+    v.Text = defaultVal
+    v.TextColor3 = Color3.fromRGB(230, 235, 245)
+    v.Font = Enum.Font.GothamBold
+    v.TextSize = 11
+    v.TextXAlignment = Enum.TextXAlignment.Right
+    v.Parent = row
+    return v
 end
 
-local beeCountLabel = makeInfoLabel(24)
-beeCountLabel.Text = "Bees: 0"
-local honeyLabel = makeInfoLabel(40)
-honeyLabel.Text = "Honey: 0"
-local treatsLabel = makeInfoLabel(56)
-treatsLabel.Text = "Treats: 0"
-local totalTreatsLabel = makeInfoLabel(72)
-totalTreatsLabel.Text = "Treats Needed: 0"
-local totalHoneyLabel = makeInfoLabel(88)
-totalHoneyLabel.Text = "Honey Needed: 0"
-local overallLabel = makeInfoLabel(104)
-overallLabel.Text = "Overall: 0%"
+local beeCountLabel = makeStatRow(6, "Active Bees / Buff:", "Bees: 0")
+local honeyLabel = makeStatRow(24, "Honey Available:", "0")
+local treatsLabel = makeStatRow(42, "Treats Owned:", "0")
+local totalTreatsLabel = makeStatRow(60, "Treats Needed:", "0")
+local totalHoneyLabel = makeStatRow(78, "Honey Needed:", "0")
+local overallLabel = makeStatRow(96, "Overall Progression:", "0%")
 
-local btnRow = Instance.new("Frame")
-btnRow.Size = UDim2.new(1, 0, 0, 26)
-btnRow.Position = UDim2.new(0, 0, 0, 126)
-btnRow.BackgroundTransparency = 1
-btnRow.Parent = bodyFrame
+local progressBg = Instance.new("Frame")
+progressBg.Size = UDim2.new(1, -16, 0, 6)
+progressBg.Position = UDim2.new(0, 8, 0, 122)
+progressBg.BackgroundColor3 = Color3.fromRGB(13, 15, 20)
+progressBg.BorderSizePixel = 0
+progressBg.Parent = statsBox
+Instance.new("UICorner", progressBg).CornerRadius = UDim.new(0, 3)
+
+local progressFill = Instance.new("Frame")
+progressFill.Size = UDim2.new(0, 0, 1, 0)
+progressFill.BackgroundColor3 = Color3.fromRGB(37, 72, 130)
+progressFill.BorderSizePixel = 0
+progressFill.Parent = progressBg
+Instance.new("UICorner", progressFill).CornerRadius = UDim.new(0, 3)
+
+local afActionRow = Instance.new("Frame")
+afActionRow.Size = UDim2.new(1, -24, 0, 32)
+afActionRow.Position = UDim2.new(0, 12, 1, -40)
+afActionRow.BackgroundTransparency = 1
+afActionRow.Parent = autoFeedPage
 
 local calcBtn = Instance.new("TextButton")
 calcBtn.Size = UDim2.new(0.48, 0, 1, 0)
 calcBtn.Position = UDim2.new(0, 0, 0, 0)
-calcBtn.BackgroundColor3 = Color3.fromRGB(26, 26, 26)
-calcBtn.Text = "Recalculate"
-calcBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+calcBtn.BackgroundColor3 = Color3.fromRGB(37, 72, 130)
+calcBtn.Text = "↻ Recalculate"
+calcBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 calcBtn.Font = Enum.Font.GothamBold
 calcBtn.TextSize = 11
 calcBtn.BorderSizePixel = 0
-calcBtn.Active = true
-calcBtn.Selectable = true
-calcBtn.ZIndex = 15
-calcBtn.Parent = btnRow
-Instance.new("UICorner", calcBtn).CornerRadius = UDim.new(0, 4)
+calcBtn.Parent = afActionRow
+Instance.new("UICorner", calcBtn).CornerRadius = UDim.new(0, 6)
 
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0.48, 0, 1, 0)
 toggleBtn.Position = UDim2.new(0.52, 0, 0, 0)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
-toggleBtn.Text = "Auto: OFF"
-toggleBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+toggleBtn.Text = "● Auto: OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(248, 113, 113)
 toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.TextSize = 11
 toggleBtn.BorderSizePixel = 0
-toggleBtn.Active = true
-toggleBtn.Selectable = true
-toggleBtn.ZIndex = 15
-toggleBtn.Parent = btnRow
-Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 4)
+toggleBtn.Parent = afActionRow
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 6)
+
+local settingsPage = Instance.new("Frame")
+settingsPage.Size = UDim2.new(1, 0, 1, 0)
+settingsPage.BackgroundTransparency = 1
+settingsPage.Visible = false
+settingsPage.Parent = contentArea
+
+local setHeader = Instance.new("Frame")
+setHeader.Size = UDim2.new(1, -24, 0, 24)
+setHeader.Position = UDim2.new(0, 12, 0, 6)
+setHeader.BackgroundTransparency = 1
+setHeader.Parent = settingsPage
+
+local setTitle = Instance.new("TextLabel")
+setTitle.Size = UDim2.new(1, 0, 1, 0)
+setTitle.BackgroundTransparency = 1
+setTitle.Text = "Configuration & Safety"
+setTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+setTitle.Font = Enum.Font.GothamBold
+setTitle.TextSize = 13
+setTitle.TextXAlignment = Enum.TextXAlignment.Left
+setTitle.Parent = setHeader
+
+local function makeSettingCard(yPos, labelTxt)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, -24, 0, 38)
+    card.Position = UDim2.new(0, 12, 0, yPos)
+    card.BackgroundColor3 = Color3.fromRGB(24, 27, 34)
+    card.BorderSizePixel = 0
+    card.Parent = settingsPage
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 6)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -70, 1, 0)
+    lbl.Position = UDim2.new(0, 10, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = labelTxt
+    lbl.TextColor3 = Color3.fromRGB(200, 205, 215)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = card
+
+    return card
+end
+
+local speedCard = makeSettingCard(36, "Walk Speed (Tween to Shop)")
+local speedBox = Instance.new("TextBox")
+speedBox.Size = UDim2.new(0, 48, 0, 22)
+speedBox.Position = UDim2.new(1, -58, 0.5, -11)
+speedBox.BackgroundColor3 = Color3.fromRGB(15, 17, 23)
+speedBox.Text = tostring(WALK_SPEED)
+speedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedBox.Font = Enum.Font.GothamBold
+speedBox.TextSize = 11
+speedBox.BorderSizePixel = 0
+speedBox.ClearTextOnFocus = false
+speedBox.Parent = speedCard
+Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 4)
+
+local antiAfkCard = makeSettingCard(80, "Anti-AFK (20m Kick Prevention)")
+local antiAfkEnabled = true
+local antiAfkBtn = Instance.new("TextButton")
+antiAfkBtn.Size = UDim2.new(0, 48, 0, 22)
+antiAfkBtn.Position = UDim2.new(1, -58, 0.5, -11)
+antiAfkBtn.BackgroundColor3 = Color3.fromRGB(28, 54, 32)
+antiAfkBtn.Text = "ON"
+antiAfkBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
+antiAfkBtn.Font = Enum.Font.GothamBold
+antiAfkBtn.TextSize = 10
+antiAfkBtn.BorderSizePixel = 0
+antiAfkBtn.Parent = antiAfkCard
+Instance.new("UICorner", antiAfkBtn).CornerRadius = UDim.new(0, 4)
+
+antiAfkBtn.MouseButton1Click:Connect(function()
+    antiAfkEnabled = not antiAfkEnabled
+    if antiAfkEnabled then
+        antiAfkBtn.Text = "ON"
+        antiAfkBtn.BackgroundColor3 = Color3.fromRGB(28, 54, 32)
+        antiAfkBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
+    else
+        antiAfkBtn.Text = "OFF"
+        antiAfkBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
+        antiAfkBtn.TextColor3 = Color3.fromRGB(248, 113, 113)
+    end
+end)
+
+local returnHiveCard = makeSettingCard(124, "Return to Hive after Shop")
+local returnHiveEnabled = true
+local returnHiveBtn = Instance.new("TextButton")
+returnHiveBtn.Size = UDim2.new(0, 48, 0, 22)
+returnHiveBtn.Position = UDim2.new(1, -58, 0.5, -11)
+returnHiveBtn.BackgroundColor3 = Color3.fromRGB(28, 54, 32)
+returnHiveBtn.Text = "ON"
+returnHiveBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
+returnHiveBtn.Font = Enum.Font.GothamBold
+returnHiveBtn.TextSize = 10
+returnHiveBtn.BorderSizePixel = 0
+returnHiveBtn.Parent = returnHiveCard
+Instance.new("UICorner", returnHiveBtn).CornerRadius = UDim.new(0, 4)
+
+returnHiveBtn.MouseButton1Click:Connect(function()
+    returnHiveEnabled = not returnHiveEnabled
+    if returnHiveEnabled then
+        returnHiveBtn.Text = "ON"
+        returnHiveBtn.BackgroundColor3 = Color3.fromRGB(28, 54, 32)
+        returnHiveBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
+    else
+        returnHiveBtn.Text = "OFF"
+        returnHiveBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
+        returnHiveBtn.TextColor3 = Color3.fromRGB(248, 113, 113)
+    end
+end)
+
+tabBtnAutoFeed.MouseButton1Click:Connect(function()
+    autoFeedPage.Visible = true
+    settingsPage.Visible = false
+    tabBtnAutoFeed.BackgroundColor3 = Color3.fromRGB(37, 72, 130)
+    tabBtnAutoFeed.TextColor3 = Color3.fromRGB(255, 255, 255)
+    tabBtnSettings.BackgroundColor3 = Color3.fromRGB(15, 16, 21)
+    tabBtnSettings.TextColor3 = Color3.fromRGB(160, 165, 175)
+end)
+
+tabBtnSettings.MouseButton1Click:Connect(function()
+    settingsPage.Visible = true
+    autoFeedPage.Visible = false
+    tabBtnSettings.BackgroundColor3 = Color3.fromRGB(37, 72, 130)
+    tabBtnSettings.TextColor3 = Color3.fromRGB(255, 255, 255)
+    tabBtnAutoFeed.BackgroundColor3 = Color3.fromRGB(15, 16, 21)
+    tabBtnAutoFeed.TextColor3 = Color3.fromRGB(160, 165, 175)
+end)
 
 local isMinimized = false
 minBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
     if isMinimized then
-        mainFrame.Size = UDim2.new(0, 240, 0, 28)
-        minBtn.Text = "+"
+        mainFrame.Size = UDim2.new(0, 480, 0, 32)
         bodyFrame.Visible = false
+        minBtn.Text = "+"
     else
-        mainFrame.Size = UDim2.new(0, 240, 0, 195)
-        minBtn.Text = "—"
+        mainFrame.Size = UDim2.new(0, 480, 0, 310)
         bodyFrame.Visible = true
+        minBtn.Text = "—"
     end
+end)
+
+pcall(function()
+    local vu = game:GetService("VirtualUser")
+    player.Idled:Connect(function()
+        if antiAfkEnabled then
+            vu:CaptureController()
+            vu:ClickButton2(Vector2.new())
+        end
+    end)
 end)
 
 local isRefreshing = false
@@ -926,15 +1225,16 @@ local function refreshBeeList()
         local bees = getAllBees(data)
         local bftBonus = autoDetectBFT(data, bees)
 
-        honeyLabel.Text = "Honey: " .. formatNum(getHoney(data))
-        treatsLabel.Text = "Treats: " .. formatNum(getTreats(data))
+        honeyLabel.Text = formatNum(getHoney(data))
+        treatsLabel.Text = formatNum(getTreats(data))
 
         if not next(bees) then
             beeCountLabel.Text = "Bees: 0"
-            totalTreatsLabel.Text = "Treats Needed: 0"
-            totalHoneyLabel.Text = "Honey Needed: 0"
-            overallLabel.Text = "Overall: 0%"
-            calcBtn.Text = "Recalculate"
+            totalTreatsLabel.Text = "0"
+            totalHoneyLabel.Text = "0"
+            overallLabel.Text = "0%"
+            progressFill.Size = UDim2.new(0, 0, 1, 0)
+            calcBtn.Text = "↻ Recalculate"
             return
         end
 
@@ -956,12 +1256,13 @@ local function refreshBeeList()
         end
 
         local overall = totalBondReq > 0 and math.floor((totalBondDone / totalBondReq) * 10000) / 100 or 100
-        beeCountLabel.Text = (bftBonus > 0) and ("Bees: " .. beeCount .. " | BFT: +" .. bftBonus .. "%") or ("Bees: " .. beeCount)
-        overallLabel.Text = "Overall: " .. overall .. "%"
-        totalTreatsLabel.Text = "Treats Needed: " .. formatNum(totalTreats)
-        totalHoneyLabel.Text = "Honey Needed: " .. formatNum(totalTreats * TREAT_COST)
+        beeCountLabel.Text = (bftBonus > 0) and (beeCount .. " bees | +" .. bftBonus .. "% BFT") or (beeCount .. " bees")
+        overallLabel.Text = overall .. "%"
+        totalTreatsLabel.Text = formatNum(totalTreats)
+        totalHoneyLabel.Text = formatNum(totalTreats * TREAT_COST)
+        progressFill.Size = UDim2.new(math.min(1, math.max(0, overall / 100)), 0, 1, 0)
     end)
-    calcBtn.Text = "Recalculate"
+    calcBtn.Text = "↻ Recalculate"
     isRefreshing = false
 end
 
@@ -973,22 +1274,26 @@ speedBox.FocusLost:Connect(refreshBeeList)
 toggleBtn.MouseButton1Click:Connect(function()
     autoRunning = not autoRunning
     if autoRunning then
-        toggleBtn.Text = "Auto: ON"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(20, 42, 24)
+        toggleBtn.Text = "● Auto: RUNNING"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(28, 54, 32)
+        toggleBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
     else
-        toggleBtn.Text = "Auto: OFF"
+        toggleBtn.Text = "● Auto: OFF"
         toggleBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
+        toggleBtn.TextColor3 = Color3.fromRGB(248, 113, 113)
         isTweening = false
     end
 end)
 toggleBtn.Activated:Connect(function()
     if not autoRunning then
-        toggleBtn.Text = "Auto: ON"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(20, 42, 24)
+        toggleBtn.Text = "● Auto: RUNNING"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(28, 54, 32)
+        toggleBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
         autoRunning = true
     else
-        toggleBtn.Text = "Auto: OFF"
+        toggleBtn.Text = "● Auto: OFF"
         toggleBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
+        toggleBtn.TextColor3 = Color3.fromRGB(248, 113, 113)
         autoRunning = false
         isTweening = false
     end
@@ -1017,7 +1322,7 @@ spawn(function()
 
                 local owned = getTreats(data)
                 local honey = getHoney(data)
-                if owned < totalNeeded and honey >= TREAT_COST then
+                if autoBuyEnabled and owned < totalNeeded and honey >= TREAT_COST then
                     local maxCanBuy = math.floor(honey / TREAT_COST)
                     local toBuy = math.min(totalNeeded - owned, maxCanBuy)
                     if toBuy > 0 then
@@ -1029,7 +1334,7 @@ spawn(function()
                             wait(0.5)
                             buyTreats(toBuy)
                             wait(0.8)
-                            if savedPos then tweenTo(savedPos) end
+                            if returnHiveEnabled and savedPos then tweenTo(savedPos) end
                         end
                     end
                 end
