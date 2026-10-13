@@ -370,7 +370,7 @@ local function feedBee(slot, amount)
     return ok
 end
 
-local function tweenTo(targetCF, statusLabel)
+local function tweenTo(targetCF)
     local char = player.Character
     if not char then return false end
     local root = char:FindFirstChild("HumanoidRootPart")
@@ -398,8 +398,8 @@ screenGui.ResetOnSpawn = false
 screenGui.Parent = guiParent
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 460, 0, 210)
-mainFrame.Position = UDim2.new(0.5, -230, 0.35, 0)
+mainFrame.Size = UDim2.new(0, 240, 0, 195)
+mainFrame.Position = UDim2.new(0.5, -120, 0.35, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
@@ -443,17 +443,11 @@ bodyFrame.Position = UDim2.new(0, 8, 0, 30)
 bodyFrame.BackgroundTransparency = 1
 bodyFrame.Parent = mainFrame
 
-local leftCol = Instance.new("Frame")
-leftCol.Size = UDim2.new(0, 216, 1, 0)
-leftCol.Position = UDim2.new(0, 0, 0, 0)
-leftCol.BackgroundTransparency = 1
-leftCol.Parent = bodyFrame
-
 local targetRow = Instance.new("Frame")
 targetRow.Size = UDim2.new(1, 0, 0, 22)
 targetRow.Position = UDim2.new(0, 0, 0, 0)
 targetRow.BackgroundTransparency = 1
-targetRow.Parent = leftCol
+targetRow.Parent = bodyFrame
 
 local tgtTxt = Instance.new("TextLabel")
 tgtTxt.Size = UDim2.new(0, 42, 1, 0)
@@ -466,7 +460,7 @@ tgtTxt.TextXAlignment = Enum.TextXAlignment.Left
 tgtTxt.Parent = targetRow
 
 local targetBox = Instance.new("TextBox")
-targetBox.Size = UDim2.new(0, 45, 1, 0)
+targetBox.Size = UDim2.new(0, 48, 1, 0)
 targetBox.Position = UDim2.new(0, 44, 0, 0)
 targetBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 targetBox.Text = tostring(targetLevel)
@@ -481,7 +475,7 @@ Instance.new("UICorner", targetBox).CornerRadius = UDim.new(0, 4)
 
 local spdTxt = Instance.new("TextLabel")
 spdTxt.Size = UDim2.new(0, 42, 1, 0)
-spdTxt.Position = UDim2.new(0, 98, 0, 0)
+spdTxt.Position = UDim2.new(0, 102, 0, 0)
 spdTxt.BackgroundTransparency = 1
 spdTxt.Text = "Speed:"
 spdTxt.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -491,8 +485,8 @@ spdTxt.TextXAlignment = Enum.TextXAlignment.Left
 spdTxt.Parent = targetRow
 
 local speedBox = Instance.new("TextBox")
-speedBox.Size = UDim2.new(0, 45, 1, 0)
-speedBox.Position = UDim2.new(0, 142, 0, 0)
+speedBox.Size = UDim2.new(0, 48, 1, 0)
+speedBox.Position = UDim2.new(0, 146, 0, 0)
 speedBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 speedBox.Text = tostring(WALK_SPEED)
 speedBox.TextColor3 = Color3.fromRGB(240, 240, 240)
@@ -513,7 +507,7 @@ local function makeInfoLabel(yPos)
     l.Font = Enum.Font.Gotham
     l.TextSize = 11
     l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = leftCol
+    l.Parent = bodyFrame
     return l
 end
 
@@ -530,22 +524,11 @@ totalHoneyLabel.Text = "Honey Needed: 0"
 local overallLabel = makeInfoLabel(104)
 overallLabel.Text = "Overall: 0%"
 
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1, 0, 0, 16)
-statusLabel.Position = UDim2.new(0, 0, 0, 122)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "Status: Idle"
-statusLabel.TextColor3 = Color3.fromRGB(140, 140, 140)
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextSize = 10
-statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-statusLabel.Parent = leftCol
-
 local btnRow = Instance.new("Frame")
 btnRow.Size = UDim2.new(1, 0, 0, 26)
-btnRow.Position = UDim2.new(0, 0, 0, 142)
+btnRow.Position = UDim2.new(0, 0, 0, 126)
 btnRow.BackgroundTransparency = 1
-btnRow.Parent = leftCol
+btnRow.Parent = bodyFrame
 
 local calcBtn = Instance.new("TextButton")
 calcBtn.Size = UDim2.new(0.48, 0, 1, 0)
@@ -577,27 +560,15 @@ toggleBtn.ZIndex = 15
 toggleBtn.Parent = btnRow
 Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 4)
 
-local scrollFrame = Instance.new("ScrollingFrame")
-scrollFrame.Size = UDim2.new(0, 218, 1, 0)
-scrollFrame.Position = UDim2.new(1, -218, 0, 0)
-scrollFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 16)
-scrollFrame.BorderSizePixel = 0
-scrollFrame.ScrollBarThickness = 3
-scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 60)
-scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-scrollFrame.Parent = bodyFrame
-Instance.new("UICorner", scrollFrame).CornerRadius = UDim.new(0, 6)
-Instance.new("UIListLayout", scrollFrame).Padding = UDim.new(0, 2)
-
 local isMinimized = false
 minBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
     if isMinimized then
-        mainFrame.Size = UDim2.new(0, 460, 0, 28)
+        mainFrame.Size = UDim2.new(0, 240, 0, 28)
         minBtn.Text = "+"
         bodyFrame.Visible = false
     else
-        mainFrame.Size = UDim2.new(0, 460, 0, 210)
+        mainFrame.Size = UDim2.new(0, 240, 0, 195)
         minBtn.Text = "—"
         bodyFrame.Visible = true
     end
@@ -610,9 +581,6 @@ local function refreshBeeList()
     isRefreshing = true
     pcall(function()
         calcBtn.Text = "Updating..."
-        for _, c in pairs(scrollFrame:GetChildren()) do
-            if c:IsA("TextLabel") then c:Destroy() end
-        end
 
         local digits = string.match(tostring(targetBox.Text), "%d+")
         local val = digits and tonumber(digits)
@@ -660,7 +628,6 @@ local function refreshBeeList()
 
         local beeCount, totalTreats = 0, 0
         local totalBondDone, totalBondReq = 0, 0
-        local beeList = {}
 
         for slot, bee in pairs(bees) do
             local b = extractBee(bee) or bee
@@ -673,44 +640,9 @@ local function refreshBeeList()
                 totalTreats = totalTreats + treats
                 totalBondReq = totalBondReq + reqBond
                 totalBondDone = totalBondDone + (reqBond - remBond)
-
-                table.insert(beeList, {
-                    slot = slot,
-                    name = tostring(b.Type or ("Slot"..slot)),
-                    lvl = lvl,
-                    lvlPct = lvlPct,
-                    pct = totalPct,
-                    treats = treats,
-                    row = b.row,
-                    col = b.col
-                })
             end
         end
 
-        table.sort(beeList, function(a, b)
-            local la = tonumber(a.lvl) or 0
-            local lb = tonumber(b.lvl) or 0
-            if la ~= lb then return la < lb end
-            return (tonumber(a.slot) or 0) < (tonumber(b.slot) or 0)
-        end)
-
-        for i, info in ipairs(beeList) do
-            local done = info.pct >= 100
-            local row = Instance.new("TextLabel")
-            row.Size = UDim2.new(1, -6, 0, 16)
-            row.BackgroundTransparency = 1
-            row.Text = string.format(" %s Lv%d(%.0f%%) [%.0f%%] %s",
-                info.name, info.lvl, info.lvlPct,
-                info.pct, done and "[DONE]" or formatNum(info.treats))
-            row.TextColor3 = done and Color3.fromRGB(120, 200, 120) or Color3.fromRGB(180, 180, 180)
-            row.Font = Enum.Font.Gotham
-            row.TextSize = 10
-            row.TextXAlignment = Enum.TextXAlignment.Left
-            row.LayoutOrder = i
-            row.Parent = scrollFrame
-        end
-
-        scrollFrame.CanvasSize = UDim2.new(0, 0, 0, #beeList * 18)
         local overall = totalBondReq > 0 and math.floor((totalBondDone / totalBondReq) * 10000) / 100 or 100
         beeCountLabel.Text = "Bees: " .. beeCount
         overallLabel.Text = "Overall: " .. overall .. "%"
@@ -795,15 +727,12 @@ spawn(function()
                         local char = player.Character
                         local root = char and char:FindFirstChild("HumanoidRootPart")
                         local savedPos = root and root.CFrame
-                        statusLabel.Text = "Status: Moving to shop..."
-                        local arrived = tweenTo(TREAT_SHOP_POS, statusLabel)
+                        local arrived = tweenTo(TREAT_SHOP_POS)
                         if arrived and autoRunning then
-                            statusLabel.Text = "Status: Buying treats..."
                             wait(0.5)
                             buyTreats(toBuy)
                             wait(0.8)
-                            statusLabel.Text = "Status: Returning..."
-                            if savedPos then tweenTo(savedPos, statusLabel) end
+                            if savedPos then tweenTo(savedPos) end
                         end
                     end
                 end
@@ -811,7 +740,6 @@ spawn(function()
                 data = getStatData() or data
                 local availableTreats = getTreats(data)
                 if availableTreats > 0 then
-                    statusLabel.Text = "Status: Feeding bees..."
                     for slot, bee in pairs(bees) do
                         if not autoRunning or availableTreats <= 0 then break end
                         local b = extractBee(bee) or bee
@@ -834,7 +762,6 @@ spawn(function()
                                         end)
                                     end
                                     availableTreats = availableTreats - toFeed
-                                    statusLabel.Text = "Status: Fed " .. tostring(b.Type or "bee") .. " " .. formatNum(toFeed)
                                     wait(0.3)
                                 end
                             end
@@ -842,7 +769,6 @@ spawn(function()
                     end
                 end
                 refreshBeeList()
-                statusLabel.Text = "Status: Idle"
             end
         end
         wait(3)
