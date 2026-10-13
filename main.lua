@@ -242,15 +242,20 @@ local function findBeesTable(data)
     if not data or type(data) ~= "table" then return nil end
     local candidate = data.Bees or data.bees or data.Hive or data.hive or data.HiveSlots or data.hiveSlots or data.Slots or data.slots
     if type(candidate) == "table" then
+        local count = 0
         local result = {}
         for k, v in pairs(candidate) do
             local b = extractBee(v)
-            if b then result[tonumber(k) or k] = b end
+            if b then
+                result[tonumber(k) or k] = b
+                count = count + 1
+            end
         end
-        if next(result) then return result end
+        if count >= 20 then return result end
     end
-    for _, v in pairs(data) do
-        if type(v) == "table" then
+    for k, v in pairs(data) do
+        local lk = tostring(k):lower()
+        if lk ~= "amulets" and lk ~= "eggs" and lk ~= "inventory" and lk ~= "badges" and lk ~= "accessories" and lk ~= "totals" and type(v) == "table" then
             local count = 0
             local result = {}
             for subK, subV in pairs(v) do
@@ -260,7 +265,7 @@ local function findBeesTable(data)
                     count = count + 1
                 end
             end
-            if count >= 3 then
+            if count >= 20 then
                 return result
             end
         end
@@ -305,9 +310,17 @@ local function getBeesFromWorkspace()
     if cells then
         for i, cell in ipairs(cells:GetChildren()) do
             local cellType = cell:FindFirstChild("CellType") or cell:FindFirstChild("BeeType") or cell:FindFirstChild("Type")
+            if not cellType then
+                for _, ch in ipairs(cell:GetChildren()) do
+                    if ch:IsA("StringValue") and (ch.Name:lower():find("type") or ch.Name:lower():find("bee")) then
+                        cellType = ch
+                        break
+                    end
+                end
+            end
             local typeName = (cellType and tostring(cellType.Value)) or cell:GetAttribute("CellType") or cell:GetAttribute("BeeType") or ""
             local lowerType = typeName:lower():gsub("%s+", "")
-            if lowerType == "" or lowerType == "empty" or lowerType == "none" or lowerType == "unbought" or lowerType == "locked" then
+            if lowerType == "empty" or lowerType == "none" or lowerType == "unbought" or lowerType == "locked" then
                 continue
             end
 
@@ -340,20 +353,48 @@ local function getBeesFromWorkspace()
                 local bestLevel = nil
                 for _, desc in ipairs(cell:GetDescendants()) do
                     if desc:IsA("TextLabel") then
-                        local txt = tostring(desc.Text or "")
-                        local num = tonumber(txt:match("(%d+)"))
-                        if num and num >= 1 and num <= 25 then
-                            local dname = desc.Name:lower()
-                            if dname:find("level") or dname:find("lvl") then
+                        local txt = tostring(desc.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                        local dname = desc.Name:lower()
+                        if dname:find("level") or dname:find("lvl") then
+                            local num = tonumber(txt:match("(%d+)"))
+                            if num and num >= 1 and num <= 25 then
                                 bestLevel = num
                                 break
-                            elseif not bestLevel and (txt:match("^%s*Lv?%.?%s*(%d+)%s*$") or #txt <= 3) then
+                            end
+                        else
+                            local lvMatch = txt:match("^[Ll]?[Vv]?l?%.?%s*(%d+)$") or txt:match("^[Ll]evel%s*(%d+)$")
+                            local num = tonumber(lvMatch)
+                            if num and num >= 1 and num <= 25 then
                                 bestLevel = num
                             end
+                        end
+                        if bond == 0 then
+                            local b1 = txt:match("([%d,]+)%s*/%s*[%d,]+")
+                            if b1 then
+                                local bNum = tonumber(b1:gsub(",", ""))
+                                if bNum and bNum > 0 then
+                                    bond = bNum
+                                end
+                            end
+                        end
+                    elseif desc:IsA("ValueBase") then
+                        local dname = desc.Name:lower()
+                        if not bestLevel and (dname:find("level") or dname:find("lvl")) then
+                            local n = tonumber(desc.Value)
+                            if n and n >= 1 and n <= 25 then
+                                bestLevel = n
+                            end
+                        elseif bond == 0 and (dname:find("bond") or dname:find("xp")) then
+                            local b = tonumber(desc.Value)
+                            if b and b > 0 then bond = b end
                         end
                     end
                 end
                 lvl = bestLevel
+            end
+
+            if lowerType == "" and (not lvl or lvl < 1) then
+                continue
             end
 
             local row, col = cell.Name:match("C(%d+),(%d+)")
@@ -368,15 +409,13 @@ local function getBeesFromWorkspace()
                 slotIdx = i
             end
 
-            if typeName ~= "" and lowerType ~= "empty" and lowerType ~= "none" then
-                bees[slotIdx] = {
-                    Type = typeName,
-                    Level = lvl or 1,
-                    Bond = bond or 0,
-                    row = row,
-                    col = col
-                }
-            end
+            bees[slotIdx] = {
+                Type = (typeName ~= "" and typeName) or "Bee",
+                Level = math.max(1, math.floor(lvl or 1)),
+                Bond = math.max(0, bond or 0),
+                row = row,
+                col = col
+            }
         end
     end
     return next(bees) and bees or nil
@@ -385,37 +424,49 @@ end
 local function getAllBees(data)
     local wsBees = getBeesFromWorkspace() or {}
     local cacheBees = findBeesTable(data) or {}
-    local bees = {}
-    if next(cacheBees) then
+
+    local wsCount = 0
+    for _ in pairs(wsBees) do wsCount = wsCount + 1 end
+
+    local cacheCount = 0
+    for _ in pairs(cacheBees) do cacheCount = cacheCount + 1 end
+
+    if wsCount >= 20 then
+        if cacheCount >= 20 then
+            for k, cb in pairs(cacheBees) do
+                local sk = tonumber(k) or k
+                if wsBees[sk] then
+                    if cb.Bond and cb.Bond > 0 then
+                        wsBees[sk].Bond = cb.Bond
+                    end
+                    if cb.Level and cb.Level > 1 then
+                        wsBees[sk].Level = cb.Level
+                    end
+                    if cb.Type and cb.Type ~= "" and not tostring(cb.Type):find("^Slot") then
+                        wsBees[sk].Type = cb.Type
+                    end
+                end
+            end
+        end
+        return wsBees
+    end
+
+    if cacheCount >= 20 then
         for k, v in pairs(cacheBees) do
             local sk = tonumber(k) or k
-            bees[sk] = v
             if type(sk) == "number" and (not v.row or not v.col) then
                 v.row = math.ceil(sk / 5)
                 v.col = sk - (v.row - 1) * 5
             end
         end
-        for k, v in pairs(wsBees) do
-            local sk = tonumber(k) or k
-            if bees[sk] then
-                if v.Level and v.Level > 1 and (not bees[sk].Level or bees[sk].Level <= 1 or v.Level > bees[sk].Level) then
-                    bees[sk].Level = v.Level
-                end
-                if v.Bond and v.Bond > 0 and (not bees[sk].Bond or bees[sk].Bond == 0) then
-                    bees[sk].Bond = v.Bond
-                end
-                if v.row and v.col then
-                    bees[sk].row = v.row
-                    bees[sk].col = v.col
-                end
-                if v.Type and v.Type ~= "" and not tostring(v.Type):find("^Slot") then
-                    bees[sk].Type = v.Type
-                end
-            end
-        end
-        return bees
+        return cacheBees
     end
-    return wsBees
+
+    if wsCount > 0 then
+        return wsBees
+    end
+
+    return cacheBees
 end
 
 local function getHoney(data)
