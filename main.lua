@@ -497,7 +497,110 @@ local function getTreats(data)
     return 0
 end
 
-local function calcBeeTreats(currentLvl, currentBond, targetLvl)
+local function autoDetectBFT(data, bees)
+    local bft = 0
+
+    pcall(function()
+        local pg = player:FindFirstChild("PlayerGui")
+        if pg then
+            for _, desc in ipairs(pg:GetDescendants()) do
+                if desc:IsA("TextLabel") then
+                    local txt = tostring(desc.Text or ""):lower()
+                    if txt:find("bond%s*from%s*treat") then
+                        local pct = txt:match("%+?(%d+)%%") or txt:match("(%d+)")
+                        local n = tonumber(pct)
+                        if n then
+                            if n > 100 then n = n - 100 end
+                            if n > bft and n <= 100 then
+                                bft = n
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    if bft > 0 then return bft end
+
+    local hasGiftedPuppy = false
+    if type(bees) == "table" then
+        for _, b in pairs(bees) do
+            local t = tostring(b.Type or ""):lower()
+            if t:find("puppy") then
+                if t:find("gifted") or b.Gifted or b.IsGifted then
+                    hasGiftedPuppy = true
+                    break
+                end
+                if b.row and b.col then
+                    pcall(function()
+                        local hVal = player:FindFirstChild("Honeycomb") and player.Honeycomb.Value
+                        local honeycombs = workspace:FindFirstChild("Honeycombs")
+                        local hive = (typeof(hVal) == "Instance" and hVal) or (honeycombs and honeycombs:FindFirstChild(tostring(hVal)))
+                        if hive and hive:FindFirstChild("Cells") then
+                            local cellName = "C" .. b.row .. "," .. b.col
+                            local cell = hive.Cells:FindFirstChild(cellName)
+                            if cell then
+                                if cell:FindFirstChild("Gifted") or cell:GetAttribute("Gifted") then
+                                    hasGiftedPuppy = true
+                                else
+                                    for _, desc in ipairs(cell:GetDescendants()) do
+                                        local dn = desc.Name:lower()
+                                        if dn:find("gifted") or dn:find("star") then
+                                            hasGiftedPuppy = true
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                end
+                if hasGiftedPuppy then break end
+            end
+        end
+    end
+    if hasGiftedPuppy then
+        bft = bft + 20
+    end
+
+    if type(data) == "table" then
+        pcall(function()
+            local amulets = data.Amulets or data.amulets
+            if type(amulets) == "table" then
+                for k, v in pairs(amulets) do
+                    local lk = tostring(k):lower()
+                    if lk:find("moon") or type(v) == "table" then
+                        local targetTab = (type(v) == "table") and v or amulets
+                        local function scanAmulet(tab)
+                            for statK, statV in pairs(tab) do
+                                local lsk = tostring(statK):lower()
+                                if lsk:find("bond") and lsk:find("treat") then
+                                    local num = tonumber(statV)
+                                    if num then
+                                        if num > 0 and num <= 1 then num = num * 100 end
+                                        if num > 0 and num <= 50 then
+                                            bft = bft + math.floor(num)
+                                            return true
+                                        end
+                                    end
+                                elseif type(statV) == "table" then
+                                    if scanAmulet(statV) then return true end
+                                end
+                            end
+                            return false
+                        end
+                        scanAmulet(targetTab)
+                    end
+                end
+            end
+        end)
+    end
+
+    return bft
+end
+
+local function calcBeeTreats(currentLvl, currentBond, targetLvl, bftBonus)
     local lvl = math.max(1, math.floor(tonumber(currentLvl) or 1))
     local bond = math.max(0, tonumber(currentBond) or 0)
     local tgt = math.max(1, math.floor(tonumber(targetLvl) or 1))
@@ -519,7 +622,10 @@ local function calcBeeTreats(currentLvl, currentBond, targetLvl)
     local totalReq = needThisLvl + subBond
     local doneBond = totalReq - totalRemainingBond
     local totalPct = math.min(100, math.floor((doneBond / totalReq) * 10000) / 100)
-    local treats = math.ceil(totalRemainingBond / TREAT_BOND)
+
+    local bonusPct = math.max(0, tonumber(bftBonus) or 0)
+    local effectiveTreatBond = TREAT_BOND * (1 + bonusPct / 100)
+    local treats = math.ceil(totalRemainingBond / effectiveTreatBond)
 
     return treats, totalPct, lvlPct, totalRemainingBond, totalReq
 end
@@ -818,6 +924,7 @@ local function refreshBeeList()
 
         local data = getStatData()
         local bees = getAllBees(data)
+        local bftBonus = autoDetectBFT(data, bees)
 
         honeyLabel.Text = "Honey: " .. formatNum(getHoney(data))
         treatsLabel.Text = "Treats: " .. formatNum(getTreats(data))
@@ -841,7 +948,7 @@ local function refreshBeeList()
                 local bond = math.max(0, tonumber(b.Bond) or 0)
                 beeCount = beeCount + 1
 
-                local treats, totalPct, lvlPct, remBond, reqBond = calcBeeTreats(lvl, bond, targetLevel)
+                local treats, totalPct, lvlPct, remBond, reqBond = calcBeeTreats(lvl, bond, targetLevel, bftBonus)
                 totalTreats = totalTreats + treats
                 totalBondReq = totalBondReq + reqBond
                 totalBondDone = totalBondDone + (reqBond - remBond)
@@ -849,7 +956,7 @@ local function refreshBeeList()
         end
 
         local overall = totalBondReq > 0 and math.floor((totalBondDone / totalBondReq) * 10000) / 100 or 100
-        beeCountLabel.Text = "Bees: " .. beeCount
+        beeCountLabel.Text = (bftBonus > 0) and ("Bees: " .. beeCount .. " | BFT: +" .. bftBonus .. "%") or ("Bees: " .. beeCount)
         overallLabel.Text = "Overall: " .. overall .. "%"
         totalTreatsLabel.Text = "Treats Needed: " .. formatNum(totalTreats)
         totalHoneyLabel.Text = "Honey Needed: " .. formatNum(totalTreats * TREAT_COST)
@@ -892,6 +999,7 @@ spawn(function()
         if autoRunning then
             local data = getStatData()
             local bees = getAllBees(data)
+            local bftBonus = autoDetectBFT(data, bees)
 
             if next(bees) then
                 local totalNeeded = 0
@@ -901,7 +1009,7 @@ spawn(function()
                         local lvl = math.max(1, math.floor(tonumber(b.Level) or 1))
                         local bond = math.max(0, tonumber(b.Bond) or 0)
                         if lvl < targetLevel then
-                            local treats = calcBeeTreats(lvl, bond, targetLevel)
+                            local treats = calcBeeTreats(lvl, bond, targetLevel, bftBonus)
                             totalNeeded = totalNeeded + treats
                         end
                     end
@@ -936,7 +1044,7 @@ spawn(function()
                             local lvl = math.max(1, math.floor(tonumber(b.Level) or 1))
                             local bond = math.max(0, tonumber(b.Bond) or 0)
                             if lvl < targetLevel then
-                                local treatsNeeded = calcBeeTreats(lvl, bond, targetLevel)
+                                local treatsNeeded = calcBeeTreats(lvl, bond, targetLevel, bftBonus)
                                 local toFeed = math.min(treatsNeeded, availableTreats)
                                 if toFeed > 0 then
                                     local r = b.row or slotToRowCol(slot)
