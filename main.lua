@@ -187,7 +187,14 @@ local function extractBee(b)
         if row and col and row <= 5 and col > 5 then row, col = col, row end
     end
 
-    if lvl or bond > 0 or name then
+    if name then
+        local ln = name:lower():gsub("%s+", "")
+        if ln == "empty" or ln == "none" or ln == "unbought" or ln == "locked" then
+            return nil
+        end
+    end
+
+    if (name and name ~= "") or (lvl and lvl >= 1) then
         return {
             Type = tostring(name or "Bee"),
             Level = math.max(1, math.floor(tonumber(lvl) or 1)),
@@ -299,7 +306,10 @@ local function getBeesFromWorkspace()
         for i, cell in ipairs(cells:GetChildren()) do
             local cellType = cell:FindFirstChild("CellType") or cell:FindFirstChild("BeeType") or cell:FindFirstChild("Type")
             local typeName = (cellType and tostring(cellType.Value)) or cell:GetAttribute("CellType") or cell:GetAttribute("BeeType") or ""
-            if typeName == "Empty" or typeName == "None" then continue end
+            local lowerType = typeName:lower():gsub("%s+", "")
+            if lowerType == "" or lowerType == "empty" or lowerType == "none" or lowerType == "unbought" or lowerType == "locked" then
+                continue
+            end
 
             local lvl = nil
             local bond = 0
@@ -358,9 +368,9 @@ local function getBeesFromWorkspace()
                 slotIdx = i
             end
 
-            if (typeName ~= "" and typeName ~= "Empty" and typeName ~= "None") or lvl then
+            if typeName ~= "" and lowerType ~= "empty" and lowerType ~= "none" then
                 bees[slotIdx] = {
-                    Type = (typeName ~= "" and typeName ~= "Empty" and typeName ~= "None") and typeName or ("Slot"..slotIdx),
+                    Type = typeName,
                     Level = lvl or 1,
                     Bond = bond or 0,
                     row = row,
@@ -376,35 +386,36 @@ local function getAllBees(data)
     local wsBees = getBeesFromWorkspace() or {}
     local cacheBees = findBeesTable(data) or {}
     local bees = {}
-    for k, v in pairs(cacheBees) do
-        local sk = tonumber(k) or k
-        bees[sk] = v
-        if type(sk) == "number" and (not v.row or not v.col) then
-            v.row = math.ceil(sk / 5)
-            v.col = sk - (v.row - 1) * 5
-        end
-    end
-    for k, v in pairs(wsBees) do
-        local sk = tonumber(k) or k
-        if not bees[sk] then
+    if next(cacheBees) then
+        for k, v in pairs(cacheBees) do
+            local sk = tonumber(k) or k
             bees[sk] = v
-        else
-            if v.Level and v.Level > 1 and (not bees[sk].Level or bees[sk].Level <= 1 or v.Level > bees[sk].Level) then
-                bees[sk].Level = v.Level
-            end
-            if v.Bond and v.Bond > 0 and (not bees[sk].Bond or bees[sk].Bond == 0) then
-                bees[sk].Bond = v.Bond
-            end
-            if v.row and v.col then
-                bees[sk].row = v.row
-                bees[sk].col = v.col
-            end
-            if v.Type and v.Type ~= "" and not tostring(v.Type):find("^Slot") then
-                bees[sk].Type = v.Type
+            if type(sk) == "number" and (not v.row or not v.col) then
+                v.row = math.ceil(sk / 5)
+                v.col = sk - (v.row - 1) * 5
             end
         end
+        for k, v in pairs(wsBees) do
+            local sk = tonumber(k) or k
+            if bees[sk] then
+                if v.Level and v.Level > 1 and (not bees[sk].Level or bees[sk].Level <= 1 or v.Level > bees[sk].Level) then
+                    bees[sk].Level = v.Level
+                end
+                if v.Bond and v.Bond > 0 and (not bees[sk].Bond or bees[sk].Bond == 0) then
+                    bees[sk].Bond = v.Bond
+                end
+                if v.row and v.col then
+                    bees[sk].row = v.row
+                    bees[sk].col = v.col
+                end
+                if v.Type and v.Type ~= "" and not tostring(v.Type):find("^Slot") then
+                    bees[sk].Type = v.Type
+                end
+            end
+        end
+        return bees
     end
-    return bees
+    return wsBees
 end
 
 local function getHoney(data)
