@@ -1,4 +1,5 @@
 local RS = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local UIS = game:GetService("UserInputService")
@@ -39,10 +40,13 @@ local function getRemote(name)
     return nil
 end
 
+local TREAT_SHOP_POS = CFrame.new(-220.1, 5.8, 84.5)
+local WALK_SPEED = 60
 local TREAT_BOND = 10
 local TREAT_COST = 10000
 local autoRunning = false
 local targetLevel = 15
+local isTweening = false
 
 local bondTable = {
     [1]=1000,[2]=5000,[3]=25000,[4]=100000,[5]=400000,
@@ -201,6 +205,28 @@ local function feedBee(slot, amount)
     return ok
 end
 
+local function tweenTo(targetCF, statusLabel)
+    local char = player.Character
+    if not char then return false end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    local dist = (root.Position - targetCF.Position).Magnitude
+    if dist < 5 then return true end
+    local duration = dist / WALK_SPEED
+    isTweening = true
+    local tween = TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCF})
+    local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+    if humanoid then humanoid.WalkSpeed = 0 end
+    local done = false
+    tween:Play()
+    tween.Completed:Connect(function() done = true end)
+    while not done and isTweening and autoRunning do wait(0.1) end
+    if not done then tween:Cancel() end
+    if humanoid then humanoid.WalkSpeed = 16 end
+    isTweening = false
+    return done
+end
+
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "BSS_Final"
 screenGui.ResetOnSpawn = false
@@ -264,9 +290,9 @@ targetRow.BackgroundTransparency = 1
 targetRow.Parent = leftCol
 
 local tgtTxt = Instance.new("TextLabel")
-tgtTxt.Size = UDim2.new(0, 80, 1, 0)
+tgtTxt.Size = UDim2.new(0, 40, 1, 0)
 tgtTxt.BackgroundTransparency = 1
-tgtTxt.Text = "Target Level:"
+tgtTxt.Text = "Target:"
 tgtTxt.TextColor3 = Color3.fromRGB(180, 180, 180)
 tgtTxt.Font = Enum.Font.Gotham
 tgtTxt.TextSize = 11
@@ -274,8 +300,8 @@ tgtTxt.TextXAlignment = Enum.TextXAlignment.Left
 tgtTxt.Parent = targetRow
 
 local targetBox = Instance.new("TextBox")
-targetBox.Size = UDim2.new(0, 50, 1, 0)
-targetBox.Position = UDim2.new(0, 82, 0, 0)
+targetBox.Size = UDim2.new(0, 45, 1, 0)
+targetBox.Position = UDim2.new(0, 42, 0, 0)
 targetBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 targetBox.Text = tostring(targetLevel)
 targetBox.TextColor3 = Color3.fromRGB(240, 240, 240)
@@ -285,6 +311,30 @@ targetBox.BorderSizePixel = 0
 targetBox.ClearTextOnFocus = false
 targetBox.Parent = targetRow
 Instance.new("UICorner", targetBox).CornerRadius = UDim.new(0, 4)
+
+local spdTxt = Instance.new("TextLabel")
+spdTxt.Size = UDim2.new(0, 40, 1, 0)
+spdTxt.Position = UDim2.new(0, 95, 0, 0)
+spdTxt.BackgroundTransparency = 1
+spdTxt.Text = "Speed:"
+spdTxt.TextColor3 = Color3.fromRGB(180, 180, 180)
+spdTxt.Font = Enum.Font.Gotham
+spdTxt.TextSize = 11
+spdTxt.TextXAlignment = Enum.TextXAlignment.Left
+spdTxt.Parent = targetRow
+
+local speedBox = Instance.new("TextBox")
+speedBox.Size = UDim2.new(0, 45, 1, 0)
+speedBox.Position = UDim2.new(0, 137, 0, 0)
+speedBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
+speedBox.Text = tostring(WALK_SPEED)
+speedBox.TextColor3 = Color3.fromRGB(240, 240, 240)
+speedBox.Font = Enum.Font.GothamBold
+speedBox.TextSize = 11
+speedBox.BorderSizePixel = 0
+speedBox.ClearTextOnFocus = false
+speedBox.Parent = targetRow
+Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 4)
 
 local function makeInfoLabel(yPos)
     local l = Instance.new("TextLabel")
@@ -385,6 +435,8 @@ local function refreshBeeList()
     end
     local val = tonumber(targetBox.Text)
     if val and val > 0 then targetLevel = math.floor(val) end
+    local spd = tonumber(speedBox.Text)
+    if spd and spd > 0 then WALK_SPEED = spd end
 
     local data = getStatData()
     local bees = findBeesTable(data) or getBeesFromWorkspace()
@@ -454,6 +506,10 @@ end
 
 calcBtn.MouseButton1Click:Connect(refreshBeeList)
 targetBox.FocusLost:Connect(refreshBeeList)
+speedBox.FocusLost:Connect(function()
+    local spd = tonumber(speedBox.Text)
+    if spd and spd > 0 then WALK_SPEED = spd end
+end)
 
 toggleBtn.MouseButton1Click:Connect(function()
     autoRunning = not autoRunning
@@ -463,6 +519,7 @@ toggleBtn.MouseButton1Click:Connect(function()
     else
         toggleBtn.Text = "Auto: OFF"
         toggleBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
+        isTweening = false
     end
 end)
 
@@ -489,9 +546,19 @@ spawn(function()
                     local maxCanBuy = math.floor(honey / TREAT_COST)
                     local toBuy = math.min(totalNeeded - owned, maxCanBuy)
                     if toBuy > 0 then
-                        statusLabel.Text = "Status: Buying treats..."
-                        buyTreats(toBuy)
-                        wait(0.5)
+                        local char = player.Character
+                        local root = char and char:FindFirstChild("HumanoidRootPart")
+                        local savedPos = root and root.CFrame
+                        statusLabel.Text = "Status: Moving to shop..."
+                        local arrived = tweenTo(TREAT_SHOP_POS, statusLabel)
+                        if arrived and autoRunning then
+                            statusLabel.Text = "Status: Buying treats..."
+                            wait(0.5)
+                            buyTreats(toBuy)
+                            wait(0.8)
+                            statusLabel.Text = "Status: Returning..."
+                            if savedPos then tweenTo(savedPos, statusLabel) end
+                        end
                     end
                 end
 
