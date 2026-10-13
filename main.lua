@@ -5,10 +5,32 @@ local CoreGui = game:GetService("CoreGui")
 local UIS = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
-local Events = RS:WaitForChild("Events")
-local guiParent = (pcall(function() return CoreGui.Name end) and CoreGui) or player:WaitForChild("PlayerGui")
 
-if guiParent:FindFirstChild("BSS_Final") then guiParent.BSS_Final:Destroy() end
+local guiParent
+pcall(function()
+    if gethui then
+        guiParent = gethui()
+    else
+        local test = Instance.new("ScreenGui")
+        test.Parent = CoreGui
+        test:Destroy()
+        guiParent = CoreGui
+    end
+end)
+if not guiParent then
+    guiParent = player:WaitForChild("PlayerGui")
+end
+
+pcall(function()
+    if CoreGui:FindFirstChild("BSS_Final") then CoreGui.BSS_Final:Destroy() end
+end)
+pcall(function()
+    if player.PlayerGui:FindFirstChild("BSS_Final") then player.PlayerGui.BSS_Final:Destroy() end
+end)
+
+local Events = RS:WaitForChild("Events", 10)
+local ItemPackageEvent = Events and Events:WaitForChild("ItemPackageEvent", 10)
+local ConstructHiveCellFromEgg = Events and Events:WaitForChild("ConstructHiveCellFromEgg", 10)
 
 local TREAT_SHOP_POS = CFrame.new(-220.1, 5.8, 84.5)
 local WALK_SPEED = 60
@@ -17,9 +39,6 @@ local TREAT_COST = 10000
 local autoRunning = false
 local targetLevel = 15
 local isTweening = false
-
-local ItemPackageEvent = Events:WaitForChild("ItemPackageEvent")
-local ConstructHiveCellFromEgg = Events:WaitForChild("ConstructHiveCellFromEgg")
 
 local bondTable = {
     [1]=1000,[2]=5000,[3]=25000,[4]=100000,[5]=400000,
@@ -39,7 +58,9 @@ local function formatNum(n)
 end
 
 local function getStatData()
-    local ok, data = pcall(function() return require(RS.ClientStatCache):Get() end)
+    local cache = RS:FindFirstChild("ClientStatCache") or RS:WaitForChild("ClientStatCache", 5)
+    if not cache then return nil end
+    local ok, data = pcall(function() return require(cache):Get() end)
     return (ok and type(data) == "table") and data or nil
 end
 
@@ -75,17 +96,19 @@ local function slotToRowCol(slot)
 end
 
 local function buyTreats(amount)
+    if not ItemPackageEvent or amount <= 0 then return end
     pcall(function()
         ItemPackageEvent:InvokeServer("Purchase", {
-            Type = "Treat", Amount = amount, Category = "Eggs"
+            Type = "Treat", Amount = math.floor(amount), Category = "Eggs"
         })
     end)
 end
 
 local function feedBee(slot, amount)
+    if not ConstructHiveCellFromEgg or amount <= 0 then return end
     local row, col = slotToRowCol(slot)
     pcall(function()
-        ConstructHiveCellFromEgg:InvokeServer(row, col, "Treat", amount, false)
+        ConstructHiveCellFromEgg:InvokeServer(row, col, "Treat", math.floor(amount), false)
     end)
 end
 
@@ -377,33 +400,44 @@ spawn(function()
                 end
 
                 local owned = getTreats(data)
-                if owned < totalNeeded then
-                    local char = player.Character
-                    local root = char and char:FindFirstChild("HumanoidRootPart")
-                    local savedPos = root and root.CFrame
-                    statusLabel.Text = "Status: Moving to shop..."
-                    local arrived = tweenTo(TREAT_SHOP_POS, statusLabel)
-                    if arrived and autoRunning then
-                        statusLabel.Text = "Status: Buying treats..."
-                        wait(0.5)
-                        buyTreats(totalNeeded - owned)
-                        wait(0.8)
-                        statusLabel.Text = "Status: Returning..."
-                        if savedPos then tweenTo(savedPos, statusLabel) end
+                local honey = getHoney(data)
+                if owned < totalNeeded and honey >= TREAT_COST then
+                    local maxCanBuy = math.floor(honey / TREAT_COST)
+                    local toBuy = math.min(totalNeeded - owned, maxCanBuy)
+                    if toBuy > 0 then
+                        local char = player.Character
+                        local root = char and char:FindFirstChild("HumanoidRootPart")
+                        local savedPos = root and root.CFrame
+                        statusLabel.Text = "Status: Moving to shop..."
+                        local arrived = tweenTo(TREAT_SHOP_POS, statusLabel)
+                        if arrived and autoRunning then
+                            statusLabel.Text = "Status: Buying treats..."
+                            wait(0.5)
+                            buyTreats(toBuy)
+                            wait(0.8)
+                            statusLabel.Text = "Status: Returning..."
+                            if savedPos then tweenTo(savedPos, statusLabel) end
+                        end
                     end
                 end
 
                 if autoRunning then
-                    statusLabel.Text = "Status: Feeding bees..."
-                    for slot, bee in pairs(data.Bees) do
-                        if not autoRunning then break end
-                        if type(bee) == "table" and bee.Level and bee.Level < targetLevel then
-                            local _, rem = getBondProgress(bee.Level, bee.Bond or 0, targetLevel)
-                            local treats = math.ceil(rem / TREAT_BOND)
-                            if treats > 0 then
-                                feedBee(slot, treats)
-                                statusLabel.Text = "Status: Fed " .. (bee.Type or "bee") .. " " .. formatNum(treats)
-                                wait(0.3)
+                    data = getStatData() or data
+                    local availableTreats = getTreats(data)
+                    if availableTreats > 0 then
+                        statusLabel.Text = "Status: Feeding bees..."
+                        for slot, bee in pairs(data.Bees) do
+                            if not autoRunning or availableTreats <= 0 then break end
+                            if type(bee) == "table" and bee.Level and bee.Level < targetLevel then
+                                local _, rem = getBondProgress(bee.Level, bee.Bond or 0, targetLevel)
+                                local treatsNeeded = math.ceil(rem / TREAT_BOND)
+                                local toFeed = math.min(treatsNeeded, availableTreats)
+                                if toFeed > 0 then
+                                    feedBee(slot, toFeed)
+                                    availableTreats = availableTreats - toFeed
+                                    statusLabel.Text = "Status: Fed " .. (bee.Type or "bee") .. " " .. formatNum(toFeed)
+                                    wait(0.3)
+                                end
                             end
                         end
                     end
