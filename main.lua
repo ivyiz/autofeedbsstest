@@ -66,6 +66,17 @@ local function formatNum(n)
     else return tostring(math.floor(n)) end
 end
 
+local function callRemote(remote, ...)
+    if not remote then return nil end
+    if remote:IsA("RemoteFunction") then
+        return remote:InvokeServer(...)
+    elseif remote:IsA("RemoteEvent") then
+        remote:FireServer(...)
+        return true
+    end
+    return nil
+end
+
 local function deriveLvlFromBond(totalBond)
     local curLvl = 1
     local remBond = totalBond
@@ -94,6 +105,8 @@ local function extractBee(b)
     local lvl = nil
     local bond = nil
     local name = nil
+    local row = nil
+    local col = nil
 
     local function scanTable(t)
         if type(t) ~= "table" then return end
@@ -110,6 +123,14 @@ local function extractBee(b)
             elseif not name and (lk == "type" or lk == "beetype" or lk == "name" or lk:find("type") or lk:find("species")) then
                 if type(v) == "string" then
                     name = tostring(v)
+                end
+            elseif not row and (lk == "row" or lk == "x" or lk == "line") then
+                if type(v) == "number" or (type(v) == "string" and tonumber(v)) then
+                    row = tonumber(v)
+                end
+            elseif not col and (lk == "col" or lk == "column" or lk == "y") then
+                if type(v) == "number" or (type(v) == "string" and tonumber(v)) then
+                    col = tonumber(v)
                 end
             end
         end
@@ -129,19 +150,31 @@ local function extractBee(b)
         bond = calcBond
     elseif lvl and lvl > 1 then
         local reqThisLvl = bondTable[lvl] or (bondTable[25] * 2^(lvl - 25))
-        if bond > reqThisLvl then
+        if bond >= reqThisLvl then
             local cum = getCumulativeBond(lvl)
             if bond >= cum then
                 bond = math.max(0, bond - cum)
             end
+            if bond >= reqThisLvl then
+                local calcLvl, calcBond = deriveLvlFromBond(bond + cum)
+                lvl = calcLvl
+                bond = calcBond
+            end
         end
+    end
+
+    if row and col then
+        row, col = tonumber(row), tonumber(col)
+        if row and col and row <= 5 and col > 5 then row, col = col, row end
     end
 
     if lvl or bond > 0 or name then
         return {
             Type = tostring(name or "Bee"),
             Level = math.max(1, math.floor(tonumber(lvl) or 1)),
-            Bond = math.max(0, tonumber(bond) or 0)
+            Bond = math.max(0, tonumber(bond) or 0),
+            row = row,
+            col = col
         }
     end
     return nil
@@ -153,8 +186,14 @@ local function getStatData()
         local cache = RS:FindFirstChild("ClientStatCache")
         if cache then
             local mod = require(cache)
-            if type(mod) == "table" and type(mod.Get) == "function" then
-                data = mod:Get()
+            if type(mod) == "table" then
+                if type(mod.Get) == "function" then
+                    data = mod:Get() or mod.Get() or mod:Get(player)
+                elseif type(mod.Stats) == "table" then
+                    data = mod.Stats
+                elseif type(mod.Cache) == "table" then
+                    data = mod.Cache
+                end
             end
         end
     end)
@@ -162,13 +201,13 @@ local function getStatData()
 
     pcall(function()
         local rf = getRemote("RetrievePlayerStats")
-        if rf then data = rf:InvokeServer() end
+        if rf then data = callRemote(rf) end
     end)
     if type(data) == "table" then return data end
 
     pcall(function()
         local rf = getRemote("RetrievePlayerStatsSummary")
-        if rf then data = rf:InvokeServer() end
+        if rf then data = callRemote(rf) end
     end)
     return (type(data) == "table") and data or nil
 end
@@ -180,7 +219,7 @@ local function findBeesTable(data)
         local result = {}
         for k, v in pairs(candidate) do
             local b = extractBee(v)
-            if b then result[k] = b end
+            if b then result[tonumber(k) or k] = b end
         end
         if next(result) then return result end
     end
@@ -191,7 +230,7 @@ local function findBeesTable(data)
             for subK, subV in pairs(v) do
                 local b = extractBee(subV)
                 if b then
-                    result[subK] = b
+                    result[tonumber(subK) or subK] = b
                     count = count + 1
                 end
             end
@@ -208,22 +247,41 @@ local function getBeesFromWorkspace()
     local honeycombs = workspace:FindFirstChild("Honeycombs")
     if not honeycombs then return nil end
     local myHive = nil
-    for _, hive in ipairs(honeycombs:GetChildren()) do
-        local owner = hive:FindFirstChild("Owner")
-        if owner then
-            local val = owner.Value
-            if val == player or val == player.Name or tostring(val) == player.Name or (player.Character and val == player.Character) then
+
+    if player:FindFirstChild("Honeycomb") and player.Honeycomb.Value then
+        local hVal = player.Honeycomb.Value
+        if typeof(hVal) == "Instance" then
+            myHive = hVal
+        else
+            myHive = honeycombs:FindFirstChild(tostring(hVal))
+        end
+    end
+
+    if not myHive then
+        for _, hive in ipairs(honeycombs:GetChildren()) do
+            local owner = hive:FindFirstChild("Owner")
+            if owner then
+                local val = owner.Value
+                if val == player or val == player.Name or tostring(val) == player.Name or (player.Character and val == player.Character) then
+                    myHive = hive
+                    break
+                end
+            end
+            if hive:GetAttribute("Owner") == player.Name then
                 myHive = hive
                 break
             end
         end
     end
     if not myHive then return nil end
+
     local cells = myHive:FindFirstChild("Cells") or myHive:FindFirstChild("cells")
     if cells then
         for i, cell in ipairs(cells:GetChildren()) do
             local cellType = cell:FindFirstChild("CellType") or cell:FindFirstChild("BeeType") or cell:FindFirstChild("Type")
             local typeName = (cellType and tostring(cellType.Value)) or cell:GetAttribute("CellType") or cell:GetAttribute("BeeType") or ""
+            if typeName == "Empty" or typeName == "None" then continue end
+
             local lvl = nil
             local bond = 0
 
@@ -273,15 +331,17 @@ local function getBeesFromWorkspace()
             local slotIdx = i
             if row and col then
                 row, col = tonumber(row), tonumber(col)
-                slotIdx = (row - 1) * 10 + col
+                if row <= 5 and col > 5 then row, col = col, row end
+                slotIdx = (row - 1) * 5 + col
             else
-                row = math.ceil(i / 10)
-                col = i - (row - 1) * 10
+                row = math.ceil(i / 5)
+                col = i - (row - 1) * 5
+                slotIdx = i
             end
 
-            if (typeName ~= "" and typeName ~= "Empty") or lvl then
+            if (typeName ~= "" and typeName ~= "Empty" and typeName ~= "None") or lvl then
                 bees[slotIdx] = {
-                    Type = (typeName ~= "" and typeName ~= "Empty") and typeName or ("Slot"..slotIdx),
+                    Type = (typeName ~= "" and typeName ~= "Empty" and typeName ~= "None") and typeName or ("Slot"..slotIdx),
                     Level = lvl or 1,
                     Bond = bond or 0,
                     row = row,
@@ -293,13 +353,56 @@ local function getBeesFromWorkspace()
     return next(bees) and bees or nil
 end
 
+local function getAllBees(data)
+    local wsBees = getBeesFromWorkspace() or {}
+    local cacheBees = findBeesTable(data) or {}
+    local bees = {}
+    for k, v in pairs(cacheBees) do
+        local sk = tonumber(k) or k
+        bees[sk] = v
+        if type(sk) == "number" and (not v.row or not v.col) then
+            v.row = math.ceil(sk / 5)
+            v.col = sk - (v.row - 1) * 5
+        end
+    end
+    for k, v in pairs(wsBees) do
+        local sk = tonumber(k) or k
+        if not bees[sk] then
+            bees[sk] = v
+        else
+            if v.Level and v.Level > 1 and (not bees[sk].Level or bees[sk].Level <= 1 or v.Level > bees[sk].Level) then
+                bees[sk].Level = v.Level
+            end
+            if v.Bond and v.Bond > 0 and (not bees[sk].Bond or bees[sk].Bond == 0) then
+                bees[sk].Bond = v.Bond
+            end
+            if v.row and v.col then
+                bees[sk].row = v.row
+                bees[sk].col = v.col
+            end
+            if v.Type and v.Type ~= "" and not tostring(v.Type):find("^Slot") then
+                bees[sk].Type = v.Type
+            end
+        end
+    end
+    return bees
+end
+
 local function getHoney(data)
-    if data and data.Honey then return tonumber(data.Honey) or 0 end
+    if not data then data = getStatData() end
+    if data then
+        if data.Honey then return tonumber(data.Honey) or 0 end
+        if data.Totals and data.Totals.Honey then return tonumber(data.Totals.Honey) or 0 end
+    end
     local s = player:FindFirstChild("leaderstats")
-    return (s and s:FindFirstChild("Honey") and tonumber(s.Honey.Value)) or 0
+    if s and s:FindFirstChild("Honey") then
+        return tonumber(s.Honey.Value) or 0
+    end
+    return 0
 end
 
 local function getTreats(data)
+    if not data then data = getStatData() end
     if data then
         if data.Eggs and type(data.Eggs) == "table" and data.Eggs.Treat then
             return tonumber(data.Eggs.Treat) or 0
@@ -341,32 +444,72 @@ local function calcBeeTreats(currentLvl, currentBond, targetLvl)
 end
 
 local function slotToRowCol(slot)
+    if type(slot) == "string" then
+        local r, c = slot:match("(%d+)[^%d]+(%d+)")
+        if r and c then
+            local nr, nc = tonumber(r), tonumber(c)
+            if nr <= 5 and nc > 5 then nr, nc = nc, nr end
+            return nr, nc
+        end
+    end
     local s = tonumber(slot) or 1
-    local row = math.ceil(s / 10)
-    local col = s - (row - 1) * 10
+    local row = math.ceil(s / 5)
+    local col = s - (row - 1) * 5
     return row, col
+end
+
+local function getTreatShopCFrame()
+    local toys = workspace:FindFirstChild("Toys")
+    if toys then
+        local shop = toys:FindFirstChild("Treat Shop") or toys:FindFirstChild("TreatShop") or toys:FindFirstChild("Treat Dispenser")
+        if shop then
+            if shop:IsA("Model") and shop.PrimaryPart then
+                return shop.PrimaryPart.CFrame + Vector3.new(0, 3, 0)
+            elseif shop:IsA("BasePart") then
+                return shop.CFrame + Vector3.new(0, 3, 0)
+            end
+        end
+    end
+    return CFrame.new(-220.1, 7.5, 84.5)
 end
 
 local function buyTreats(amount)
     local remote = getRemote("ItemPackageEvent")
     if not remote or amount <= 0 then return false end
+    local amt = math.floor(amount)
     local ok = pcall(function()
-        remote:InvokeServer("Purchase", {
+        callRemote(remote, "Purchase", {
             Type = "Treat",
-            Amount = math.floor(amount),
+            Amount = amt,
             Category = "Eggs"
         })
     end)
+    if not ok then
+        pcall(function()
+            callRemote(remote, "Purchase", {
+                Type = "Treat",
+                Amount = amt
+            })
+        end)
+    end
     return ok
 end
 
-local function feedBee(slot, amount)
+local function feedBee(r, c, amount)
     local remote = getRemote("ConstructHiveCellFromEgg")
-    if not remote or amount <= 0 then return false end
-    local row, col = slotToRowCol(slot)
+    if not remote or not r or not c or amount <= 0 then return false end
+    local nr = tonumber(r)
+    local nc = tonumber(c)
+    local namt = math.floor(tonumber(amount) or 0)
+    if not nr or not nc or namt <= 0 then return false end
     local ok = pcall(function()
-        remote:InvokeServer(row, col, "Treat", math.floor(amount), false)
+        callRemote(remote, nr, nc, "Treat", namt)
     end)
+    if not ok then
+        pcall(function()
+            callRemote(remote, nr, nc, "Treat", namt, false)
+        end)
+    end
     return ok
 end
 
@@ -593,26 +736,7 @@ local function refreshBeeList()
         speedBox.Text = tostring(WALK_SPEED)
 
         local data = getStatData()
-        local wsBees = getBeesFromWorkspace() or {}
-        local cacheBees = findBeesTable(data) or {}
-
-        local bees = {}
-        for k, v in pairs(cacheBees) do
-            bees[k] = v
-        end
-        for k, v in pairs(wsBees) do
-            if not bees[k] then
-                bees[k] = v
-            else
-                if v.Level and v.Level > 1 and (not bees[k].Level or bees[k].Level <= 1 or v.Level > bees[k].Level) then
-                    bees[k].Level = v.Level
-                end
-                if v.row and v.col then
-                    bees[k].row = v.row
-                    bees[k].col = v.col
-                end
-            end
-        end
+        local bees = getAllBees(data)
 
         honeyLabel.Text = "Honey: " .. formatNum(getHoney(data))
         treatsLabel.Text = "Treats: " .. formatNum(getTreats(data))
@@ -686,23 +810,7 @@ spawn(function()
     while screenGui.Parent do
         if autoRunning then
             local data = getStatData()
-            local wsBees = getBeesFromWorkspace() or {}
-            local cacheBees = findBeesTable(data) or {}
-            local bees = {}
-            for k, v in pairs(cacheBees) do bees[k] = v end
-            for k, v in pairs(wsBees) do
-                if not bees[k] then
-                    bees[k] = v
-                else
-                    if v.Level and v.Level > 1 and (not bees[k].Level or bees[k].Level <= 1 or v.Level > bees[k].Level) then
-                        bees[k].Level = v.Level
-                    end
-                    if v.row and v.col then
-                        bees[k].row = v.row
-                        bees[k].col = v.col
-                    end
-                end
-            end
+            local bees = getAllBees(data)
 
             if next(bees) then
                 local totalNeeded = 0
@@ -727,7 +835,7 @@ spawn(function()
                         local char = player.Character
                         local root = char and char:FindFirstChild("HumanoidRootPart")
                         local savedPos = root and root.CFrame
-                        local arrived = tweenTo(TREAT_SHOP_POS)
+                        local arrived = tweenTo(getTreatShopCFrame())
                         if arrived and autoRunning then
                             wait(0.5)
                             buyTreats(toBuy)
@@ -750,17 +858,13 @@ spawn(function()
                                 local treatsNeeded = calcBeeTreats(lvl, bond, targetLevel)
                                 local toFeed = math.min(treatsNeeded, availableTreats)
                                 if toFeed > 0 then
-                                    local r = b.row
+                                    local r = b.row or slotToRowCol(slot)
                                     local c = b.col
-                                    if not r or not c then
-                                        r, c = slotToRowCol(slot)
+                                    if not c then
+                                        local _, nc = slotToRowCol(slot)
+                                        c = nc
                                     end
-                                    local remote = getRemote("ConstructHiveCellFromEgg")
-                                    if remote then
-                                        pcall(function()
-                                            remote:InvokeServer(r, c, "Treat", math.floor(toFeed), false)
-                                        end)
-                                    end
+                                    feedBee(r, c, toFeed)
                                     availableTreats = availableTreats - toFeed
                                     wait(0.3)
                                 end
