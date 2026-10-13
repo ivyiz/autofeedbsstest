@@ -128,6 +128,7 @@ local function extractBee(b)
     local name = nil
     local row = nil
     local col = nil
+    local gifted = false
 
     local function scanTable(t)
         if type(t) ~= "table" then return end
@@ -154,6 +155,14 @@ local function extractBee(b)
                     col = tonumber(v)
                 end
             end
+
+            if not gifted then
+                if lk == "gifted" or lk:find("gift") or lk == "isgifted" or lk == "star" then
+                    if v == true or (type(v) == "number" and v > 0) or (type(v) == "string" and (v:lower():find("true") or v:lower():find("gift"))) then
+                        gifted = true
+                    end
+                end
+            end
         end
     end
 
@@ -161,6 +170,10 @@ local function extractBee(b)
     if type(b.Properties) == "table" then scanTable(b.Properties) end
     if type(b.Stats) == "table" then scanTable(b.Stats) end
     if type(b.Data) == "table" then scanTable(b.Data) end
+
+    if name and name:lower():find("gifted") then
+        gifted = true
+    end
 
     bond = tonumber(bond) or 0
     if lvl then lvl = tonumber(lvl) end
@@ -201,6 +214,7 @@ local function extractBee(b)
             Type = tostring(name or "Bee"),
             Level = math.max(1, math.floor(tonumber(lvl) or 1)),
             Bond = math.max(0, tonumber(bond) or 0),
+            Gifted = gifted,
             row = row,
             col = col
         }
@@ -328,6 +342,10 @@ local function getBeesFromWorkspace()
 
             local lvl = nil
             local bond = 0
+            local isCellGifted = false
+            if lowerType:find("gifted") then
+                isCellGifted = true
+            end
 
             for _, child in ipairs(cell:GetChildren()) do
                 local lk = child.Name:lower()
@@ -336,6 +354,14 @@ local function getBeesFromWorkspace()
                         lvl = tonumber(child.Value)
                     elseif lk:find("bond") or lk:find("xp") then
                         bond = tonumber(child.Value) or 0
+                    elseif lk:find("gift") or lk:find("star") then
+                        if child.Value == true or (type(child.Value) == "number" and child.Value > 0) then
+                            isCellGifted = true
+                        end
+                    end
+                elseif child:IsA("ParticleEmitter") or child:IsA("Decal") or child:IsA("Texture") or child:IsA("BillboardGui") then
+                    if lk:find("gift") or lk:find("star") then
+                        isCellGifted = true
                     end
                 end
             end
@@ -347,6 +373,10 @@ local function getBeesFromWorkspace()
                         lvl = tonumber(v)
                     elseif lk:find("bond") or lk:find("xp") then
                         bond = tonumber(v) or 0
+                    elseif not isCellGifted and (lk:find("gift") or lk:find("star")) then
+                        if v == true or (type(v) == "number" and v > 0) then
+                            isCellGifted = true
+                        end
                     end
                 end
             end
@@ -415,6 +445,7 @@ local function getBeesFromWorkspace()
                 Type = (typeName ~= "" and typeName) or "Bee",
                 Level = math.max(1, math.floor(lvl or 1)),
                 Bond = math.max(0, bond or 0),
+                Gifted = isCellGifted,
                 row = row,
                 col = col
             }
@@ -446,6 +477,9 @@ local function getAllBees(data)
                     end
                     if cb.Type and cb.Type ~= "" and not tostring(cb.Type):find("^Slot") then
                         wsBees[sk].Type = cb.Type
+                    end
+                    if cb.Gifted ~= nil then
+                        wsBees[sk].Gifted = cb.Gifted or wsBees[sk].Gifted
                     end
                 end
             end
@@ -1439,41 +1473,83 @@ local function isEntryGifted(v, kStr, parentName)
     return false
 end
 
-local function buildBeeIdMap()
+local function buildBeeIdMap(data)
     local idMap = {}
-    local function inspectModule(modName)
-        pcall(function()
-            local mod = RS:FindFirstChild(modName)
-            if not mod or not mod:IsA("ModuleScript") then return end
-            local data = require(mod)
-            if type(data) ~= "table" then return end
 
-            local function scanTbl(tbl, depth)
-                if type(tbl) ~= "table" or depth > 3 then return end
-                for k, v in pairs(tbl) do
-                    if type(v) == "table" then
-                        local id = v.Id or v.ID or v.id or (type(k) == "number" and k)
-                        local name = v.Name or v.Type or v.name or v.Species or (type(k) == "string" and k)
-                        if id and name and type(id) == "number" then
-                            local bName = extractBeeName(tostring(name))
-                            if bName then idMap[tonumber(id)] = bName end
-                        end
-                        scanTbl(v, depth + 1)
-                    elseif type(v) == "string" and type(k) == "number" then
-                        local bName = extractBeeName(v)
-                        if bName then idMap[k] = bName end
+    local function inspectTable(tbl, depth)
+        if type(tbl) ~= "table" or depth > 4 then return end
+        for k, v in pairs(tbl) do
+            if type(k) == "number" and type(v) == "string" then
+                local bName = extractBeeName(v)
+                if bName and k > 0 and k <= 100 then idMap[k] = bName end
+            elseif type(k) == "string" and type(v) == "number" then
+                local bName = extractBeeName(k)
+                if bName and v > 0 and v <= 100 then idMap[v] = bName end
+            elseif type(v) == "table" then
+                local numId = nil
+                local beeName = nil
+
+                for _, idKey in ipairs({"Id", "ID", "id", "Index", "index", "BeeId", "TypeId", "TypeID", "Code", "Value"}) do
+                    if type(v[idKey]) == "number" and v[idKey] > 0 and v[idKey] <= 100 then
+                        numId = v[idKey]
+                        break
                     end
                 end
+                if not numId and type(k) == "number" and k > 0 and k <= 100 then
+                    numId = k
+                end
+
+                for _, nameKey in ipairs({"Name", "name", "Species", "species", "Bee", "bee", "BeeName", "Type", "type"}) do
+                    if type(v[nameKey]) == "string" then
+                        local bn = extractBeeName(v[nameKey])
+                        if bn then
+                            beeName = bn
+                            break
+                        end
+                    end
+                end
+                if not beeName and type(k) == "string" then
+                    beeName = extractBeeName(k)
+                end
+
+                if numId and beeName then
+                    idMap[numId] = beeName
+                end
+
+                inspectTable(v, depth + 1)
             end
-            scanTbl(data, 1)
-        end)
+        end
     end
 
-    inspectModule("EggTypes")
-    inspectModule("BeeTypes")
-    inspectModule("Types")
-    inspectModule("Bees")
-    inspectModule("BeeData")
+    pcall(function()
+        for _, desc in ipairs(RS:GetDescendants()) do
+            if desc:IsA("ModuleScript") then
+                pcall(function()
+                    local res = require(desc)
+                    if type(res) == "table" then
+                        inspectTable(res, 1)
+                    end
+                end)
+            end
+        end
+    end)
+
+    if data and type(data.DiscoveredBees) == "table" then
+        for k, v in pairs(data.DiscoveredBees) do
+            if type(k) == "number" and type(v) == "string" then
+                local bn = extractBeeName(v)
+                if bn and k > 0 and k <= 100 and not idMap[k] then
+                    idMap[k] = bn
+                end
+            elseif type(k) == "string" and type(v) == "number" then
+                local bn = extractBeeName(k)
+                if bn and v > 0 and v <= 100 and not idMap[v] then
+                    idMap[v] = bn
+                end
+            end
+        end
+    end
+
     return idMap
 end
 
@@ -1482,26 +1558,27 @@ local function getGiftedDiscoveredMap()
     local data = getStatData()
 
     if data and type(data) == "table" then
-        local idMap = buildBeeIdMap()
+        local idMap = buildBeeIdMap(data)
 
         local giftTable = data.DiscGiftTypes or data.GiftedTypes or data.DiscoveredGiftTypes
         if type(giftTable) == "table" then
-            for _, val in pairs(giftTable) do
-                local numId = tonumber(val)
-                local matchedName = nil
-
-                if numId then
-                    matchedName = idMap[numId]
-
-                    if not matchedName and data.DiscoveredBees and data.DiscoveredBees[numId] then
-                        matchedName = extractBeeName(tostring(data.DiscoveredBees[numId]))
+            for k, val in pairs(giftTable) do
+                local candidates = { val, k }
+                for _, item in ipairs(candidates) do
+                    local matchedName = nil
+                    if type(item) == "number" then
+                        matchedName = idMap[item]
+                    elseif type(item) == "string" then
+                        local nId = tonumber(item)
+                        if nId and idMap[nId] then
+                            matchedName = idMap[nId]
+                        else
+                            matchedName = extractBeeName(item)
+                        end
                     end
-                elseif type(val) == "string" then
-                    matchedName = extractBeeName(val)
-                end
-
-                if matchedName then
-                    discovered[matchedName] = true
+                    if matchedName then
+                        discovered[matchedName] = true
+                    end
                 end
             end
         end
@@ -1510,13 +1587,41 @@ local function getGiftedDiscoveredMap()
         if type(bees) == "table" then
             for _, b in pairs(bees) do
                 local beeObj = extractBee(b) or b
-                if type(beeObj) == "table" and (beeObj.Gifted or beeObj.gifted) and beeObj.Type then
+                if type(beeObj) == "table" and (beeObj.Gifted == true or beeObj.gifted == true) and beeObj.Type then
                     local matched = extractBeeName(tostring(beeObj.Type))
                     if matched then discovered[matched] = true end
                 end
             end
         end
     end
+
+    pcall(function()
+        local pg = player:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, desc in ipairs(pg:GetDescendants()) do
+            if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+                local txt = tostring(desc.Text or "")
+                local bName = extractBeeName(txt)
+                if bName then
+                    local parent = desc.Parent
+                    if parent then
+                        for _, sibling in ipairs(parent:GetChildren()) do
+                            local sName = sibling.Name:lower()
+                            if sName:find("star") or sName:find("gift") then
+                                if (sibling:IsA("ImageLabel") or sibling:IsA("ImageButton")) and sibling.Visible and sibling.ImageTransparency < 0.8 and sibling.Image ~= "" then
+                                    discovered[bName] = true
+                                    break
+                                elseif sibling:IsA("GuiObject") and sibling.Visible then
+                                    discovered[bName] = true
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
 
     return discovered
 end
@@ -1549,7 +1654,7 @@ end
 
 debugBtn.MouseButton1Click:Connect(function()
     local data = getStatData()
-    local idMap = buildBeeIdMap()
+    local idMap = buildBeeIdMap(data)
     local report = {}
     table.insert(report, "=== BSS GIFTED DATA DEBUG ===")
 
@@ -1559,8 +1664,20 @@ debugBtn.MouseButton1Click:Connect(function()
 
     if data and data.DiscGiftTypes then
         local rawList = {}
-        for k, v in pairs(data.DiscGiftTypes) do table.insert(rawList, tostring(k) .. ":" .. tostring(v)) end
+        local unmapped = {}
+        for k, v in pairs(data.DiscGiftTypes) do
+            table.insert(rawList, tostring(k) .. ":" .. tostring(v))
+            local num = tonumber(v) or tonumber(k)
+            if num and not idMap[num] then
+                table.insert(unmapped, tostring(num))
+            end
+        end
         table.insert(report, string.format("DiscGiftTypes (%d items): %s", #rawList, table.concat(rawList, ", ")))
+        if #unmapped > 0 then
+            table.insert(report, string.format("UNMAPPED IDs (%d): %s", #unmapped, table.concat(unmapped, ", ")))
+        else
+            table.insert(report, "All DiscGiftTypes IDs successfully mapped!")
+        end
     else
         table.insert(report, "DiscGiftTypes is NIL!")
     end
@@ -1569,6 +1686,18 @@ debugBtn.MouseButton1Click:Connect(function()
         local dbList = {}
         for k, v in pairs(data.DiscoveredBees) do table.insert(dbList, tostring(k) .. ":" .. tostring(v)) end
         table.insert(report, string.format("DiscoveredBees (%d items): %s", #dbList, table.concat(dbList, ", ")))
+    end
+
+    local bees = getAllBees(data)
+    if type(bees) == "table" then
+        local hiveGifted = {}
+        for _, b in pairs(bees) do
+            local beeObj = extractBee(b) or b
+            if type(beeObj) == "table" and (beeObj.Gifted or beeObj.gifted) then
+                table.insert(hiveGifted, tostring(beeObj.Type))
+            end
+        end
+        table.insert(report, string.format("Hive Gifted Bees (%d): %s", #hiveGifted, table.concat(hiveGifted, ", ")))
     end
 
     local disc = getGiftedDiscoveredMap()
