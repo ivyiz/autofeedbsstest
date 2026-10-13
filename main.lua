@@ -1367,22 +1367,58 @@ local function makeBeeItem(parent, beeName, rarity)
     rarLbl.Parent = row
 end
 
+local function normalizeBeeName(str)
+    if not str or type(str) ~= "string" then return nil end
+    local s = str:lower()
+    s = s:gsub("gifted%s*", ""):gsub("%s*bee$", ""):gsub("[^%w]", "")
+    if s == "" then return nil end
+    for _, bee in ipairs(ALL_BEES) do
+        local b = bee.Name:lower():gsub("%s*bee$", ""):gsub("[^%w]", "")
+        if s == b or s:find(b, 1, true) or b:find(s, 1, true) then
+            return bee.Name
+        end
+    end
+    return nil
+end
+
 local function getGiftedDiscoveredMap()
     local discovered = {}
     local data = getStatData()
-    if data then
-        local fields = {"TypesDiscovered", "GiftedTypes", "GiftedTypesDiscovered", "BeesDiscovered", "DiscoveredTypes", "Types"}
-        for _, f in ipairs(fields) do
-            if type(data[f]) == "table" then
-                for k, v in pairs(data[f]) do
-                    local beeKey = tostring(k)
-                    if type(v) == "table" and (v.Gifted or v.gifted) then
-                        discovered[string.lower(beeKey)] = true
-                    elseif v == true then
-                        discovered[string.lower(beeKey)] = true
-                    elseif string.find(string.lower(beeKey), "gifted") then
-                        local clean = string.gsub(string.lower(beeKey), "gifted%s*", "")
-                        discovered[clean] = true
+
+    if data and type(data) == "table" then
+        for tableName, tableVal in pairs(data) do
+            if type(tableVal) == "table" then
+                local tNameLower = tostring(tableName):lower()
+                local isGiftedTable = tNameLower:find("gift") or tNameLower:find("star")
+                local isTypeTable = tNameLower:find("type") or tNameLower:find("discover") or tNameLower:find("bee") or tNameLower:find("egg") or tNameLower:find("codex") or tNameLower:find("index")
+
+                for k, v in pairs(tableVal) do
+                    local kStr = tostring(k)
+                    local vStr = (type(v) == "string") and v or ""
+
+                    local beeKey = normalizeBeeName(kStr)
+                    local beeVal = normalizeBeeName(vStr)
+
+                    if isGiftedTable then
+                        if beeKey then discovered[beeKey] = true end
+                        if beeVal then discovered[beeVal] = true end
+                    else
+                        if beeKey then
+                            if kStr:lower():find("gift") or kStr:lower():find("star") then
+                                discovered[beeKey] = true
+                            elseif type(v) == "table" and (v.Gifted or v.gifted or v.Star or v.star or v[2] == true) then
+                                discovered[beeKey] = true
+                            elseif type(v) == "number" and v >= 2 then
+                                discovered[beeKey] = true
+                            elseif type(v) == "string" and (v:lower():find("gift") or v:lower():find("star")) then
+                                discovered[beeKey] = true
+                            elseif isTypeTable and v == true and (kStr:lower():find("gift") or kStr:lower():find("star")) then
+                                discovered[beeKey] = true
+                            end
+                        end
+                        if beeVal and (vStr:lower():find("gift") or vStr:lower():find("star")) then
+                            discovered[beeVal] = true
+                        end
                     end
                 end
             end
@@ -1393,23 +1429,41 @@ local function getGiftedDiscoveredMap()
             for _, b in pairs(bees) do
                 local beeObj = extractBee(b) or b
                 if type(beeObj) == "table" and (beeObj.Gifted or beeObj.gifted) and beeObj.Type then
-                    discovered[string.lower(tostring(beeObj.Type))] = true
+                    local matched = normalizeBeeName(tostring(beeObj.Type))
+                    if matched then discovered[matched] = true end
                 end
             end
         end
     end
-    return discovered
-end
 
-local function isBeeGifted(beeName, discMap)
-    local lowerName = string.lower(beeName)
-    local shortName = string.gsub(lowerName, "%s*bee$", "")
-    for dName, _ in pairs(discMap) do
-        if dName == lowerName or dName == shortName or string.find(dName, shortName) then
-            return true
+    pcall(function()
+        local pg = player:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, gui in ipairs(pg:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui.Name ~= "AutoTreat_ivyis" then
+                for _, obj in ipairs(gui:GetDescendants()) do
+                    local txt = (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Text or obj.Name
+                    local matched = normalizeBeeName(txt)
+                    if matched then
+                        local p = obj:IsA("GuiObject") and obj.Parent or nil
+                        if p then
+                            for _, sib in ipairs(p:GetChildren()) do
+                                local sName = sib.Name:lower()
+                                if (sName:find("star") or sName:find("gift")) and sib:IsA("GuiObject") and sib.Visible then
+                                    if not sib:IsA("ImageLabel") or sib.ImageTransparency < 0.8 then
+                                        discovered[matched] = true
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
         end
-    end
-    return false
+    end)
+
+    return discovered
 end
 
 local function refreshGiftedTracker()
@@ -1424,7 +1478,7 @@ local function refreshGiftedTracker()
     local giftedCount, missingCount = 0, 0
 
     for _, bee in ipairs(ALL_BEES) do
-        if isBeeGifted(bee.Name, discMap) then
+        if discMap[bee.Name] then
             giftedCount = giftedCount + 1
             makeBeeItem(giftedScroll, bee.Name, bee.Rarity)
         else
