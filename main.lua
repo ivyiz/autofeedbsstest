@@ -66,6 +66,87 @@ local function formatNum(n)
     else return tostring(math.floor(n)) end
 end
 
+local function deriveLvlFromBond(totalBond)
+    local curLvl = 1
+    local remBond = totalBond
+    for l = 1, 25 do
+        local req = bondTable[l] or (bondTable[25] * 2^(l - 25))
+        if remBond >= req then
+            remBond = remBond - req
+            curLvl = l + 1
+        else
+            break
+        end
+    end
+    return curLvl, remBond
+end
+
+local function getCumulativeBond(targetLvl)
+    local sum = 0
+    for l = 1, targetLvl - 1 do
+        sum = sum + (bondTable[l] or (bondTable[25] * 2^(l - 25)))
+    end
+    return sum
+end
+
+local function extractBee(b)
+    if type(b) ~= "table" then return nil end
+    local lvl = nil
+    local bond = nil
+    local name = nil
+
+    local function scanTable(t)
+        if type(t) ~= "table" then return end
+        for k, v in pairs(t) do
+            local lk = tostring(k):lower()
+            if not lvl and (lk == "level" or lk == "lvl" or lk:find("level") or lk:find("lvl") or lk == "rank") then
+                if type(v) == "number" or (type(v) == "string" and tonumber(v)) then
+                    lvl = tonumber(v)
+                end
+            elseif not bond and (lk == "bond" or lk == "xp" or lk:find("bond") or lk:find("xp")) then
+                if type(v) == "number" or (type(v) == "string" and tonumber(v)) then
+                    bond = tonumber(v)
+                end
+            elseif not name and (lk == "type" or lk == "beetype" or lk == "name" or lk:find("type") or lk:find("species")) then
+                if type(v) == "string" then
+                    name = tostring(v)
+                end
+            end
+        end
+    end
+
+    scanTable(b)
+    if type(b.Properties) == "table" then scanTable(b.Properties) end
+    if type(b.Stats) == "table" then scanTable(b.Stats) end
+    if type(b.Data) == "table" then scanTable(b.Data) end
+
+    bond = tonumber(bond) or 0
+    if lvl then lvl = tonumber(lvl) end
+
+    if (not lvl or lvl <= 1) and bond >= 1000 then
+        local calcLvl, calcBond = deriveLvlFromBond(bond)
+        lvl = calcLvl
+        bond = calcBond
+    elseif lvl and lvl > 1 then
+        local reqThisLvl = bondTable[lvl] or (bondTable[25] * 2^(lvl - 25))
+        if bond > reqThisLvl then
+            local cum = getCumulativeBond(lvl)
+            if bond >= cum then
+                bond = math.max(0, bond - cum)
+            end
+        end
+    end
+
+    if lvl or bond > 0 or name then
+        return {
+            Type = tostring(name or "Bee"),
+            Level = math.max(1, math.floor(tonumber(lvl) or 1)),
+            Bond = math.max(0, tonumber(bond) or 0)
+        }
+    end
+    return nil
+end
+
 local function getStatData()
     local data = nil
     pcall(function()
@@ -94,15 +175,28 @@ end
 
 local function findBeesTable(data)
     if not data or type(data) ~= "table" then return nil end
-    if type(data.Bees) == "table" then return data.Bees end
-    if type(data.Hive) == "table" then return data.Hive end
-    if type(data.HiveSlots) == "table" then return data.HiveSlots end
+    local candidate = data.Bees or data.bees or data.Hive or data.hive or data.HiveSlots or data.hiveSlots or data.Slots or data.slots
+    if type(candidate) == "table" then
+        local result = {}
+        for k, v in pairs(candidate) do
+            local b = extractBee(v)
+            if b then result[k] = b end
+        end
+        if next(result) then return result end
+    end
     for _, v in pairs(data) do
         if type(v) == "table" then
-            for _, subV in pairs(v) do
-                if type(subV) == "table" and (subV.Level or subV.Bond) then
-                    return v
+            local count = 0
+            local result = {}
+            for subK, subV in pairs(v) do
+                local b = extractBee(subV)
+                if b then
+                    result[subK] = b
+                    count = count + 1
                 end
+            end
+            if count >= 3 then
+                return result
             end
         end
     end
@@ -116,23 +210,82 @@ local function getBeesFromWorkspace()
     local myHive = nil
     for _, hive in ipairs(honeycombs:GetChildren()) do
         local owner = hive:FindFirstChild("Owner")
-        if owner and (owner.Value == player or owner.Value == player.Name) then
-            myHive = hive
-            break
+        if owner then
+            local val = owner.Value
+            if val == player or val == player.Name or tostring(val) == player.Name or (player.Character and val == player.Character) then
+                myHive = hive
+                break
+            end
         end
     end
     if not myHive then return nil end
-    local cells = myHive:FindFirstChild("Cells")
+    local cells = myHive:FindFirstChild("Cells") or myHive:FindFirstChild("cells")
     if cells then
         for i, cell in ipairs(cells:GetChildren()) do
             local cellType = cell:FindFirstChild("CellType") or cell:FindFirstChild("BeeType") or cell:FindFirstChild("Type")
-            local cellLevel = cell:FindFirstChild("CellLevel") or cell:FindFirstChild("Level")
-            local cellBond = cell:FindFirstChild("Bond") or cell:FindFirstChild("CellBond")
-            if cellType and cellType.Value and tostring(cellType.Value) ~= "" and tostring(cellType.Value) ~= "Empty" then
-                bees[i] = {
-                    Type = tostring(cellType.Value),
-                    Level = cellLevel and tonumber(cellLevel.Value) or 1,
-                    Bond = cellBond and tonumber(cellBond.Value) or 0
+            local typeName = (cellType and tostring(cellType.Value)) or cell:GetAttribute("CellType") or cell:GetAttribute("BeeType") or ""
+            local lvl = nil
+            local bond = 0
+
+            for _, child in ipairs(cell:GetChildren()) do
+                local lk = child.Name:lower()
+                if child:IsA("ValueBase") then
+                    if lk:find("level") or lk:find("lvl") then
+                        lvl = tonumber(child.Value)
+                    elseif lk:find("bond") or lk:find("xp") then
+                        bond = tonumber(child.Value) or 0
+                    end
+                end
+            end
+
+            if not lvl then
+                for k, v in pairs(cell:GetAttributes()) do
+                    local lk = tostring(k):lower()
+                    if lk:find("level") or lk:find("lvl") then
+                        lvl = tonumber(v)
+                    elseif lk:find("bond") or lk:find("xp") then
+                        bond = tonumber(v) or 0
+                    end
+                end
+            end
+
+            if not lvl then
+                local bestLevel = nil
+                for _, desc in ipairs(cell:GetDescendants()) do
+                    if desc:IsA("TextLabel") then
+                        local txt = tostring(desc.Text or "")
+                        local num = tonumber(txt:match("(%d+)"))
+                        if num and num >= 1 and num <= 25 then
+                            local dname = desc.Name:lower()
+                            if dname:find("level") or dname:find("lvl") then
+                                bestLevel = num
+                                break
+                            elseif not bestLevel and (txt:match("^%s*Lv?%.?%s*(%d+)%s*$") or #txt <= 3) then
+                                bestLevel = num
+                            end
+                        end
+                    end
+                end
+                lvl = bestLevel
+            end
+
+            local row, col = cell.Name:match("C(%d+),(%d+)")
+            local slotIdx = i
+            if row and col then
+                row, col = tonumber(row), tonumber(col)
+                slotIdx = (row - 1) * 10 + col
+            else
+                row = math.ceil(i / 10)
+                col = i - (row - 1) * 10
+            end
+
+            if (typeName ~= "" and typeName ~= "Empty") or lvl then
+                bees[slotIdx] = {
+                    Type = (typeName ~= "" and typeName ~= "Empty") and typeName or ("Slot"..slotIdx),
+                    Level = lvl or 1,
+                    Bond = bond or 0,
+                    row = row,
+                    col = col
                 }
             end
         end
@@ -141,9 +294,9 @@ local function getBeesFromWorkspace()
 end
 
 local function getHoney(data)
-    if data and data.Honey then return data.Honey end
+    if data and data.Honey then return tonumber(data.Honey) or 0 end
     local s = player:FindFirstChild("leaderstats")
-    return (s and s:FindFirstChild("Honey") and s.Honey.Value) or 0
+    return (s and s:FindFirstChild("Honey") and tonumber(s.Honey.Value)) or 0
 end
 
 local function getTreats(data)
@@ -160,19 +313,31 @@ local function getTreats(data)
     return 0
 end
 
-local function getBondProgress(lvl, bond, tgt)
-    local total = 0
-    for i = lvl, tgt - 1 do
-        total = total + (bondTable[i] or bondTable[25] * 2^(i-25))
-    end
-    if total <= 0 then return 100, 0 end
-    local rem = math.max(0, total - (bond or 0))
-    return math.floor(((total-rem)/total)*10000)/100, rem
-end
+local function calcBeeTreats(currentLvl, currentBond, targetLvl)
+    local lvl = math.max(1, math.floor(tonumber(currentLvl) or 1))
+    local bond = math.max(0, tonumber(currentBond) or 0)
+    local tgt = math.max(1, math.floor(tonumber(targetLvl) or 1))
 
-local function getLvlPct(lvl, bond)
-    local need = bondTable[lvl] or bondTable[25]*2^(lvl-25)
-    return math.floor(((bond or 0)/need)*10000)/100
+    if lvl >= tgt then
+        return 0, 100, 100, 0, 0
+    end
+
+    local needThisLvl = bondTable[lvl] or (bondTable[25] * 2^(lvl - 25))
+    local lvlPct = math.min(100, math.floor((bond / needThisLvl) * 10000) / 100)
+    local remThisLvl = math.max(0, needThisLvl - bond)
+
+    local subBond = 0
+    for l = lvl + 1, tgt - 1 do
+        subBond = subBond + (bondTable[l] or (bondTable[25] * 2^(l - 25)))
+    end
+
+    local totalRemainingBond = remThisLvl + subBond
+    local totalReq = needThisLvl + subBond
+    local doneBond = totalReq - totalRemainingBond
+    local totalPct = math.min(100, math.floor((doneBond / totalReq) * 10000) / 100)
+    local treats = math.ceil(totalRemainingBond / TREAT_BOND)
+
+    return treats, totalPct, lvlPct, totalRemainingBond, totalReq
 end
 
 local function slotToRowCol(slot)
@@ -233,8 +398,8 @@ screenGui.ResetOnSpawn = false
 screenGui.Parent = guiParent
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 450, 0, 190)
-mainFrame.Position = UDim2.new(0.5, -225, 0.35, 0)
+mainFrame.Size = UDim2.new(0, 460, 0, 210)
+mainFrame.Position = UDim2.new(0.5, -230, 0.35, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
@@ -268,6 +433,7 @@ minBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
 minBtn.Font = Enum.Font.GothamBold
 minBtn.TextSize = 12
 minBtn.BorderSizePixel = 0
+minBtn.ZIndex = 15
 minBtn.Parent = titleBar
 Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 4)
 
@@ -278,19 +444,19 @@ bodyFrame.BackgroundTransparency = 1
 bodyFrame.Parent = mainFrame
 
 local leftCol = Instance.new("Frame")
-leftCol.Size = UDim2.new(0, 210, 1, 0)
+leftCol.Size = UDim2.new(0, 216, 1, 0)
 leftCol.Position = UDim2.new(0, 0, 0, 0)
 leftCol.BackgroundTransparency = 1
 leftCol.Parent = bodyFrame
 
 local targetRow = Instance.new("Frame")
-targetRow.Size = UDim2.new(1, 0, 0, 20)
+targetRow.Size = UDim2.new(1, 0, 0, 22)
 targetRow.Position = UDim2.new(0, 0, 0, 0)
 targetRow.BackgroundTransparency = 1
 targetRow.Parent = leftCol
 
 local tgtTxt = Instance.new("TextLabel")
-tgtTxt.Size = UDim2.new(0, 40, 1, 0)
+tgtTxt.Size = UDim2.new(0, 42, 1, 0)
 tgtTxt.BackgroundTransparency = 1
 tgtTxt.Text = "Target:"
 tgtTxt.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -301,7 +467,7 @@ tgtTxt.Parent = targetRow
 
 local targetBox = Instance.new("TextBox")
 targetBox.Size = UDim2.new(0, 45, 1, 0)
-targetBox.Position = UDim2.new(0, 42, 0, 0)
+targetBox.Position = UDim2.new(0, 44, 0, 0)
 targetBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 targetBox.Text = tostring(targetLevel)
 targetBox.TextColor3 = Color3.fromRGB(240, 240, 240)
@@ -309,12 +475,13 @@ targetBox.Font = Enum.Font.GothamBold
 targetBox.TextSize = 11
 targetBox.BorderSizePixel = 0
 targetBox.ClearTextOnFocus = false
+targetBox.ZIndex = 15
 targetBox.Parent = targetRow
 Instance.new("UICorner", targetBox).CornerRadius = UDim.new(0, 4)
 
 local spdTxt = Instance.new("TextLabel")
-spdTxt.Size = UDim2.new(0, 40, 1, 0)
-spdTxt.Position = UDim2.new(0, 95, 0, 0)
+spdTxt.Size = UDim2.new(0, 42, 1, 0)
+spdTxt.Position = UDim2.new(0, 98, 0, 0)
 spdTxt.BackgroundTransparency = 1
 spdTxt.Text = "Speed:"
 spdTxt.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -325,7 +492,7 @@ spdTxt.Parent = targetRow
 
 local speedBox = Instance.new("TextBox")
 speedBox.Size = UDim2.new(0, 45, 1, 0)
-speedBox.Position = UDim2.new(0, 137, 0, 0)
+speedBox.Position = UDim2.new(0, 142, 0, 0)
 speedBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 speedBox.Text = tostring(WALK_SPEED)
 speedBox.TextColor3 = Color3.fromRGB(240, 240, 240)
@@ -333,6 +500,7 @@ speedBox.Font = Enum.Font.GothamBold
 speedBox.TextSize = 11
 speedBox.BorderSizePixel = 0
 speedBox.ClearTextOnFocus = false
+speedBox.ZIndex = 15
 speedBox.Parent = targetRow
 Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 4)
 
@@ -349,22 +517,22 @@ local function makeInfoLabel(yPos)
     return l
 end
 
-local beeCountLabel = makeInfoLabel(22)
+local beeCountLabel = makeInfoLabel(24)
 beeCountLabel.Text = "Bees: 0"
-local honeyLabel = makeInfoLabel(38)
+local honeyLabel = makeInfoLabel(40)
 honeyLabel.Text = "Honey: 0"
-local treatsLabel = makeInfoLabel(54)
+local treatsLabel = makeInfoLabel(56)
 treatsLabel.Text = "Treats: 0"
-local totalTreatsLabel = makeInfoLabel(70)
+local totalTreatsLabel = makeInfoLabel(72)
 totalTreatsLabel.Text = "Treats Needed: 0"
-local totalHoneyLabel = makeInfoLabel(86)
+local totalHoneyLabel = makeInfoLabel(88)
 totalHoneyLabel.Text = "Honey Needed: 0"
-local overallLabel = makeInfoLabel(102)
+local overallLabel = makeInfoLabel(104)
 overallLabel.Text = "Overall: 0%"
 
 local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1, 0, 0, 15)
-statusLabel.Position = UDim2.new(0, 0, 0, 118)
+statusLabel.Size = UDim2.new(1, 0, 0, 16)
+statusLabel.Position = UDim2.new(0, 0, 0, 122)
 statusLabel.BackgroundTransparency = 1
 statusLabel.Text = "Status: Idle"
 statusLabel.TextColor3 = Color3.fromRGB(140, 140, 140)
@@ -374,8 +542,8 @@ statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 statusLabel.Parent = leftCol
 
 local btnRow = Instance.new("Frame")
-btnRow.Size = UDim2.new(1, 0, 0, 22)
-btnRow.Position = UDim2.new(0, 0, 0, 134)
+btnRow.Size = UDim2.new(1, 0, 0, 26)
+btnRow.Position = UDim2.new(0, 0, 0, 142)
 btnRow.BackgroundTransparency = 1
 btnRow.Parent = leftCol
 
@@ -388,6 +556,9 @@ calcBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
 calcBtn.Font = Enum.Font.GothamBold
 calcBtn.TextSize = 11
 calcBtn.BorderSizePixel = 0
+calcBtn.Active = true
+calcBtn.Selectable = true
+calcBtn.ZIndex = 15
 calcBtn.Parent = btnRow
 Instance.new("UICorner", calcBtn).CornerRadius = UDim.new(0, 4)
 
@@ -400,12 +571,15 @@ toggleBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
 toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.TextSize = 11
 toggleBtn.BorderSizePixel = 0
+toggleBtn.Active = true
+toggleBtn.Selectable = true
+toggleBtn.ZIndex = 15
 toggleBtn.Parent = btnRow
 Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 4)
 
 local scrollFrame = Instance.new("ScrollingFrame")
-scrollFrame.Size = UDim2.new(0, 214, 1, 0)
-scrollFrame.Position = UDim2.new(1, -214, 0, 0)
+scrollFrame.Size = UDim2.new(0, 218, 1, 0)
+scrollFrame.Position = UDim2.new(1, -218, 0, 0)
 scrollFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 16)
 scrollFrame.BorderSizePixel = 0
 scrollFrame.ScrollBarThickness = 3
@@ -419,97 +593,138 @@ local isMinimized = false
 minBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
     if isMinimized then
-        mainFrame.Size = UDim2.new(0, 450, 0, 28)
+        mainFrame.Size = UDim2.new(0, 460, 0, 28)
         minBtn.Text = "+"
         bodyFrame.Visible = false
     else
-        mainFrame.Size = UDim2.new(0, 450, 0, 190)
+        mainFrame.Size = UDim2.new(0, 460, 0, 210)
         minBtn.Text = "—"
         bodyFrame.Visible = true
     end
 end)
 
+local isRefreshing = false
+
 local function refreshBeeList()
-    for _, c in pairs(scrollFrame:GetChildren()) do
-        if c:IsA("TextLabel") then c:Destroy() end
-    end
-    local val = tonumber(targetBox.Text)
-    if val and val > 0 then targetLevel = math.floor(val) end
-    local spd = tonumber(speedBox.Text)
-    if spd and spd > 0 then WALK_SPEED = spd end
-
-    local data = getStatData()
-    local bees = findBeesTable(data) or getBeesFromWorkspace()
-
-    honeyLabel.Text = "Honey: " .. formatNum(getHoney(data))
-    treatsLabel.Text = "Treats: " .. formatNum(getTreats(data))
-
-    if not bees then
-        beeCountLabel.Text = "Bees: 0"
-        totalTreatsLabel.Text = "Treats Needed: 0"
-        totalHoneyLabel.Text = "Honey Needed: 0"
-        overallLabel.Text = "Overall: 0%"
-        return
-    end
-
-    local beeCount, totalTreats = 0, 0
-    local totalBondDone, totalBondReq = 0, 0
-    local beeList = {}
-
-    for slot, bee in pairs(bees) do
-        if type(bee) == "table" and (bee.Level or bee.Bond) then
-            beeCount = beeCount + 1
-            local lvl = tonumber(bee.Level) or 1
-            local bond = tonumber(bee.Bond) or 0
-            local pct, rem = getBondProgress(lvl, bond, targetLevel)
-            local lvlPct = getLvlPct(lvl, bond)
-            local treats = math.ceil(rem / TREAT_BOND)
-            totalTreats = totalTreats + treats
-            local bondNeeded = 0
-            for i = lvl, targetLevel - 1 do
-                bondNeeded = bondNeeded + (bondTable[i] or bondTable[25]*2^(i-25))
-            end
-            totalBondDone = totalBondDone + (bondNeeded - rem)
-            totalBondReq = totalBondReq + bondNeeded
-            table.insert(beeList, {
-                slot=slot, name=bee.Type or ("Slot"..slot),
-                lvl=lvl, lvlPct=lvlPct, pct=pct, treats=treats
-            })
+    if isRefreshing then return end
+    isRefreshing = true
+    pcall(function()
+        calcBtn.Text = "Updating..."
+        for _, c in pairs(scrollFrame:GetChildren()) do
+            if c:IsA("TextLabel") then c:Destroy() end
         end
-    end
 
-    table.sort(beeList, function(a,b) return a.lvl < b.lvl end)
+        local digits = string.match(tostring(targetBox.Text), "%d+")
+        local val = digits and tonumber(digits)
+        if val and val > 0 then targetLevel = math.floor(val) end
+        targetBox.Text = tostring(targetLevel)
 
-    for i, info in ipairs(beeList) do
-        local done = info.pct >= 100
-        local row = Instance.new("TextLabel")
-        row.Size = UDim2.new(1, -6, 0, 16)
-        row.BackgroundTransparency = 1
-        row.Text = string.format(" %s Lv%d(%.0f%%) [%.0f%%] %s",
-            info.name, info.lvl, info.lvlPct,
-            info.pct, done and "[DONE]" or formatNum(info.treats))
-        row.TextColor3 = done and Color3.fromRGB(120, 200, 120) or Color3.fromRGB(180, 180, 180)
-        row.Font = Enum.Font.Gotham
-        row.TextSize = 10
-        row.TextXAlignment = Enum.TextXAlignment.Left
-        row.LayoutOrder = i
-        row.Parent = scrollFrame
-    end
+        local spdDigits = string.match(tostring(speedBox.Text), "%d+")
+        local spd = spdDigits and tonumber(spdDigits)
+        if spd and spd > 0 then WALK_SPEED = spd end
+        speedBox.Text = tostring(WALK_SPEED)
 
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, #beeList * 18)
-    local overall = totalBondReq > 0 and math.floor((totalBondDone/totalBondReq)*10000)/100 or 100
-    beeCountLabel.Text = "Bees: " .. beeCount
-    overallLabel.Text = "Overall: " .. overall .. "%"
-    totalTreatsLabel.Text = "Treats Needed: " .. formatNum(totalTreats)
-    totalHoneyLabel.Text = "Honey Needed: " .. formatNum(totalTreats * TREAT_COST)
+        local data = getStatData()
+        local wsBees = getBeesFromWorkspace() or {}
+        local cacheBees = findBeesTable(data) or {}
+
+        local bees = {}
+        for k, v in pairs(cacheBees) do
+            bees[k] = v
+        end
+        for k, v in pairs(wsBees) do
+            if not bees[k] then
+                bees[k] = v
+            else
+                if v.Level and v.Level > 1 and (not bees[k].Level or bees[k].Level <= 1 or v.Level > bees[k].Level) then
+                    bees[k].Level = v.Level
+                end
+                if v.row and v.col then
+                    bees[k].row = v.row
+                    bees[k].col = v.col
+                end
+            end
+        end
+
+        honeyLabel.Text = "Honey: " .. formatNum(getHoney(data))
+        treatsLabel.Text = "Treats: " .. formatNum(getTreats(data))
+
+        if not next(bees) then
+            beeCountLabel.Text = "Bees: 0"
+            totalTreatsLabel.Text = "Treats Needed: 0"
+            totalHoneyLabel.Text = "Honey Needed: 0"
+            overallLabel.Text = "Overall: 0%"
+            calcBtn.Text = "Recalculate"
+            return
+        end
+
+        local beeCount, totalTreats = 0, 0
+        local totalBondDone, totalBondReq = 0, 0
+        local beeList = {}
+
+        for slot, bee in pairs(bees) do
+            local b = extractBee(bee) or bee
+            if type(b) == "table" then
+                local lvl = math.max(1, math.floor(tonumber(b.Level) or 1))
+                local bond = math.max(0, tonumber(b.Bond) or 0)
+                beeCount = beeCount + 1
+
+                local treats, totalPct, lvlPct, remBond, reqBond = calcBeeTreats(lvl, bond, targetLevel)
+                totalTreats = totalTreats + treats
+                totalBondReq = totalBondReq + reqBond
+                totalBondDone = totalBondDone + (reqBond - remBond)
+
+                table.insert(beeList, {
+                    slot = slot,
+                    name = tostring(b.Type or ("Slot"..slot)),
+                    lvl = lvl,
+                    lvlPct = lvlPct,
+                    pct = totalPct,
+                    treats = treats,
+                    row = b.row,
+                    col = b.col
+                })
+            end
+        end
+
+        table.sort(beeList, function(a, b)
+            local la = tonumber(a.lvl) or 0
+            local lb = tonumber(b.lvl) or 0
+            if la ~= lb then return la < lb end
+            return (tonumber(a.slot) or 0) < (tonumber(b.slot) or 0)
+        end)
+
+        for i, info in ipairs(beeList) do
+            local done = info.pct >= 100
+            local row = Instance.new("TextLabel")
+            row.Size = UDim2.new(1, -6, 0, 16)
+            row.BackgroundTransparency = 1
+            row.Text = string.format(" %s Lv%d(%.0f%%) [%.0f%%] %s",
+                info.name, info.lvl, info.lvlPct,
+                info.pct, done and "[DONE]" or formatNum(info.treats))
+            row.TextColor3 = done and Color3.fromRGB(120, 200, 120) or Color3.fromRGB(180, 180, 180)
+            row.Font = Enum.Font.Gotham
+            row.TextSize = 10
+            row.TextXAlignment = Enum.TextXAlignment.Left
+            row.LayoutOrder = i
+            row.Parent = scrollFrame
+        end
+
+        scrollFrame.CanvasSize = UDim2.new(0, 0, 0, #beeList * 18)
+        local overall = totalBondReq > 0 and math.floor((totalBondDone / totalBondReq) * 10000) / 100 or 100
+        beeCountLabel.Text = "Bees: " .. beeCount
+        overallLabel.Text = "Overall: " .. overall .. "%"
+        totalTreatsLabel.Text = "Treats Needed: " .. formatNum(totalTreats)
+        totalHoneyLabel.Text = "Honey Needed: " .. formatNum(totalTreats * TREAT_COST)
+    end)
+    calcBtn.Text = "Recalculate"
+    isRefreshing = false
 end
 
 calcBtn.MouseButton1Click:Connect(refreshBeeList)
+calcBtn.Activated:Connect(refreshBeeList)
 targetBox.FocusLost:Connect(refreshBeeList)
-speedBox.FocusLost:Connect(function()
-    local spd = tonumber(speedBox.Text)
-    if spd and spd > 0 then WALK_SPEED = spd end
-end)
+speedBox.FocusLost:Connect(refreshBeeList)
 
 toggleBtn.MouseButton1Click:Connect(function()
     autoRunning = not autoRunning
@@ -522,20 +737,51 @@ toggleBtn.MouseButton1Click:Connect(function()
         isTweening = false
     end
 end)
+toggleBtn.Activated:Connect(function()
+    if not autoRunning then
+        toggleBtn.Text = "Auto: ON"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(20, 42, 24)
+        autoRunning = true
+    else
+        toggleBtn.Text = "Auto: OFF"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
+        autoRunning = false
+        isTweening = false
+    end
+end)
 
 spawn(function()
     while screenGui.Parent do
         if autoRunning then
             local data = getStatData()
-            local bees = findBeesTable(data) or getBeesFromWorkspace()
-            if bees then
+            local wsBees = getBeesFromWorkspace() or {}
+            local cacheBees = findBeesTable(data) or {}
+            local bees = {}
+            for k, v in pairs(cacheBees) do bees[k] = v end
+            for k, v in pairs(wsBees) do
+                if not bees[k] then
+                    bees[k] = v
+                else
+                    if v.Level and v.Level > 1 and (not bees[k].Level or bees[k].Level <= 1 or v.Level > bees[k].Level) then
+                        bees[k].Level = v.Level
+                    end
+                    if v.row and v.col then
+                        bees[k].row = v.row
+                        bees[k].col = v.col
+                    end
+                end
+            end
+
+            if next(bees) then
                 local totalNeeded = 0
                 for _, bee in pairs(bees) do
-                    if type(bee) == "table" and (bee.Level or bee.Bond) then
-                        local lvl = tonumber(bee.Level) or 1
+                    local b = extractBee(bee) or bee
+                    if type(b) == "table" then
+                        local lvl = math.max(1, math.floor(tonumber(b.Level) or 1))
+                        local bond = math.max(0, tonumber(b.Bond) or 0)
                         if lvl < targetLevel then
-                            local _, rem = getBondProgress(lvl, tonumber(bee.Bond) or 0, targetLevel)
-                            totalNeeded = totalNeeded + math.ceil(rem / TREAT_BOND)
+                            local treats = calcBeeTreats(lvl, bond, targetLevel)
+                            totalNeeded = totalNeeded + treats
                         end
                     end
                 end
@@ -568,16 +814,27 @@ spawn(function()
                     statusLabel.Text = "Status: Feeding bees..."
                     for slot, bee in pairs(bees) do
                         if not autoRunning or availableTreats <= 0 then break end
-                        if type(bee) == "table" and (bee.Level or bee.Bond) then
-                            local lvl = tonumber(bee.Level) or 1
+                        local b = extractBee(bee) or bee
+                        if type(b) == "table" then
+                            local lvl = math.max(1, math.floor(tonumber(b.Level) or 1))
+                            local bond = math.max(0, tonumber(b.Bond) or 0)
                             if lvl < targetLevel then
-                                local _, rem = getBondProgress(lvl, tonumber(bee.Bond) or 0, targetLevel)
-                                local treatsNeeded = math.ceil(rem / TREAT_BOND)
+                                local treatsNeeded = calcBeeTreats(lvl, bond, targetLevel)
                                 local toFeed = math.min(treatsNeeded, availableTreats)
                                 if toFeed > 0 then
-                                    feedBee(slot, toFeed)
+                                    local r = b.row
+                                    local c = b.col
+                                    if not r or not c then
+                                        r, c = slotToRowCol(slot)
+                                    end
+                                    local remote = getRemote("ConstructHiveCellFromEgg")
+                                    if remote then
+                                        pcall(function()
+                                            remote:InvokeServer(r, c, "Treat", math.floor(toFeed), false)
+                                        end)
+                                    end
                                     availableTreats = availableTreats - toFeed
-                                    statusLabel.Text = "Status: Fed " .. (bee.Type or "bee") .. " " .. formatNum(toFeed)
+                                    statusLabel.Text = "Status: Fed " .. tostring(b.Type or "bee") .. " " .. formatNum(toFeed)
                                     wait(0.3)
                                 end
                             end
