@@ -824,9 +824,37 @@ tabTxt1.TextSize = 11
 tabTxt1.TextXAlignment = Enum.TextXAlignment.Left
 tabTxt1.Parent = tabBtnAutoFeed
 
+local tabBtnHive = Instance.new("TextButton")
+tabBtnHive.Size = UDim2.new(0, 94, 0, 28)
+tabBtnHive.Position = UDim2.new(0, 8, 0, 44)
+tabBtnHive.BackgroundColor3 = Color3.fromRGB(8, 9, 12)
+tabBtnHive.Text = ""
+tabBtnHive.BorderSizePixel = 0
+tabBtnHive.Parent = sidebar
+Instance.new("UICorner", tabBtnHive).CornerRadius = UDim.new(0, 6)
+
+local tabIconH = Instance.new("ImageLabel")
+tabIconH.Size = UDim2.new(0, 14, 0, 14)
+tabIconH.Position = UDim2.new(0, 8, 0.5, -7)
+tabIconH.BackgroundTransparency = 1
+tabIconH.Image = "rbxassetid://7734022107"
+tabIconH.ImageColor3 = Color3.fromRGB(150, 155, 165)
+tabIconH.Parent = tabBtnHive
+
+local tabTxtH = Instance.new("TextLabel")
+tabTxtH.Size = UDim2.new(1, -26, 1, 0)
+tabTxtH.Position = UDim2.new(0, 26, 0, 0)
+tabTxtH.BackgroundTransparency = 1
+tabTxtH.Text = "Hive"
+tabTxtH.TextColor3 = Color3.fromRGB(150, 155, 165)
+tabTxtH.Font = Enum.Font.GothamBold
+tabTxtH.TextSize = 11
+tabTxtH.TextXAlignment = Enum.TextXAlignment.Left
+tabTxtH.Parent = tabBtnHive
+
 local tabBtnSettings = Instance.new("TextButton")
 tabBtnSettings.Size = UDim2.new(0, 94, 0, 28)
-tabBtnSettings.Position = UDim2.new(0, 8, 0, 44)
+tabBtnSettings.Position = UDim2.new(0, 8, 0, 78)
 tabBtnSettings.BackgroundColor3 = Color3.fromRGB(8, 9, 12)
 tabBtnSettings.Text = ""
 tabBtnSettings.BorderSizePixel = 0
@@ -1139,27 +1167,302 @@ returnHiveBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-tabBtnAutoFeed.MouseButton1Click:Connect(function()
-    autoFeedPage.Visible = true
-    settingsPage.Visible = false
-    tabBtnAutoFeed.BackgroundColor3 = Color3.fromRGB(24, 40, 72)
-    tabTxt1.TextColor3 = Color3.fromRGB(255, 255, 255)
-    tabIcon1.ImageColor3 = Color3.fromRGB(255, 255, 255)
-    tabBtnSettings.BackgroundColor3 = Color3.fromRGB(8, 9, 12)
-    tabTxt2.TextColor3 = Color3.fromRGB(150, 155, 165)
-    tabIcon2.ImageColor3 = Color3.fromRGB(150, 155, 165)
-end)
+local hivePage = Instance.new("Frame")
+hivePage.Size = UDim2.new(1, 0, 1, 0)
+hivePage.BackgroundTransparency = 1
+hivePage.Visible = false
+hivePage.Parent = contentArea
 
-tabBtnSettings.MouseButton1Click:Connect(function()
-    settingsPage.Visible = true
-    autoFeedPage.Visible = false
-    tabBtnSettings.BackgroundColor3 = Color3.fromRGB(24, 40, 72)
-    tabTxt2.TextColor3 = Color3.fromRGB(255, 255, 255)
-    tabIcon2.ImageColor3 = Color3.fromRGB(255, 255, 255)
-    tabBtnAutoFeed.BackgroundColor3 = Color3.fromRGB(8, 9, 12)
-    tabTxt1.TextColor3 = Color3.fromRGB(150, 155, 165)
-    tabIcon1.ImageColor3 = Color3.fromRGB(150, 155, 165)
-end)
+local hiveHeader = Instance.new("Frame")
+hiveHeader.Size = UDim2.new(1, -24, 0, 24)
+hiveHeader.Position = UDim2.new(0, 12, 0, 6)
+hiveHeader.BackgroundTransparency = 1
+hiveHeader.Parent = hivePage
+
+local hiveTitle = Instance.new("TextLabel")
+hiveTitle.Size = UDim2.new(0, 150, 1, 0)
+hiveTitle.BackgroundTransparency = 1
+hiveTitle.Text = "Hive Gifted Tracker"
+hiveTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+hiveTitle.Font = Enum.Font.GothamBold
+hiveTitle.TextSize = 13
+hiveTitle.TextXAlignment = Enum.TextXAlignment.Left
+hiveTitle.Parent = hiveHeader
+
+local hiveBadge = Instance.new("TextLabel")
+hiveBadge.Size = UDim2.new(0, 100, 0, 20)
+hiveBadge.Position = UDim2.new(1, -100, 0, 2)
+hiveBadge.BackgroundColor3 = Color3.fromRGB(18, 32, 58)
+hiveBadge.Text = "SSA: 0 / 40"
+hiveBadge.TextColor3 = Color3.fromRGB(100, 180, 255)
+hiveBadge.Font = Enum.Font.GothamBold
+hiveBadge.TextSize = 10
+hiveBadge.BorderSizePixel = 0
+hiveBadge.Parent = hiveHeader
+Instance.new("UICorner", hiveBadge).CornerRadius = UDim.new(0, 4)
+
+local giftedCard = Instance.new("Frame")
+giftedCard.Size = UDim2.new(0.48, 0, 1, -38)
+giftedCard.Position = UDim2.new(0, 12, 0, 32)
+giftedCard.BackgroundColor3 = Color3.fromRGB(15, 16, 21)
+giftedCard.BorderSizePixel = 0
+giftedCard.Parent = hivePage
+Instance.new("UICorner", giftedCard).CornerRadius = UDim.new(0, 6)
+
+local giftedHead = Instance.new("Frame")
+giftedHead.Size = UDim2.new(1, 0, 0, 22)
+giftedHead.BackgroundColor3 = Color3.fromRGB(18, 38, 25)
+giftedHead.BorderSizePixel = 0
+giftedHead.Parent = giftedCard
+Instance.new("UICorner", giftedHead).CornerRadius = UDim.new(0, 6)
+
+local giftedColLabel = Instance.new("TextLabel")
+giftedColLabel.Size = UDim2.new(1, -12, 1, 0)
+giftedColLabel.Position = UDim2.new(0, 8, 0, 0)
+giftedColLabel.BackgroundTransparency = 1
+giftedColLabel.Text = "✔ Gifted (0)"
+giftedColLabel.TextColor3 = Color3.fromRGB(74, 222, 128)
+giftedColLabel.Font = Enum.Font.GothamBold
+giftedColLabel.TextSize = 10
+giftedColLabel.TextXAlignment = Enum.TextXAlignment.Left
+giftedColLabel.Parent = giftedHead
+
+local giftedScroll = Instance.new("ScrollingFrame")
+giftedScroll.Size = UDim2.new(1, -8, 1, -26)
+giftedScroll.Position = UDim2.new(0, 4, 0, 24)
+giftedScroll.BackgroundTransparency = 1
+giftedScroll.BorderSizePixel = 0
+giftedScroll.ScrollBarThickness = 3
+giftedScroll.ScrollBarImageColor3 = Color3.fromRGB(35, 45, 60)
+giftedScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+giftedScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+giftedScroll.Parent = giftedCard
+local gLayout = Instance.new("UIListLayout", giftedScroll)
+gLayout.Padding = UDim.new(0, 2)
+
+local missingCard = Instance.new("Frame")
+missingCard.Size = UDim2.new(0.48, 0, 1, -38)
+missingCard.Position = UDim2.new(0.52, 0, 0, 32)
+missingCard.BackgroundColor3 = Color3.fromRGB(15, 16, 21)
+missingCard.BorderSizePixel = 0
+missingCard.Parent = hivePage
+Instance.new("UICorner", missingCard).CornerRadius = UDim.new(0, 6)
+
+local missingHead = Instance.new("Frame")
+missingHead.Size = UDim2.new(1, 0, 0, 22)
+missingHead.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
+missingHead.BorderSizePixel = 0
+missingHead.Parent = missingCard
+Instance.new("UICorner", missingHead).CornerRadius = UDim.new(0, 6)
+
+local missingColLabel = Instance.new("TextLabel")
+missingColLabel.Size = UDim2.new(1, -12, 1, 0)
+missingColLabel.Position = UDim2.new(0, 8, 0, 0)
+missingColLabel.BackgroundTransparency = 1
+missingColLabel.Text = "✖ Not Gifted (0)"
+missingColLabel.TextColor3 = Color3.fromRGB(248, 113, 113)
+missingColLabel.Font = Enum.Font.GothamBold
+missingColLabel.TextSize = 10
+missingColLabel.TextXAlignment = Enum.TextXAlignment.Left
+missingColLabel.Parent = missingHead
+
+local missingScroll = Instance.new("ScrollingFrame")
+missingScroll.Size = UDim2.new(1, -8, 1, -26)
+missingScroll.Position = UDim2.new(0, 4, 0, 24)
+missingScroll.BackgroundTransparency = 1
+missingScroll.BorderSizePixel = 0
+missingScroll.ScrollBarThickness = 3
+missingScroll.ScrollBarImageColor3 = Color3.fromRGB(35, 45, 60)
+missingScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+missingScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+missingScroll.Parent = missingCard
+local mLayout = Instance.new("UIListLayout", missingScroll)
+mLayout.Padding = UDim.new(0, 2)
+
+local ALL_BEES = {
+    {Name = "Basic Bee", Rarity = "Common"},
+    {Name = "Bomber Bee", Rarity = "Rare"},
+    {Name = "Brave Bee", Rarity = "Rare"},
+    {Name = "Bumble Bee", Rarity = "Rare"},
+    {Name = "Cool Bee", Rarity = "Rare"},
+    {Name = "Hasty Bee", Rarity = "Rare"},
+    {Name = "Looker Bee", Rarity = "Rare"},
+    {Name = "Rad Bee", Rarity = "Rare"},
+    {Name = "Rascal Bee", Rarity = "Rare"},
+    {Name = "Bubble Bee", Rarity = "Epic"},
+    {Name = "Bucko Bee", Rarity = "Epic"},
+    {Name = "Commander Bee", Rarity = "Epic"},
+    {Name = "Demo Bee", Rarity = "Epic"},
+    {Name = "Exhausted Bee", Rarity = "Epic"},
+    {Name = "Fire Bee", Rarity = "Epic"},
+    {Name = "Frosty Bee", Rarity = "Epic"},
+    {Name = "Honey Bee", Rarity = "Epic"},
+    {Name = "Rage Bee", Rarity = "Epic"},
+    {Name = "Riley Bee", Rarity = "Epic"},
+    {Name = "Shocked Bee", Rarity = "Epic"},
+    {Name = "Baby Bee", Rarity = "Legendary"},
+    {Name = "Carpenter Bee", Rarity = "Legendary"},
+    {Name = "Demon Bee", Rarity = "Legendary"},
+    {Name = "Diamond Bee", Rarity = "Legendary"},
+    {Name = "Lion Bee", Rarity = "Legendary"},
+    {Name = "Music Bee", Rarity = "Legendary"},
+    {Name = "Ninja Bee", Rarity = "Legendary"},
+    {Name = "Shy Bee", Rarity = "Legendary"},
+    {Name = "Buoyant Bee", Rarity = "Mythic"},
+    {Name = "Fuzzy Bee", Rarity = "Mythic"},
+    {Name = "Precise Bee", Rarity = "Mythic"},
+    {Name = "Spicy Bee", Rarity = "Mythic"},
+    {Name = "Tadpole Bee", Rarity = "Mythic"},
+    {Name = "Vector Bee", Rarity = "Mythic"},
+    {Name = "Bear Bee", Rarity = "Event"},
+    {Name = "Cobalt Bee", Rarity = "Event"},
+    {Name = "Crimson Bee", Rarity = "Event"},
+    {Name = "Digital Bee", Rarity = "Event"},
+    {Name = "Festive Bee", Rarity = "Event"},
+    {Name = "Gummy Bee", Rarity = "Event"},
+    {Name = "Photon Bee", Rarity = "Event"},
+    {Name = "Puppy Bee", Rarity = "Event"},
+    {Name = "Tabby Bee", Rarity = "Event"},
+    {Name = "Vicious Bee", Rarity = "Event"},
+    {Name = "Windy Bee", Rarity = "Event"}
+}
+
+local RARITY_COLORS = {
+    Common = Color3.fromRGB(190, 195, 205),
+    Rare = Color3.fromRGB(120, 175, 255),
+    Epic = Color3.fromRGB(255, 195, 75),
+    Legendary = Color3.fromRGB(80, 220, 245),
+    Mythic = Color3.fromRGB(205, 115, 255),
+    Event = Color3.fromRGB(90, 235, 140)
+}
+
+local function makeBeeItem(parent, beeName, rarity)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -2, 0, 18)
+    row.BackgroundColor3 = Color3.fromRGB(10, 11, 15)
+    row.BorderSizePixel = 0
+    row.Parent = parent
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 3)
+
+    local nameLbl = Instance.new("TextLabel")
+    nameLbl.Size = UDim2.new(0.68, 0, 1, 0)
+    nameLbl.Position = UDim2.new(0, 6, 0, 0)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.Text = beeName
+    nameLbl.TextColor3 = Color3.fromRGB(230, 235, 245)
+    nameLbl.Font = Enum.Font.Gotham
+    nameLbl.TextSize = 10
+    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+    nameLbl.Parent = row
+
+    local rarLbl = Instance.new("TextLabel")
+    rarLbl.Size = UDim2.new(0.32, -6, 1, 0)
+    rarLbl.Position = UDim2.new(0.68, 0, 0, 0)
+    rarLbl.BackgroundTransparency = 1
+    rarLbl.Text = rarity
+    rarLbl.TextColor3 = RARITY_COLORS[rarity] or Color3.fromRGB(160, 165, 175)
+    rarLbl.Font = Enum.Font.GothamBold
+    rarLbl.TextSize = 9
+    rarLbl.TextXAlignment = Enum.TextXAlignment.Right
+    rarLbl.Parent = row
+end
+
+local function getGiftedDiscoveredMap()
+    local discovered = {}
+    local data = getStatData()
+    if data then
+        local fields = {"TypesDiscovered", "GiftedTypes", "GiftedTypesDiscovered", "BeesDiscovered", "DiscoveredTypes", "Types"}
+        for _, f in ipairs(fields) do
+            if type(data[f]) == "table" then
+                for k, v in pairs(data[f]) do
+                    local beeKey = tostring(k)
+                    if type(v) == "table" and (v.Gifted or v.gifted) then
+                        discovered[string.lower(beeKey)] = true
+                    elseif v == true then
+                        discovered[string.lower(beeKey)] = true
+                    elseif string.find(string.lower(beeKey), "gifted") then
+                        local clean = string.gsub(string.lower(beeKey), "gifted%s*", "")
+                        discovered[clean] = true
+                    end
+                end
+            end
+        end
+
+        local bees = getAllBees(data)
+        if type(bees) == "table" then
+            for _, b in pairs(bees) do
+                local beeObj = extractBee(b) or b
+                if type(beeObj) == "table" and (beeObj.Gifted or beeObj.gifted) and beeObj.Type then
+                    discovered[string.lower(tostring(beeObj.Type))] = true
+                end
+            end
+        end
+    end
+    return discovered
+end
+
+local function isBeeGifted(beeName, discMap)
+    local lowerName = string.lower(beeName)
+    local shortName = string.gsub(lowerName, "%s*bee$", "")
+    for dName, _ in pairs(discMap) do
+        if dName == lowerName or dName == shortName or string.find(dName, shortName) then
+            return true
+        end
+    end
+    return false
+end
+
+local function refreshGiftedTracker()
+    for _, child in ipairs(giftedScroll:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    for _, child in ipairs(missingScroll:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+
+    local discMap = getGiftedDiscoveredMap()
+    local giftedCount, missingCount = 0, 0
+
+    for _, bee in ipairs(ALL_BEES) do
+        if isBeeGifted(bee.Name, discMap) then
+            giftedCount = giftedCount + 1
+            makeBeeItem(giftedScroll, bee.Name, bee.Rarity)
+        else
+            missingCount = missingCount + 1
+            makeBeeItem(missingScroll, bee.Name, bee.Rarity)
+        end
+    end
+
+    hiveBadge.Text = "SSA: " .. giftedCount .. " / 40"
+    giftedColLabel.Text = "✔ Gifted (" .. giftedCount .. ")"
+    missingColLabel.Text = "✖ Not Gifted (" .. missingCount .. ")"
+end
+
+local function setTab(tabName)
+    autoFeedPage.Visible = (tabName == "AutoFeed")
+    hivePage.Visible = (tabName == "Hive")
+    settingsPage.Visible = (tabName == "Settings")
+
+    tabBtnAutoFeed.BackgroundColor3 = (tabName == "AutoFeed") and Color3.fromRGB(24, 40, 72) or Color3.fromRGB(8, 9, 12)
+    tabTxt1.TextColor3 = (tabName == "AutoFeed") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 155, 165)
+    tabIcon1.ImageColor3 = (tabName == "AutoFeed") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 155, 165)
+
+    tabBtnHive.BackgroundColor3 = (tabName == "Hive") and Color3.fromRGB(24, 40, 72) or Color3.fromRGB(8, 9, 12)
+    tabTxtH.TextColor3 = (tabName == "Hive") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 155, 165)
+    tabIconH.ImageColor3 = (tabName == "Hive") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 155, 165)
+
+    tabBtnSettings.BackgroundColor3 = (tabName == "Settings") and Color3.fromRGB(24, 40, 72) or Color3.fromRGB(8, 9, 12)
+    tabTxt2.TextColor3 = (tabName == "Settings") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 155, 165)
+    tabIcon2.ImageColor3 = (tabName == "Settings") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 155, 165)
+
+    if tabName == "Hive" then
+        refreshGiftedTracker()
+    end
+end
+
+tabBtnAutoFeed.MouseButton1Click:Connect(function() setTab("AutoFeed") end)
+tabBtnHive.MouseButton1Click:Connect(function() setTab("Hive") end)
+tabBtnSettings.MouseButton1Click:Connect(function() setTab("Settings") end)
 
 local isMinimized = false
 minBtn.MouseButton1Click:Connect(function()
@@ -1241,6 +1544,7 @@ local function refreshBeeList()
         totalTreatsLabel.Text = formatNum(totalTreats)
         totalHoneyLabel.Text = formatNum(totalTreats * TREAT_COST)
         progressFill.Size = UDim2.new(math.min(1, math.max(0, overall / 100)), 0, 1, 0)
+        pcall(refreshGiftedTracker)
     end)
     calcBtn.Text = "Recalculate"
     isRefreshing = false
@@ -1384,3 +1688,4 @@ UIS.InputChanged:Connect(function(input)
 end)
 
 refreshBeeList()
+pcall(refreshGiftedTracker)
