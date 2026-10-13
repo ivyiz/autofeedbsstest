@@ -1476,16 +1476,10 @@ end
 local function buildBeeIdMap(data)
     local idMap = {}
 
-    local function inspectTable(tbl, depth)
-        if type(tbl) ~= "table" or depth > 4 then return end
+    local function scanTbl(tbl, depth)
+        if type(tbl) ~= "table" or depth > 3 then return end
         for k, v in pairs(tbl) do
-            if type(k) == "number" and type(v) == "string" then
-                local bName = extractBeeName(v)
-                if bName and k > 0 and k <= 100 then idMap[k] = bName end
-            elseif type(k) == "string" and type(v) == "number" then
-                local bName = extractBeeName(k)
-                if bName and v > 0 and v <= 100 then idMap[v] = bName end
-            elseif type(v) == "table" then
+            if type(v) == "table" then
                 local numId = nil
                 local beeName = nil
 
@@ -1499,7 +1493,7 @@ local function buildBeeIdMap(data)
                     numId = k
                 end
 
-                for _, nameKey in ipairs({"Name", "name", "Species", "species", "Bee", "bee", "BeeName", "Type", "type"}) do
+                for _, nameKey in ipairs({"Name", "name", "Species", "species", "Bee", "bee", "BeeName"}) do
                     if type(v[nameKey]) == "string" then
                         local bn = extractBeeName(v[nameKey])
                         if bn then
@@ -1507,6 +1501,9 @@ local function buildBeeIdMap(data)
                             break
                         end
                     end
+                end
+                if not beeName and type(v.Type) == "string" then
+                    beeName = extractBeeName(v.Type)
                 end
                 if not beeName and type(k) == "string" then
                     beeName = extractBeeName(k)
@@ -1516,36 +1513,56 @@ local function buildBeeIdMap(data)
                     idMap[numId] = beeName
                 end
 
-                inspectTable(v, depth + 1)
+                scanTbl(v, depth + 1)
+            elseif type(v) == "string" and type(k) == "number" and k > 0 and k <= 100 then
+                local bn = extractBeeName(v)
+                if bn then idMap[k] = bn end
+            elseif type(k) == "string" and type(v) == "number" and v > 0 and v <= 100 then
+                local bn = extractBeeName(k)
+                if bn then idMap[v] = bn end
             end
         end
     end
 
-    pcall(function()
-        for _, desc in ipairs(RS:GetDescendants()) do
-            if desc:IsA("ModuleScript") then
-                pcall(function()
-                    local res = require(desc)
-                    if type(res) == "table" then
-                        inspectTable(res, 1)
-                    end
-                end)
+    local function safeInspect(mod)
+        if not mod or not mod:IsA("ModuleScript") then return end
+        pcall(function()
+            local res = require(mod)
+            if type(res) == "table" then
+                scanTbl(res, 1)
+            end
+        end)
+    end
+
+    local moduleNames = {
+        "EggTypes", "BeeTypes", "Types", "Bees", "BeeData",
+        "Events", "EventTypes", "EventBees", "EventData",
+        "ToyTypes", "ItemTypes", "ItemData", "CollectorTypes",
+        "Accessories", "ShopData", "Shops"
+    }
+    for _, mName in ipairs(moduleNames) do
+        safeInspect(RS:FindFirstChild(mName))
+    end
+
+    for _, folderName in ipairs({"Modules", "Data", "Bees", "Events", "Types"}) do
+        local folder = RS:FindFirstChild(folderName)
+        if folder and folder:IsA("Folder") then
+            for _, child in ipairs(folder:GetChildren()) do
+                if child:IsA("ModuleScript") then
+                    safeInspect(child)
+                end
             end
         end
-    end)
+    end
 
     if data and type(data.DiscoveredBees) == "table" then
         for k, v in pairs(data.DiscoveredBees) do
-            if type(k) == "number" and type(v) == "string" then
+            if type(k) == "number" and type(v) == "string" and k > 0 and k <= 100 then
                 local bn = extractBeeName(v)
-                if bn and k > 0 and k <= 100 and not idMap[k] then
-                    idMap[k] = bn
-                end
-            elseif type(k) == "string" and type(v) == "number" then
+                if bn and not idMap[k] then idMap[k] = bn end
+            elseif type(k) == "string" and type(v) == "number" and v > 0 and v <= 100 then
                 local bn = extractBeeName(k)
-                if bn and v > 0 and v <= 100 and not idMap[v] then
-                    idMap[v] = bn
-                end
+                if bn and not idMap[v] then idMap[v] = bn end
             end
         end
     end
@@ -1634,7 +1651,12 @@ local function refreshGiftedTracker()
         if child:IsA("Frame") then child:Destroy() end
     end
 
-    local discMap = getGiftedDiscoveredMap()
+    local discMap = {}
+    local ok, res = pcall(getGiftedDiscoveredMap)
+    if ok and type(res) == "table" then
+        discMap = res
+    end
+
     local giftedCount, missingCount = 0, 0
 
     for _, bee in ipairs(ALL_BEES) do
