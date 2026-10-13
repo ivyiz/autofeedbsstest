@@ -796,20 +796,9 @@ sideBorder.BackgroundColor3 = Color3.fromRGB(18, 20, 25)
 sideBorder.BorderSizePixel = 0
 sideBorder.Parent = sidebar
 
-local navLabel = Instance.new("TextLabel")
-navLabel.Size = UDim2.new(1, -16, 0, 20)
-navLabel.Position = UDim2.new(0, 10, 0, 8)
-navLabel.BackgroundTransparency = 1
-navLabel.Text = "NAVIGATION"
-navLabel.TextColor3 = Color3.fromRGB(75, 82, 98)
-navLabel.Font = Enum.Font.GothamBold
-navLabel.TextSize = 9
-navLabel.TextXAlignment = Enum.TextXAlignment.Left
-navLabel.Parent = sidebar
-
 local tabBtnAutoFeed = Instance.new("TextButton")
 tabBtnAutoFeed.Size = UDim2.new(0, 94, 0, 28)
-tabBtnAutoFeed.Position = UDim2.new(0, 8, 0, 32)
+tabBtnAutoFeed.Position = UDim2.new(0, 8, 0, 10)
 tabBtnAutoFeed.BackgroundColor3 = Color3.fromRGB(24, 40, 72)
 tabBtnAutoFeed.Text = ""
 tabBtnAutoFeed.BorderSizePixel = 0
@@ -837,7 +826,7 @@ tabTxt1.Parent = tabBtnAutoFeed
 
 local tabBtnSettings = Instance.new("TextButton")
 tabBtnSettings.Size = UDim2.new(0, 94, 0, 28)
-tabBtnSettings.Position = UDim2.new(0, 8, 0, 66)
+tabBtnSettings.Position = UDim2.new(0, 8, 0, 44)
 tabBtnSettings.BackgroundColor3 = Color3.fromRGB(8, 9, 12)
 tabBtnSettings.Text = ""
 tabBtnSettings.BorderSizePixel = 0
