@@ -1180,18 +1180,30 @@ hiveHeader.BackgroundTransparency = 1
 hiveHeader.Parent = hivePage
 
 local hiveTitle = Instance.new("TextLabel")
-hiveTitle.Size = UDim2.new(0, 150, 1, 0)
+hiveTitle.Size = UDim2.new(0, 120, 1, 0)
 hiveTitle.BackgroundTransparency = 1
 hiveTitle.Text = "Hive Gifted Tracker"
 hiveTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 hiveTitle.Font = Enum.Font.GothamBold
-hiveTitle.TextSize = 13
+hiveTitle.TextSize = 12
 hiveTitle.TextXAlignment = Enum.TextXAlignment.Left
 hiveTitle.Parent = hiveHeader
 
+local debugBtn = Instance.new("TextButton")
+debugBtn.Size = UDim2.new(0, 52, 0, 20)
+debugBtn.Position = UDim2.new(1, -156, 0, 2)
+debugBtn.BackgroundColor3 = Color3.fromRGB(24, 28, 38)
+debugBtn.Text = "Debug"
+debugBtn.TextColor3 = Color3.fromRGB(150, 180, 230)
+debugBtn.Font = Enum.Font.GothamBold
+debugBtn.TextSize = 10
+debugBtn.BorderSizePixel = 0
+debugBtn.Parent = hiveHeader
+Instance.new("UICorner", debugBtn).CornerRadius = UDim.new(0, 4)
+
 local hiveBadge = Instance.new("TextLabel")
-hiveBadge.Size = UDim2.new(0, 100, 0, 20)
-hiveBadge.Position = UDim2.new(1, -100, 0, 2)
+hiveBadge.Size = UDim2.new(0, 96, 0, 20)
+hiveBadge.Position = UDim2.new(1, -98, 0, 2)
 hiveBadge.BackgroundColor3 = Color3.fromRGB(18, 32, 58)
 hiveBadge.Text = "SSA: 0 / 40"
 hiveBadge.TextColor3 = Color3.fromRGB(100, 180, 255)
@@ -1367,18 +1379,64 @@ local function makeBeeItem(parent, beeName, rarity)
     rarLbl.Parent = row
 end
 
-local function normalizeBeeName(str)
+local function extractBeeName(str)
     if not str or type(str) ~= "string" then return nil end
-    local s = str:lower()
-    s = s:gsub("gifted%s*", ""):gsub("%s*bee$", ""):gsub("[^%w]", "")
-    if s == "" then return nil end
+    local lower = str:lower()
+    local clean = lower:gsub("[^%a%s]", " "):gsub("%s+", " "):match("^%s*(.-)%s*$")
+    if not clean or #clean < 3 then return nil end
+
     for _, bee in ipairs(ALL_BEES) do
-        local b = bee.Name:lower():gsub("%s*bee$", ""):gsub("[^%w]", "")
-        if s == b or s:find(b, 1, true) or b:find(s, 1, true) then
+        local bLower = bee.Name:lower()
+        local bShort = bLower:gsub("%s*bee$", "")
+
+        if clean == bLower or clean == bShort then
+            return bee.Name
+        end
+        if clean:find("%f[%a]" .. bLower .. "%f[%A]") or clean:find("%f[%a]" .. bShort .. "%f[%A]") then
             return bee.Name
         end
     end
     return nil
+end
+
+local function isEntryGifted(v, kStr, parentName)
+    local pLower = tostring(parentName or ""):lower()
+    local kLower = tostring(kStr or ""):lower()
+
+    if pLower:find("gift") or pLower:find("star") then
+        return true
+    end
+    if kLower:find("gift") or kLower:find("star") then
+        return true
+    end
+    if v == true then
+        return kLower:find("gift") ~= nil or pLower:find("gift") ~= nil
+    end
+    if type(v) == "number" and v >= 2 then
+        return true
+    end
+    if type(v) == "string" then
+        local vl = v:lower()
+        if vl:find("gift") or vl:find("star") then return true end
+    end
+    if type(v) == "table" then
+        if v.Gifted == true or v.gifted == true or v.Star == true or v.star == true or v.IsGifted == true then
+            return true
+        end
+        for sk, sv in pairs(v) do
+            local skl = tostring(sk):lower()
+            if skl:find("gift") or skl:find("star") then
+                if sv == true or (type(sv) == "number" and sv > 0) then return true end
+            end
+            if type(sv) == "string" and (sv:lower():find("gift") or sv:lower():find("star")) then
+                return true
+            end
+            if type(sv) == "number" and sv >= 2 then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 local function getGiftedDiscoveredMap()
@@ -1386,50 +1444,34 @@ local function getGiftedDiscoveredMap()
     local data = getStatData()
 
     if data and type(data) == "table" then
-        for tableName, tableVal in pairs(data) do
-            if type(tableVal) == "table" then
-                local tNameLower = tostring(tableName):lower()
-                local isGiftedTable = tNameLower:find("gift") or tNameLower:find("star")
-                local isTypeTable = tNameLower:find("type") or tNameLower:find("discover") or tNameLower:find("bee") or tNameLower:find("egg") or tNameLower:find("codex") or tNameLower:find("index")
+        local function scanBranch(tbl, depth, pName)
+            if type(tbl) ~= "table" or depth > 3 then return end
+            for k, v in pairs(tbl) do
+                local kStr = tostring(k)
+                local beeKey = extractBeeName(kStr)
+                local beeVal = (type(v) == "string") and extractBeeName(v) or nil
 
-                for k, v in pairs(tableVal) do
-                    local kStr = tostring(k)
-                    local vStr = (type(v) == "string") and v or ""
+                if beeKey and isEntryGifted(v, kStr, pName) then
+                    discovered[beeKey] = true
+                end
+                if beeVal and (isEntryGifted(v, kStr, pName) or pName:lower():find("gift") or tostring(v):lower():find("gift")) then
+                    discovered[beeVal] = true
+                end
 
-                    local beeKey = normalizeBeeName(kStr)
-                    local beeVal = normalizeBeeName(vStr)
-
-                    if isGiftedTable then
-                        if beeKey then discovered[beeKey] = true end
-                        if beeVal then discovered[beeVal] = true end
-                    else
-                        if beeKey then
-                            if kStr:lower():find("gift") or kStr:lower():find("star") then
-                                discovered[beeKey] = true
-                            elseif type(v) == "table" and (v.Gifted or v.gifted or v.Star or v.star or v[2] == true) then
-                                discovered[beeKey] = true
-                            elseif type(v) == "number" and v >= 2 then
-                                discovered[beeKey] = true
-                            elseif type(v) == "string" and (v:lower():find("gift") or v:lower():find("star")) then
-                                discovered[beeKey] = true
-                            elseif isTypeTable and v == true and (kStr:lower():find("gift") or kStr:lower():find("star")) then
-                                discovered[beeKey] = true
-                            end
-                        end
-                        if beeVal and (vStr:lower():find("gift") or vStr:lower():find("star")) then
-                            discovered[beeVal] = true
-                        end
-                    end
+                if type(v) == "table" then
+                    scanBranch(v, depth + 1, kStr)
                 end
             end
         end
+
+        scanBranch(data, 1, "root")
 
         local bees = getAllBees(data)
         if type(bees) == "table" then
             for _, b in pairs(bees) do
                 local beeObj = extractBee(b) or b
                 if type(beeObj) == "table" and (beeObj.Gifted or beeObj.gifted) and beeObj.Type then
-                    local matched = normalizeBeeName(tostring(beeObj.Type))
+                    local matched = extractBeeName(tostring(beeObj.Type))
                     if matched then discovered[matched] = true end
                 end
             end
@@ -1443,7 +1485,7 @@ local function getGiftedDiscoveredMap()
             if gui:IsA("ScreenGui") and gui.Name ~= "AutoTreat_ivyis" then
                 for _, obj in ipairs(gui:GetDescendants()) do
                     local txt = (obj:IsA("TextLabel") or obj:IsA("TextButton")) and obj.Text or obj.Name
-                    local matched = normalizeBeeName(txt)
+                    local matched = extractBeeName(txt)
                     if matched then
                         local p = obj:IsA("GuiObject") and obj.Parent or nil
                         if p then
@@ -1491,6 +1533,49 @@ local function refreshGiftedTracker()
     giftedColLabel.Text = "✔ Gifted (" .. giftedCount .. ")"
     missingColLabel.Text = "✖ Not Gifted (" .. missingCount .. ")"
 end
+
+debugBtn.MouseButton1Click:Connect(function()
+    local data = getStatData()
+    local report = {}
+    table.insert(report, "=== BSS CLIENT STATS DEBUG ===")
+    if data and type(data) == "table" then
+        for k, v in pairs(data) do
+            if type(v) == "table" then
+                local count = 0
+                local samples = {}
+                for sk, sv in pairs(v) do
+                    count = count + 1
+                    if count <= 4 then
+                        local svStr = (type(sv) == "table") and "{...}" or tostring(sv)
+                        table.insert(samples, tostring(sk) .. "=" .. svStr)
+                    end
+                end
+                table.insert(report, string.format("[Table] '%s' (%d items): %s", tostring(k), count, table.concat(samples, ", ")))
+            else
+                table.insert(report, string.format("[Val] '%s' = %s", tostring(k), tostring(v)))
+            end
+        end
+    else
+        table.insert(report, "data is NIL or not table")
+    end
+
+    local disc = getGiftedDiscoveredMap()
+    local discList = {}
+    for bName, _ in pairs(disc) do table.insert(discList, bName) end
+    table.insert(report, string.format("Discovered Gifted (%d): %s", #discList, table.concat(discList, ", ")))
+
+    local fullText = table.concat(report, "\n")
+    print(fullText)
+    pcall(function()
+        if setclipboard then
+            setclipboard(fullText)
+        end
+    end)
+    debugBtn.Text = "Copied!"
+    delay(2, function()
+        debugBtn.Text = "Debug"
+    end)
+end)
 
 local function setTab(tabName)
     autoFeedPage.Visible = (tabName == "AutoFeed")
