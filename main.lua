@@ -32,13 +32,10 @@ local Events = RS:WaitForChild("Events", 10)
 local ItemPackageEvent = Events and Events:WaitForChild("ItemPackageEvent", 10)
 local ConstructHiveCellFromEgg = Events and Events:WaitForChild("ConstructHiveCellFromEgg", 10)
 
-local TREAT_SHOP_POS = CFrame.new(-220.1, 5.8, 84.5)
-local WALK_SPEED = 60
 local TREAT_BOND = 10
 local TREAT_COST = 10000
 local autoRunning = false
 local targetLevel = 15
-local isTweening = false
 
 local bondTable = {
     [1]=1000,[2]=5000,[3]=25000,[4]=100000,[5]=400000,
@@ -50,6 +47,7 @@ local bondTable = {
 }
 
 local function formatNum(n)
+    if not n or n ~= n then return "0" end
     if n >= 1e12 then return string.format("%.2fT", n/1e12)
     elseif n >= 1e9 then return string.format("%.2fB", n/1e9)
     elseif n >= 1e6 then return string.format("%.2fM", n/1e6)
@@ -58,10 +56,31 @@ local function formatNum(n)
 end
 
 local function getStatData()
-    local cache = RS:FindFirstChild("ClientStatCache") or RS:WaitForChild("ClientStatCache", 5)
-    if not cache then return nil end
-    local ok, data = pcall(function() return require(cache):Get() end)
-    return (ok and type(data) == "table") and data or nil
+    local data = nil
+    pcall(function()
+        local cache = RS:FindFirstChild("ClientStatCache") or RS:WaitForChild("ClientStatCache", 3)
+        if cache then
+            local mod = require(cache)
+            if type(mod) == "table" and type(mod.Get) == "function" then
+                data = mod:Get()
+            end
+        end
+    end)
+    if type(data) == "table" and data.Bees then return data end
+
+    pcall(function()
+        if Events and Events:FindFirstChild("RetrievePlayerStats") then
+            data = Events.RetrievePlayerStats:InvokeServer()
+        end
+    end)
+    if type(data) == "table" and data.Bees then return data end
+
+    pcall(function()
+        if Events and Events:FindFirstChild("RetrievePlayerStatsSummary") then
+            data = Events.RetrievePlayerStatsSummary:InvokeServer()
+        end
+    end)
+    return (type(data) == "table") and data or nil
 end
 
 local function getHoney(data)
@@ -71,7 +90,11 @@ local function getHoney(data)
 end
 
 local function getTreats(data)
-    return (data and data.Inventory and data.Inventory.Treat) or 0
+    if data and data.Inventory and data.Inventory.Treat then
+        return data.Inventory.Treat
+    end
+    if data and data.Treats then return data.Treats end
+    return 0
 end
 
 local function getBondProgress(lvl, bond, tgt)
@@ -112,36 +135,14 @@ local function feedBee(slot, amount)
     end)
 end
 
-local function tweenTo(targetCF, statusLabel)
-    local char = player.Character
-    if not char then return false end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not root then return false end
-    local dist = (root.Position - targetCF.Position).Magnitude
-    if dist < 5 then return true end
-    local duration = dist / WALK_SPEED
-    isTweening = true
-    local tween = TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCF})
-    local humanoid = char:FindFirstChildWhichIsA("Humanoid")
-    if humanoid then humanoid.WalkSpeed = 0 end
-    local done = false
-    tween:Play()
-    tween.Completed:Connect(function() done = true end)
-    while not done and isTweening and autoRunning do wait(0.1) end
-    if not done then tween:Cancel() end
-    if humanoid then humanoid.WalkSpeed = 16 end
-    isTweening = false
-    return done
-end
-
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "BSS_Final"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = guiParent
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 380, 0, 490)
-mainFrame.Position = UDim2.new(0.5, -190, 0.3, 0)
+mainFrame.Size = UDim2.new(0, 480, 0, 230)
+mainFrame.Position = UDim2.new(0.5, -240, 0.35, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
 mainFrame.BorderSizePixel = 0
 mainFrame.ClipsDescendants = true
@@ -149,7 +150,7 @@ mainFrame.Parent = screenGui
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
 local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 36)
+titleBar.Size = UDim2.new(1, 0, 0, 32)
 titleBar.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
 titleBar.BorderSizePixel = 0
 titleBar.Parent = mainFrame
@@ -157,7 +158,7 @@ Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 8)
 
 local titleLabel = Instance.new("TextLabel")
 titleLabel.Size = UDim2.new(1, -40, 1, 0)
-titleLabel.Position = UDim2.new(0, 12, 0, 0)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
 titleLabel.BackgroundTransparency = 1
 titleLabel.Text = "BSS Auto Treat"
 titleLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
@@ -167,8 +168,8 @@ titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 titleLabel.Parent = titleBar
 
 local minBtn = Instance.new("TextButton")
-minBtn.Size = UDim2.new(0, 26, 0, 24)
-minBtn.Position = UDim2.new(1, -32, 0, 6)
+minBtn.Size = UDim2.new(0, 24, 0, 22)
+minBtn.Position = UDim2.new(1, -30, 0, 5)
 minBtn.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 minBtn.Text = "—"
 minBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -178,128 +179,137 @@ minBtn.BorderSizePixel = 0
 minBtn.Parent = titleBar
 Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 4)
 
-local function makeLabel(text, yPos)
-    local l = Instance.new("TextLabel")
-    l.Size = UDim2.new(1, -24, 0, 22)
-    l.Position = UDim2.new(0, 12, 0, yPos)
-    l.BackgroundTransparency = 1
-    l.Text = text
-    l.TextColor3 = Color3.fromRGB(190, 190, 190)
-    l.Font = Enum.Font.Gotham
-    l.TextSize = 12
-    l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Parent = mainFrame
-    return l
-end
+local bodyFrame = Instance.new("Frame")
+bodyFrame.Size = UDim2.new(1, -16, 1, -40)
+bodyFrame.Position = UDim2.new(0, 8, 0, 36)
+bodyFrame.BackgroundTransparency = 1
+bodyFrame.Parent = mainFrame
 
-local beeCountLabel = makeLabel("Bees: 0", 44)
-local honeyLabel = makeLabel("Honey: 0", 66)
-local treatsLabel = makeLabel("Treats: 0", 88)
-local overallLabel = makeLabel("Overall: 0%", 110)
+local leftCol = Instance.new("Frame")
+leftCol.Size = UDim2.new(0, 224, 1, 0)
+leftCol.Position = UDim2.new(0, 0, 0, 0)
+leftCol.BackgroundTransparency = 1
+leftCol.Parent = bodyFrame
 
-local targetFrame = Instance.new("Frame")
-targetFrame.Size = UDim2.new(1, -24, 0, 28)
-targetFrame.Position = UDim2.new(0, 12, 0, 140)
-targetFrame.BackgroundTransparency = 1
-targetFrame.Parent = mainFrame
+local targetRow = Instance.new("Frame")
+targetRow.Size = UDim2.new(1, 0, 0, 24)
+targetRow.Position = UDim2.new(0, 0, 0, 0)
+targetRow.BackgroundTransparency = 1
+targetRow.Parent = leftCol
 
 local tgtTxt = Instance.new("TextLabel")
 tgtTxt.Size = UDim2.new(0, 90, 1, 0)
 tgtTxt.BackgroundTransparency = 1
 tgtTxt.Text = "Target Level:"
-tgtTxt.TextColor3 = Color3.fromRGB(190, 190, 190)
+tgtTxt.TextColor3 = Color3.fromRGB(180, 180, 180)
 tgtTxt.Font = Enum.Font.Gotham
 tgtTxt.TextSize = 12
 tgtTxt.TextXAlignment = Enum.TextXAlignment.Left
-tgtTxt.Parent = targetFrame
+tgtTxt.Parent = targetRow
 
 local targetBox = Instance.new("TextBox")
-targetBox.Size = UDim2.new(0, 50, 1, 0)
+targetBox.Size = UDim2.new(0, 60, 1, 0)
 targetBox.Position = UDim2.new(0, 95, 0, 0)
 targetBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
 targetBox.Text = tostring(targetLevel)
 targetBox.TextColor3 = Color3.fromRGB(240, 240, 240)
 targetBox.Font = Enum.Font.GothamBold
-targetBox.TextSize = 13
+targetBox.TextSize = 12
 targetBox.BorderSizePixel = 0
 targetBox.ClearTextOnFocus = false
-targetBox.Parent = targetFrame
+targetBox.Parent = targetRow
 Instance.new("UICorner", targetBox).CornerRadius = UDim.new(0, 4)
 
-local spdTxt = Instance.new("TextLabel")
-spdTxt.Size = UDim2.new(0, 60, 1, 0)
-spdTxt.Position = UDim2.new(0, 158, 0, 0)
-spdTxt.BackgroundTransparency = 1
-spdTxt.Text = "Speed:"
-spdTxt.TextColor3 = Color3.fromRGB(190, 190, 190)
-spdTxt.Font = Enum.Font.Gotham
-spdTxt.TextSize = 12
-spdTxt.TextXAlignment = Enum.TextXAlignment.Left
-spdTxt.Parent = targetFrame
+local function makeInfoLabel(yPos)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, 0, 0, 18)
+    l.Position = UDim2.new(0, 0, 0, yPos)
+    l.BackgroundTransparency = 1
+    l.TextColor3 = Color3.fromRGB(180, 180, 180)
+    l.Font = Enum.Font.Gotham
+    l.TextSize = 11
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = leftCol
+    return l
+end
 
-local speedBox = Instance.new("TextBox")
-speedBox.Size = UDim2.new(0, 50, 1, 0)
-speedBox.Position = UDim2.new(0, 215, 0, 0)
-speedBox.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
-speedBox.Text = tostring(WALK_SPEED)
-speedBox.TextColor3 = Color3.fromRGB(240, 240, 240)
-speedBox.Font = Enum.Font.GothamBold
-speedBox.TextSize = 13
-speedBox.BorderSizePixel = 0
-speedBox.ClearTextOnFocus = false
-speedBox.Parent = targetFrame
-Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 4)
+local beeCountLabel = makeInfoLabel(28)
+beeCountLabel.Text = "Bees: 0"
+local honeyLabel = makeInfoLabel(48)
+honeyLabel.Text = "Honey: 0"
+local treatsLabel = makeInfoLabel(68)
+treatsLabel.Text = "Treats: 0"
+local totalTreatsLabel = makeInfoLabel(88)
+totalTreatsLabel.Text = "Treats Needed: 0"
+local totalHoneyLabel = makeInfoLabel(108)
+totalHoneyLabel.Text = "Honey Needed: 0"
+local overallLabel = makeInfoLabel(128)
+overallLabel.Text = "Overall: 0%"
 
-local totalTreatsLabel = makeLabel("Treats Needed: 0", 176)
-local totalHoneyLabel = makeLabel("Honey Needed: 0", 198)
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, 0, 0, 16)
+statusLabel.Position = UDim2.new(0, 0, 0, 148)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: Idle"
+statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 11
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = leftCol
+
+local btnRow = Instance.new("Frame")
+btnRow.Size = UDim2.new(1, 0, 0, 24)
+btnRow.Position = UDim2.new(0, 0, 0, 166)
+btnRow.BackgroundTransparency = 1
+btnRow.Parent = leftCol
+
+local calcBtn = Instance.new("TextButton")
+calcBtn.Size = UDim2.new(0.48, 0, 1, 0)
+calcBtn.Position = UDim2.new(0, 0, 0, 0)
+calcBtn.BackgroundColor3 = Color3.fromRGB(26, 26, 26)
+calcBtn.Text = "Recalculate"
+calcBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+calcBtn.Font = Enum.Font.GothamBold
+calcBtn.TextSize = 11
+calcBtn.BorderSizePixel = 0
+calcBtn.Parent = btnRow
+Instance.new("UICorner", calcBtn).CornerRadius = UDim.new(0, 4)
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0.48, 0, 1, 0)
+toggleBtn.Position = UDim2.new(0.52, 0, 0, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
+toggleBtn.Text = "Auto: OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 11
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Parent = btnRow
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 4)
 
 local scrollFrame = Instance.new("ScrollingFrame")
-scrollFrame.Size = UDim2.new(1, -24, 0, 150)
-scrollFrame.Position = UDim2.new(0, 12, 0, 226)
+scrollFrame.Size = UDim2.new(0, 232, 1, 0)
+scrollFrame.Position = UDim2.new(1, -232, 0, 0)
 scrollFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 16)
 scrollFrame.BorderSizePixel = 0
 scrollFrame.ScrollBarThickness = 3
 scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 60)
 scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-scrollFrame.Parent = mainFrame
+scrollFrame.Parent = bodyFrame
 Instance.new("UICorner", scrollFrame).CornerRadius = UDim.new(0, 6)
 Instance.new("UIListLayout", scrollFrame).Padding = UDim.new(0, 2)
-
-local statusLabel = makeLabel("Status: Idle", 384)
-statusLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
-
-local function makeBtn(text, yPos, color)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, -24, 0, 34)
-    btn.Position = UDim2.new(0, 12, 0, yPos)
-    btn.BackgroundColor3 = color
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(230, 230, 230)
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 13
-    btn.BorderSizePixel = 0
-    btn.Parent = mainFrame
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
-    return btn
-end
-
-local calcBtn = makeBtn("Recalculate", 410, Color3.fromRGB(26, 26, 26))
-local toggleBtn = makeBtn("Auto: OFF", 450, Color3.fromRGB(42, 20, 20))
 
 local isMinimized = false
 minBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
     if isMinimized then
-        mainFrame.Size = UDim2.new(0, 380, 0, 36)
+        mainFrame.Size = UDim2.new(0, 480, 0, 32)
         minBtn.Text = "+"
+        bodyFrame.Visible = false
     else
-        mainFrame.Size = UDim2.new(0, 380, 0, 490)
+        mainFrame.Size = UDim2.new(0, 480, 0, 230)
         minBtn.Text = "—"
-    end
-    for _, obj in pairs(mainFrame:GetChildren()) do
-        if obj ~= titleBar and not obj:IsA("UICorner") then
-            obj.Visible = not isMinimized
-        end
+        bodyFrame.Visible = true
     end
 end)
 
@@ -309,11 +319,12 @@ local function refreshBeeList()
     end
     local val = tonumber(targetBox.Text)
     if val and val > 0 then targetLevel = math.floor(val) end
-    local spd = tonumber(speedBox.Text)
-    if spd and spd > 0 then WALK_SPEED = spd end
 
     local data = getStatData()
-    if not data or not data.Bees then return end
+    if not data or not data.Bees then
+        beeCountLabel.Text = "Bees: Not found"
+        return
+    end
 
     local beeCount, totalTreats = 0, 0
     local totalBondDone, totalBondReq = 0, 0
@@ -344,20 +355,20 @@ local function refreshBeeList()
     for i, info in ipairs(beeList) do
         local done = info.pct >= 100
         local row = Instance.new("TextLabel")
-        row.Size = UDim2.new(1, -8, 0, 18)
+        row.Size = UDim2.new(1, -6, 0, 16)
         row.BackgroundTransparency = 1
-        row.Text = string.format(" %s Lv%d(%.0f%%) -> Lv%d [%.1f%%] %s",
-            info.name, info.lvl, info.lvlPct, targetLevel,
-            info.pct, done and "[DONE]" or (formatNum(info.treats) .. " Treats"))
+        row.Text = string.format(" %s Lv%d(%.0f%%) [%.0f%%] %s",
+            info.name, info.lvl, info.lvlPct,
+            info.pct, done and "[DONE]" or formatNum(info.treats))
         row.TextColor3 = done and Color3.fromRGB(120, 200, 120) or Color3.fromRGB(180, 180, 180)
         row.Font = Enum.Font.Gotham
-        row.TextSize = 11
+        row.TextSize = 10
         row.TextXAlignment = Enum.TextXAlignment.Left
         row.LayoutOrder = i
         row.Parent = scrollFrame
     end
 
-    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, #beeList * 20)
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, #beeList * 18)
     local overall = totalBondReq > 0 and math.floor((totalBondDone/totalBondReq)*10000)/100 or 100
     beeCountLabel.Text = "Bees: " .. beeCount
     honeyLabel.Text = "Honey: " .. formatNum(getHoney(data))
@@ -369,10 +380,6 @@ end
 
 calcBtn.MouseButton1Click:Connect(refreshBeeList)
 targetBox.FocusLost:Connect(refreshBeeList)
-speedBox.FocusLost:Connect(function()
-    local spd = tonumber(speedBox.Text)
-    if spd and spd > 0 then WALK_SPEED = spd end
-end)
 
 toggleBtn.MouseButton1Click:Connect(function()
     autoRunning = not autoRunning
@@ -382,7 +389,6 @@ toggleBtn.MouseButton1Click:Connect(function()
     else
         toggleBtn.Text = "Auto: OFF"
         toggleBtn.BackgroundColor3 = Color3.fromRGB(42, 20, 20)
-        isTweening = false
     end
 end)
 
@@ -405,45 +411,33 @@ spawn(function()
                     local maxCanBuy = math.floor(honey / TREAT_COST)
                     local toBuy = math.min(totalNeeded - owned, maxCanBuy)
                     if toBuy > 0 then
-                        local char = player.Character
-                        local root = char and char:FindFirstChild("HumanoidRootPart")
-                        local savedPos = root and root.CFrame
-                        statusLabel.Text = "Status: Moving to shop..."
-                        local arrived = tweenTo(TREAT_SHOP_POS, statusLabel)
-                        if arrived and autoRunning then
-                            statusLabel.Text = "Status: Buying treats..."
-                            wait(0.5)
-                            buyTreats(toBuy)
-                            wait(0.8)
-                            statusLabel.Text = "Status: Returning..."
-                            if savedPos then tweenTo(savedPos, statusLabel) end
-                        end
+                        statusLabel.Text = "Status: Buying treats..."
+                        buyTreats(toBuy)
+                        wait(0.5)
                     end
                 end
 
-                if autoRunning then
-                    data = getStatData() or data
-                    local availableTreats = getTreats(data)
-                    if availableTreats > 0 then
-                        statusLabel.Text = "Status: Feeding bees..."
-                        for slot, bee in pairs(data.Bees) do
-                            if not autoRunning or availableTreats <= 0 then break end
-                            if type(bee) == "table" and bee.Level and bee.Level < targetLevel then
-                                local _, rem = getBondProgress(bee.Level, bee.Bond or 0, targetLevel)
-                                local treatsNeeded = math.ceil(rem / TREAT_BOND)
-                                local toFeed = math.min(treatsNeeded, availableTreats)
-                                if toFeed > 0 then
-                                    feedBee(slot, toFeed)
-                                    availableTreats = availableTreats - toFeed
-                                    statusLabel.Text = "Status: Fed " .. (bee.Type or "bee") .. " " .. formatNum(toFeed)
-                                    wait(0.3)
-                                end
+                data = getStatData() or data
+                local availableTreats = getTreats(data)
+                if availableTreats > 0 then
+                    statusLabel.Text = "Status: Feeding bees..."
+                    for slot, bee in pairs(data.Bees) do
+                        if not autoRunning or availableTreats <= 0 then break end
+                        if type(bee) == "table" and bee.Level and bee.Level < targetLevel then
+                            local _, rem = getBondProgress(bee.Level, bee.Bond or 0, targetLevel)
+                            local treatsNeeded = math.ceil(rem / TREAT_BOND)
+                            local toFeed = math.min(treatsNeeded, availableTreats)
+                            if toFeed > 0 then
+                                feedBee(slot, toFeed)
+                                availableTreats = availableTreats - toFeed
+                                statusLabel.Text = "Status: Fed " .. (bee.Type or "bee") .. " " .. formatNum(toFeed)
+                                wait(0.3)
                             end
                         end
                     end
-                    refreshBeeList()
-                    statusLabel.Text = "Status: Done, next in 3s..."
                 end
+                refreshBeeList()
+                statusLabel.Text = "Status: Idle"
             end
         end
         wait(3)
