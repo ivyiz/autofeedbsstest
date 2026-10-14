@@ -1559,38 +1559,24 @@ local function getGiftedDiscoveredMap()
     local data = getStatData()
 
     if data and type(data) == "table" then
-        local idMap = buildBeeIdMap(data)
+        local idMap = buildBeeIdMap()
 
         local giftTable = data.DiscGiftTypes or data.GiftedTypes or data.DiscoveredGiftTypes
         if type(giftTable) == "table" then
             for _, val in pairs(giftTable) do
-                local candidates = { val }
-                for _, item in ipairs(candidates) do
-                    local matchedName = nil
-                    if type(item) == "number" then
-                        matchedName = idMap[item]
-                    elseif type(item) == "string" then
-                        local nId = tonumber(item)
-                        if nId and idMap[nId] then
-                            matchedName = idMap[nId]
-                        else
-                            matchedName = extractBeeName(item)
-                        end
-                    end
-                    if matchedName then
-                        discovered[matchedName] = true
+                local matchedName = nil
+                if type(val) == "number" then
+                    matchedName = idMap[val]
+                elseif type(val) == "string" then
+                    local nId = tonumber(val)
+                    if nId and idMap[nId] then
+                        matchedName = idMap[nId]
+                    else
+                        matchedName = extractBeeName(val)
                     end
                 end
-            end
-        end
-
-        local bees = getAllBees(data)
-        if type(bees) == "table" then
-            for _, b in pairs(bees) do
-                local beeObj = extractBee(b) or b
-                if type(beeObj) == "table" and (beeObj.Gifted == true or beeObj.gifted == true) and beeObj.Type then
-                    local matched = extractBeeName(tostring(beeObj.Type))
-                    if matched then discovered[matched] = true end
+                if matchedName then
+                    discovered[matchedName] = true
                 end
             end
         end
@@ -1632,7 +1618,7 @@ end
 
 debugBtn.MouseButton1Click:Connect(function()
     local data = getStatData()
-    local idMap = buildBeeIdMap(data)
+    local idMap = buildBeeIdMap()
     local report = {}
     table.insert(report, "=== BSS GIFTED DATA DEBUG ===")
 
@@ -1657,46 +1643,44 @@ debugBtn.MouseButton1Click:Connect(function()
 
     if data and data.DiscGiftTypes then
         local rawList = {}
+        local mappedList = {}
         local unmapped = {}
         for k, v in pairs(data.DiscGiftTypes) do
             table.insert(rawList, tostring(k) .. ":" .. tostring(v))
-            local num = tonumber(v) or tonumber(k)
-            if num and not idMap[num] then
-                table.insert(unmapped, tostring(num))
+            local num = tonumber(v)
+            if num then
+                local name = idMap[num]
+                if name then
+                    table.insert(mappedList, tostring(num) .. "=" .. name)
+                else
+                    table.insert(unmapped, tostring(num))
+                end
             end
         end
-        table.insert(report, string.format("DiscGiftTypes (%d items): %s", #rawList, table.concat(rawList, ", ")))
+        table.insert(report, string.format("DiscGiftTypes RAW (%d): %s", #rawList, table.concat(rawList, ", ")))
+        table.insert(report, string.format("DiscGiftTypes MAPPED (%d): %s", #mappedList, table.concat(mappedList, ", ")))
         if #unmapped > 0 then
             table.insert(report, string.format("UNMAPPED IDs (%d): %s", #unmapped, table.concat(unmapped, ", ")))
         else
-            table.insert(report, "All DiscGiftTypes IDs successfully mapped!")
+            table.insert(report, "All DiscGiftTypes IDs mapped OK")
         end
     else
         table.insert(report, "DiscGiftTypes is NIL!")
     end
 
-    if data and data.DiscoveredBees then
-        local dbList = {}
-        for k, v in pairs(data.DiscoveredBees) do table.insert(dbList, tostring(k) .. ":" .. tostring(v)) end
-        table.insert(report, string.format("DiscoveredBees (%d items): %s", #dbList, table.concat(dbList, ", ")))
-    end
-
-    local bees = getAllBees(data)
-    if type(bees) == "table" then
-        local hiveGifted = {}
-        for _, b in pairs(bees) do
-            local beeObj = extractBee(b) or b
-            if type(beeObj) == "table" and (beeObj.Gifted or beeObj.gifted) then
-                table.insert(hiveGifted, tostring(beeObj.Type))
-            end
-        end
-        table.insert(report, string.format("Hive Gifted Bees (%d): %s", #hiveGifted, table.concat(hiveGifted, ", ")))
-    end
-
     local disc = getGiftedDiscoveredMap()
     local discList = {}
     for bName, _ in pairs(disc) do table.insert(discList, bName) end
-    table.insert(report, string.format("Parsed Gifted (%d): %s", #discList, table.concat(discList, ", ")))
+    table.sort(discList)
+    table.insert(report, string.format("Final Gifted (%d): %s", #discList, table.concat(discList, ", ")))
+
+    local missingList = {}
+    for _, bee in ipairs(ALL_BEES) do
+        if not disc[bee.Name] then
+            table.insert(missingList, bee.Name)
+        end
+    end
+    table.insert(report, string.format("Missing (%d): %s", #missingList, table.concat(missingList, ", ")))
 
     local fullText = table.concat(report, "\n")
     print(fullText)
