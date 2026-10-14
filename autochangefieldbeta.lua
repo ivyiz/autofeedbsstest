@@ -927,7 +927,44 @@ hudLabel.TextXAlignment = Enum.TextXAlignment.Right
 hudLabel.Text = "[Auto Prog] Initializing..."
 hudLabel.Parent = hudGui
 
+local function printDebugInfo()
+    local data = getStatData()
+    local beeCount = getBeeCount(data)
+    local liveTarget = getAtlasLiveTarget()
+    print("========== [Auto Prog Debug] ==========")
+    print("Bee Count:", beeCount)
+    print("Atlas Live Target:", tostring(liveTarget))
+    if data then
+        print("Equipped/Stats:")
+        print("  Collector:", tostring(data.Collector or data.Tool))
+        print("  Bag:", tostring(data.Bag or data.Backpack))
+        print("  Boots:", tostring(data.Boots or data.Shoes))
+        print("  Belt:", tostring(data.Belt or data.BeltBag))
+        print("  Hat:", tostring(data.Hat or data.Mask))
+        print("  Sprinkler:", tostring(data.Sprinkler))
+        print("  BlueGuard:", tostring(data.BlueGuard or data.LeftGuard))
+        print("  RedGuard:", tostring(data.RedGuard or data.RightGuard))
+    else
+        print("ClientStatCache: nil")
+    end
+    print("Ownership Checks:")
+    local checkList = { "Hiking Boots", "Beekeeper's Boots", "Looker Guard", "Brave Guard", "Diamond Mask" }
+    for _, itm in ipairs(checkList) do
+        print("  " .. itm .. ":", isItemOwned(itm, "Gear", player.Character, data))
+    end
+    local targetItem, neededMat, neededAmt, field = evaluateRoute(data, beeCount)
+    print("Evaluation Result:")
+    print("  Target:", tostring(targetItem))
+    print("  Need Mat:", tostring(neededMat), "(" .. tostring(neededAmt) .. ")")
+    print("  Target Field:", tostring(field))
+    print("========================================")
+end
+
+if getgenv then getgenv().AutoProgDebug = printDebugInfo end
+_G.AutoProgDebug = printDebugInfo
+
 task.spawn(function()
+    printDebugInfo()
     while true do
         local data = getStatData()
         local beeCount = getBeeCount(data)
