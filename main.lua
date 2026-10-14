@@ -1625,8 +1625,8 @@ local function getGiftedDiscoveredMap()
 
         local giftTable = data.DiscGiftTypes or data.GiftedTypes or data.DiscoveredGiftTypes
         if type(giftTable) == "table" then
-            for k, val in pairs(giftTable) do
-                local candidates = { val, k }
+            for _, val in pairs(giftTable) do
+                local candidates = { val }
                 for _, item in ipairs(candidates) do
                     local matchedName = nil
                     if type(item) == "number" then
