@@ -16,39 +16,40 @@ local RECIPES = {
 
 local TOOL_TIERS = {
     ["scooper"] = 1, ["rake"] = 2, ["clipper"] = 3, ["magnet"] = 4, ["vacuum"] = 5,
-    ["superscooper"] = 6, ["pulsar"] = 7, ["electromagnet"] = 8, ["scissors"] = 9,
+    ["superscooper"] = 6, ["pulsar"] = 7, ["pulser"] = 7, ["electromagnet"] = 8, ["scissors"] = 9,
     ["honeydipper"] = 10, ["bubblewand"] = 11, ["scythe"] = 11, ["goldenrake"] = 12,
-    ["porcelaindipper"] = 13, ["petalwand"] = 14, ["tidepopper"] = 15, ["darkscythe"] = 15,
-    ["gummyballer"] = 15
+    ["porcelaindipper"] = 13, ["porcdipper"] = 13, ["pdipper"] = 13, ["petalwand"] = 14,
+    ["tidepopper"] = 15, ["darkscythe"] = 15, ["gummyballer"] = 15
 }
 
 local BAG_TIERS = {
     ["pouch"] = 1, ["backpack"] = 2, ["jar"] = 3, ["canister"] = 4, ["jug"] = 5,
     ["megajug"] = 6, ["barrel"] = 7, ["compressor"] = 8, ["elitebarrel"] = 9,
     ["portohive"] = 10, ["blueportohive"] = 11, ["redportohive"] = 11,
-    ["porcelainportohive"] = 12, ["coconutcanister"] = 13
+    ["porcelainportohive"] = 12, ["coconutcanister"] = 13, ["cococanister"] = 13, ["cocanister"] = 13
 }
 
 local BOOTS_TIERS = {
     ["basicboots"] = 1, ["hikingboots"] = 2, ["cleanboots"] = 3,
-    ["beekeepersboots"] = 4, ["coconutclogs"] = 5, ["gummyboots"] = 6
+    ["beekeepersboots"] = 4, ["beekeeperboots"] = 4, ["beekboots"] = 4,
+    ["coconutclogs"] = 5, ["cococlogs"] = 5, ["clogs"] = 5, ["gummyboots"] = 6
 }
 
 local BELT_TIERS = {
     ["beltpocket"] = 1, ["utilitybelt"] = 2, ["beltbag"] = 3,
-    ["mondobeltbag"] = 4, ["honeycombbelt"] = 5, ["petalbelt"] = 6,
-    ["coconutbelt"] = 7
+    ["mondobeltbag"] = 4, ["mondobelt"] = 4, ["honeycombbelt"] = 5, ["honeycomb"] = 5,
+    ["petalbelt"] = 6, ["coconutbelt"] = 7, ["cocobelt"] = 7
 }
 
 local HAT_TIERS = {
-    ["helmet"] = 1, ["propellerhat"] = 2, ["beekeepersmask"] = 3,
+    ["helmet"] = 1, ["propellerhat"] = 2, ["beekeepersmask"] = 3, ["beekeepermask"] = 3, ["beekmask"] = 3,
     ["honeymask"] = 4, ["bubblemask"] = 4, ["firemask"] = 4,
-    ["gummymask"] = 5, ["demonmask"] = 5, ["diamondmask"] = 5
+    ["gummymask"] = 5, ["demonmask"] = 5, ["diamondmask"] = 5, ["diamask"] = 5
 }
 
 local SPRINKLER_TIERS = {
     ["basicsprinkler"] = 1, ["silversoakers"] = 2, ["goldengushers"] = 3,
-    ["diamonddrenchers"] = 4, ["thesupremesaturator"] = 5, ["supremesaturator"] = 5
+    ["diamonddrenchers"] = 4, ["thesupremesaturator"] = 5, ["supremesaturator"] = 5, ["saturator"] = 5
 }
 
 local BLUE_GUARD_TIERS = {
@@ -191,172 +192,270 @@ local function getItemAmount(item, data)
     return 0
 end
 
+local ITEM_ALIASES = {
+    ["diamask"] = "Diamond Mask",
+    ["diamondmask"] = "Diamond Mask",
+    ["demonmask"] = "Demon Mask",
+    ["gummymask"] = "Gummy Mask",
+    ["bubblemask"] = "Bubble Mask",
+    ["honeymask"] = "Honey Mask",
+    ["firemask"] = "Fire Mask",
+    ["beekeepersmask"] = "Beekeeper's Mask",
+    ["beekeepermask"] = "Beekeeper's Mask",
+    ["beekmask"] = "Beekeeper's Mask",
+    ["propellerhat"] = "Propeller Hat",
+    ["helmet"] = "Helmet",
+    ["beekeepersboots"] = "Beekeeper's Boots",
+    ["beekeeperboots"] = "Beekeeper's Boots",
+    ["beekboots"] = "Beekeeper's Boots",
+    ["hikingboots"] = "Hiking Boots",
+    ["basicboots"] = "Basic Boots",
+    ["cleanboots"] = "Basic Boots",
+    ["coconutclogs"] = "Coconut Clogs",
+    ["cococlogs"] = "Coconut Clogs",
+    ["clogs"] = "Coconut Clogs",
+    ["gummyboots"] = "Gummy Boots",
+    ["beltpocket"] = "Belt Pocket",
+    ["beltbag"] = "Belt Bag",
+    ["mondobeltbag"] = "Mondo Belt Bag",
+    ["mondobelt"] = "Mondo Belt Bag",
+    ["honeycombbelt"] = "Honeycomb Belt",
+    ["petalbelt"] = "Petal Belt",
+    ["coconutbelt"] = "Coconut Belt",
+    ["cocobelt"] = "Coconut Belt",
+    ["porcelaindipper"] = "Porcelain Dipper",
+    ["porcdipper"] = "Porcelain Dipper",
+    ["pdipper"] = "Porcelain Dipper",
+    ["goldenrake"] = "Golden Rake",
+    ["petalwand"] = "Petal Wand",
+    ["tidepopper"] = "Tide Popper",
+    ["darkscythe"] = "Dark Scythe",
+    ["gummyballer"] = "Gummyballer",
+    ["bubblewand"] = "Bubble Wand",
+    ["scythe"] = "Scythe",
+    ["vacuum"] = "Vacuum",
+    ["magnet"] = "Magnet",
+    ["electromagnet"] = "Electro-Magnet",
+    ["honeydipper"] = "Honey Dipper",
+    ["superscooper"] = "Super-Scooper",
+    ["pulsar"] = "Pulsar",
+    ["pulser"] = "Pulsar",
+    ["porcelainportohive"] = "Porcelain Port-O-Hive",
+    ["porcportohive"] = "Porcelain Port-O-Hive",
+    ["porcport"] = "Porcelain Port-O-Hive",
+    ["blueportohive"] = "Blue Port-O-Hive",
+    ["portohive"] = "Port-O-Hive",
+    ["coconutcanister"] = "Coconut Canister",
+    ["cococanister"] = "Coconut Canister",
+    ["cocanister"] = "Coconut Canister",
+    ["elitebarrel"] = "Elite Barrel",
+    ["megajug"] = "Mega-Jug",
+    ["compressor"] = "Compressor",
+    ["canister"] = "Canister",
+    ["backpack"] = "Backpack",
+    ["cobaltguard"] = "Cobalt Guard",
+    ["crimsonguard"] = "Crimson Guard",
+    ["buckoguard"] = "Bucko Guard",
+    ["rileyguard"] = "Riley Guard",
+    ["eliteblueguard"] = "Elite Blue Guard",
+    ["eliteredguard"] = "Elite Red Guard",
+    ["lookerguard"] = "Looker Guard",
+    ["braveguard"] = "Brave Guard",
+    ["basicsprinkler"] = "Basic Sprinkler",
+    ["silversoakers"] = "Silver Soakers",
+    ["goldengushers"] = "Golden Gushers",
+    ["diamonddrenchers"] = "Diamond Drenchers",
+    ["supremesaturator"] = "The Supreme Saturator",
+    ["thesupremesaturator"] = "The Supreme Saturator",
+    ["plasticplanter"] = "Plastic Planter",
+    ["candyplanter"] = "Candy Planter",
+    ["blueclayplanter"] = "Blue Clay Planter",
+    ["redclayplanter"] = "Red Clay Planter",
+    ["tackyplanter"] = "Tacky Planter",
+    ["pesticideplanter"] = "Pesticide Planter",
+    ["hydroponicplanter"] = "Hydroponic Planter",
+    ["petalplanter"] = "Petal Planter",
+    ["heattreatedplanter"] = "Heat-Treated Planter",
+    ["plentyplanter"] = "Plenty Planter",
+    ["glider"] = "Glider"
+}
+
+local function resolveItemName(raw)
+    if not raw then return nil end
+    local clean = tostring(raw):gsub("[%s%-_':%[%]%(%)]", ""):lower()
+    if ITEM_ALIASES[clean] then return ITEM_ALIASES[clean] end
+    if clean:find("diamask", 1, true) then return "Diamond Mask" end
+    for k, v in pairs(ITEM_ALIASES) do
+        if #k >= 6 and clean:find(k, 1, true) then
+            return v
+        end
+    end
+    return raw
+end
+
 local function isItemOwned(itemName, itemType, char, data)
     if not itemName then return false end
-    local cleanName = tostring(itemName):gsub("[%s%-_']", ""):lower()
+    local canonical = resolveItemName(itemName) or itemName
+    local cleanName = tostring(canonical):gsub("[%s%-_']", ""):lower()
+    local rawClean = tostring(itemName):gsub("[%s%-_']", ""):lower()
 
-    if char and (char:FindFirstChild(itemName) or char:FindFirstChild(cleanName)) then return true end
-    if player.Backpack and (player.Backpack:FindFirstChild(itemName) or player.Backpack:FindFirstChild(cleanName)) then return true end
+    if char and (char:FindFirstChild(canonical) or char:FindFirstChild(itemName) or char:FindFirstChild(cleanName)) then return true end
+    if player.Backpack and (player.Backpack:FindFirstChild(canonical) or player.Backpack:FindFirstChild(itemName) or player.Backpack:FindFirstChild(cleanName)) then return true end
     if char then
         for _, child in ipairs(char:GetChildren()) do
             local cName = child.Name:gsub("[%s%-_']", ""):lower()
-            if cName == cleanName then return true end
+            if cName == cleanName or cName == rawClean then return true end
         end
     end
 
     local eq = (data and (data.Equipped or data.Equipment)) or {}
 
-    local curTool = eq.Collector or eq.Tool
-    if not curTool then
-        local toolContainers = { char, player.Backpack }
-        for _, cont in ipairs(toolContainers) do
-            if cont then
-                local t = cont:FindFirstChildWhichIsA("Tool")
-                if t then
-                    local c = t.Name:gsub("[%s%-_']", ""):lower()
-                    if TOOL_TIERS[c] then curTool = t.Name break end
-                end
-                for _, ch in ipairs(cont:GetChildren()) do
-                    local c = ch.Name:gsub("[%s%-_']", ""):lower()
-                    if TOOL_TIERS[c] then curTool = ch.Name break end
-                end
-            end
-            if curTool then break end
-        end
-    end
-    if curTool then
-        local curToolClean = tostring(curTool):gsub("[%s%-_']", ""):lower()
-        if curToolClean == cleanName then return true end
-        if TOOL_TIERS[curToolClean] and TOOL_TIERS[cleanName] then
-            if TOOL_TIERS[curToolClean] >= TOOL_TIERS[cleanName] then return true end
-        end
-    end
+    local curTool = (data and (data.Collector or data.Tool)) or eq.Collector or eq.Tool
+    local curBag = (data and (data.Bag or data.Backpack)) or eq.Bag or eq.Backpack
+    local curBoots = (data and (data.Boots or data.Shoes)) or eq.Boots or eq.Shoes
+    local curBelt = (data and (data.Belt or data.BeltBag)) or eq.Belt or eq.BeltBag
+    local curHat = (data and (data.Hat or data.Mask)) or eq.Hat or eq.Mask
+    local curSprinkler = (data and data.Sprinkler) or eq.Sprinkler
+    local curBlueGuard = (data and (data.BlueGuard or data.LeftGuard)) or eq.BlueGuard or eq.LeftGuard
+    local curRedGuard = (data and (data.RedGuard or data.RightGuard)) or eq.RedGuard or eq.RightGuard
+    local curGlider = (data and data.Glider) or eq.Glider
 
-    local curBag = eq.Bag or eq.Backpack
-    local curBoots = eq.Boots or eq.Shoes
-    local curBelt = eq.Belt
-    local curHat = eq.Hat or eq.Mask
-    local curSprinkler = eq.Sprinkler
-    local curBlueGuard = eq.BlueGuard or eq.LeftGuard
-    local curRedGuard = eq.RedGuard or eq.RightGuard
+    local function checkMatch(val)
+        if type(val) ~= "string" and type(val) ~= "number" then return end
+        local c = tostring(val):gsub("[%s%-_']", ""):lower()
+        if not curTool and TOOL_TIERS[c] then curTool = c end
+        if not curBag and BAG_TIERS[c] then curBag = c end
+        if not curBoots and BOOTS_TIERS[c] then curBoots = c end
+        if not curBelt and BELT_TIERS[c] then curBelt = c end
+        if not curHat and HAT_TIERS[c] then curHat = c end
+        if not curSprinkler and SPRINKLER_TIERS[c] then curSprinkler = c end
+        if not curBlueGuard and BLUE_GUARD_TIERS[c] then curBlueGuard = c end
+        if not curRedGuard and RED_GUARD_TIERS[c] then curRedGuard = c end
+        if not curGlider and c == "glider" then curGlider = c end
+    end
 
     if char then
         for _, child in ipairs(char:GetChildren()) do
-            local c = child.Name:gsub("[%s%-_']", ""):lower()
-            if not curBag and BAG_TIERS[c] then curBag = child.Name end
-            if not curBoots and BOOTS_TIERS[c] then curBoots = child.Name end
-            if not curBelt and BELT_TIERS[c] then curBelt = child.Name end
-            if not curHat and HAT_TIERS[c] then curHat = child.Name end
-            if not curSprinkler and SPRINKLER_TIERS[c] then curSprinkler = child.Name end
-            if not curBlueGuard and BLUE_GUARD_TIERS[c] then curBlueGuard = child.Name end
-            if not curRedGuard and RED_GUARD_TIERS[c] then curRedGuard = child.Name end
+            checkMatch(child.Name)
+            if child:IsA("Tool") and not curTool then
+                local c = child.Name:gsub("[%s%-_']", ""):lower()
+                if TOOL_TIERS[c] then curTool = c end
+            end
         end
     end
 
     if player.Backpack then
         for _, child in ipairs(player.Backpack:GetChildren()) do
-            local c = child.Name:gsub("[%s%-_']", ""):lower()
-            if not curSprinkler and SPRINKLER_TIERS[c] then curSprinkler = child.Name end
+            checkMatch(child.Name)
+            if child:IsA("Tool") and not curTool then
+                local c = child.Name:gsub("[%s%-_']", ""):lower()
+                if TOOL_TIERS[c] then curTool = c end
+            end
         end
     end
 
-    if curBag then
-        local curBagClean = tostring(curBag):gsub("[%s%-_']", ""):lower()
-        if curBagClean == cleanName then return true end
-        if BAG_TIERS[curBagClean] and BAG_TIERS[cleanName] then
-            if BAG_TIERS[curBagClean] >= BAG_TIERS[cleanName] then return true end
-        end
-    end
-
-    if curBoots then
-        local curBootsClean = tostring(curBoots):gsub("[%s%-_']", ""):lower()
-        if curBootsClean == cleanName then return true end
-        if BOOTS_TIERS[curBootsClean] and BOOTS_TIERS[cleanName] then
-            if BOOTS_TIERS[curBootsClean] >= BOOTS_TIERS[cleanName] then return true end
-        end
-    end
-
-    if curBelt then
-        local curBeltClean = tostring(curBelt):gsub("[%s%-_']", ""):lower()
-        if curBeltClean == cleanName then return true end
-        if BELT_TIERS[curBeltClean] and BELT_TIERS[cleanName] then
-            if BELT_TIERS[curBeltClean] >= BELT_TIERS[cleanName] then return true end
-        end
-    end
-
-    local SPECIAL_MASKS = {
-        ["honeymask"] = true, ["bubblemask"] = true, ["firemask"] = true,
-        ["gummymask"] = true, ["demonmask"] = true, ["diamondmask"] = true
-    }
-
-    if curHat then
-        local curHatClean = tostring(curHat):gsub("[%s%-_']", ""):lower()
-        if curHatClean == cleanName then return true end
-        if not SPECIAL_MASKS[cleanName] and HAT_TIERS[curHatClean] and HAT_TIERS[cleanName] then
-            if HAT_TIERS[curHatClean] >= HAT_TIERS[cleanName] then return true end
-        end
-    end
-
-    if curSprinkler then
-        local curSprinklerClean = tostring(curSprinkler):gsub("[%s%-_']", ""):lower()
-        if curSprinklerClean == cleanName then return true end
-        if SPRINKLER_TIERS[curSprinklerClean] and SPRINKLER_TIERS[cleanName] then
-            if SPRINKLER_TIERS[curSprinklerClean] >= SPRINKLER_TIERS[cleanName] then return true end
-        end
-    end
-
-    if curBlueGuard then
-        local c = tostring(curBlueGuard):gsub("[%s%-_']", ""):lower()
-        if c == cleanName then return true end
-        if BLUE_GUARD_TIERS[c] and BLUE_GUARD_TIERS[cleanName] then
-            if BLUE_GUARD_TIERS[c] >= BLUE_GUARD_TIERS[cleanName] then return true end
-        end
-    end
-
-    if curRedGuard then
-        local c = tostring(curRedGuard):gsub("[%s%-_']", ""):lower()
-        if c == cleanName then return true end
-        if RED_GUARD_TIERS[c] and RED_GUARD_TIERS[cleanName] then
-            if RED_GUARD_TIERS[c] >= RED_GUARD_TIERS[cleanName] then return true end
-        end
-    end
-
-    local eqSources = { eq, data and data.Accessories, data and data.Equipment, data and data.Items, data and data.Inventory }
-    for _, src in ipairs(eqSources) do
-        if type(src) == "table" then
-            if src[itemName] or src[cleanName] then return true end
-            for k, val in pairs(src) do
-                local kClean = tostring(k):gsub("[%s%-_']", ""):lower()
-                local vClean = tostring(val):gsub("[%s%-_']", ""):lower()
-                if kClean == cleanName or vClean == cleanName then return true end
-                if not curBlueGuard then
-                    if BLUE_GUARD_TIERS[kClean] then curBlueGuard = kClean
-                    elseif BLUE_GUARD_TIERS[vClean] then curBlueGuard = vClean end
-                end
-                if not curRedGuard then
-                    if RED_GUARD_TIERS[kClean] then curRedGuard = kClean
-                    elseif RED_GUARD_TIERS[vClean] then curRedGuard = vClean end
+    if data then
+        for k, v in pairs(data) do
+            if type(v) == "string" or type(v) == "number" then
+                checkMatch(v)
+                checkMatch(k)
+            elseif type(v) == "table" then
+                for k2, v2 in pairs(v) do
+                    checkMatch(k2)
+                    if type(v2) == "string" or type(v2) == "number" then checkMatch(v2) end
                 end
             end
         end
     end
 
-    if curBlueGuard and BLUE_GUARD_TIERS[cleanName] then
+    if curTool then
+        local c = tostring(curTool):gsub("[%s%-_']", ""):lower()
+        if c == cleanName or c == rawClean then return true end
+        local reqTier = TOOL_TIERS[cleanName] or TOOL_TIERS[rawClean]
+        if reqTier and TOOL_TIERS[c] and TOOL_TIERS[c] >= reqTier then return true end
+    end
+
+    if curBag then
+        local c = tostring(curBag):gsub("[%s%-_']", ""):lower()
+        if c == cleanName or c == rawClean then return true end
+        local reqTier = BAG_TIERS[cleanName] or BAG_TIERS[rawClean]
+        if reqTier and BAG_TIERS[c] and BAG_TIERS[c] >= reqTier then return true end
+    end
+
+    if curBoots then
+        local c = tostring(curBoots):gsub("[%s%-_']", ""):lower()
+        if c == cleanName or c == rawClean then return true end
+        local reqTier = BOOTS_TIERS[cleanName] or BOOTS_TIERS[rawClean]
+        if reqTier and BOOTS_TIERS[c] and BOOTS_TIERS[c] >= reqTier then return true end
+    end
+
+    if curBelt then
+        local c = tostring(curBelt):gsub("[%s%-_']", ""):lower()
+        if c == cleanName or c == rawClean then return true end
+        local reqTier = BELT_TIERS[cleanName] or BELT_TIERS[rawClean]
+        if reqTier and BELT_TIERS[c] and BELT_TIERS[c] >= reqTier then return true end
+    end
+
+    local SPECIAL_MASKS = {
+        ["honeymask"] = true, ["bubblemask"] = true, ["firemask"] = true,
+        ["gummymask"] = true, ["demonmask"] = true, ["diamondmask"] = true, ["diamask"] = true
+    }
+
+    if curHat then
+        local c = tostring(curHat):gsub("[%s%-_']", ""):lower()
+        if c == cleanName or c == rawClean then return true end
+        if not SPECIAL_MASKS[cleanName] and not SPECIAL_MASKS[rawClean] then
+            local reqTier = HAT_TIERS[cleanName] or HAT_TIERS[rawClean]
+            if reqTier and HAT_TIERS[c] and HAT_TIERS[c] >= reqTier then return true end
+        end
+    end
+
+    if curSprinkler then
+        local c = tostring(curSprinkler):gsub("[%s%-_']", ""):lower()
+        if c == cleanName or c == rawClean then return true end
+        local reqTier = SPRINKLER_TIERS[cleanName] or SPRINKLER_TIERS[rawClean]
+        if reqTier and SPRINKLER_TIERS[c] and SPRINKLER_TIERS[c] >= reqTier then return true end
+    end
+
+    if curBlueGuard then
         local c = tostring(curBlueGuard):gsub("[%s%-_']", ""):lower()
-        if BLUE_GUARD_TIERS[c] and BLUE_GUARD_TIERS[c] >= BLUE_GUARD_TIERS[cleanName] then return true end
+        if c == cleanName or c == rawClean then return true end
+        local reqTier = BLUE_GUARD_TIERS[cleanName] or BLUE_GUARD_TIERS[rawClean]
+        if reqTier and BLUE_GUARD_TIERS[c] and BLUE_GUARD_TIERS[c] >= reqTier then return true end
     end
 
-    if curRedGuard and RED_GUARD_TIERS[cleanName] then
+    if curRedGuard then
         local c = tostring(curRedGuard):gsub("[%s%-_']", ""):lower()
-        if RED_GUARD_TIERS[c] and RED_GUARD_TIERS[c] >= RED_GUARD_TIERS[cleanName] then return true end
+        if c == cleanName or c == rawClean then return true end
+        local reqTier = RED_GUARD_TIERS[cleanName] or RED_GUARD_TIERS[rawClean]
+        if reqTier and RED_GUARD_TIERS[c] and RED_GUARD_TIERS[c] >= reqTier then return true end
     end
 
-    if (itemType == "Planter" or cleanName:find("planter")) and data then
+    if (cleanName == "glider" or rawClean == "glider") and curGlider then
+        return true
+    end
+
+    local eqSources = { eq, data, data and data.Accessories, data and data.Equipment, data and data.Items, data and data.Inventory }
+    for _, src in ipairs(eqSources) do
+        if type(src) == "table" then
+            if src[canonical] or src[itemName] or src[cleanName] or src[rawClean] then return true end
+            for k, val in pairs(src) do
+                local kClean = tostring(k):gsub("[%s%-_']", ""):lower()
+                local vClean = tostring(val):gsub("[%s%-_']", ""):lower()
+                if kClean == cleanName or kClean == rawClean or vClean == cleanName or vClean == rawClean then
+                    return true
+                end
+            end
+        end
+    end
+
+    if (itemType == "Planter" or cleanName:find("planter") or rawClean:find("planter")) and data then
         local planterTables = { data.Planters, data.PurchasedPlanters, data.Items, data.Inventory }
         for _, pTable in ipairs(planterTables) do
             if type(pTable) == "table" then
                 for pName in pairs(pTable) do
-                    if tostring(pName):gsub("[%s%-_']", ""):lower() == cleanName then return true end
+                    local pClean = tostring(pName):gsub("[%s%-_']", ""):lower()
+                    if pClean == cleanName or pClean == rawClean then return true end
                 end
             end
         end
@@ -630,10 +729,11 @@ local function getAtlasRoute()
             local name = (type(rawItem) == "table" and (rawItem.Name or rawItem.Item or rawItem.Target or rawItem.Gear)) or (type(rawItem) == "string" and rawItem)
             local reqBees = (type(rawItem) == "table" and (rawItem.Bees or rawItem.BeeCount or rawItem.ReqBees))
             if name then
-                local cleanName = tostring(name):gsub("[%s%-_']", ""):lower()
+                local canonical = resolveItemName(name) or name
+                local cleanName = tostring(canonical):gsub("[%s%-_']", ""):lower()
                 local base = itemMap[cleanName]
                 table.insert(dynamicRoute, {
-                    Name = base and base.Name or tostring(name),
+                    Name = base and base.Name or tostring(canonical),
                     Type = base and base.Type or "Gear",
                     Bees = tonumber(reqBees) or (base and base.Bees) or 0,
                     Ingredients = base and base.Ingredients or nil
@@ -649,21 +749,63 @@ local function getAtlasRoute()
 end
 
 local function getAtlasLiveTarget()
+    local settings = findAtlasSettings()
+    if settings then
+        if settings.toys and type(settings.toys) == "table" then
+            if settings.toys.target then
+                local res = resolveItemName(settings.toys.target)
+                if res then return res end
+            end
+            if settings.toys.current then
+                local res = resolveItemName(settings.toys.current)
+                if res then return res end
+            end
+        end
+        if settings.target then
+            local res = resolveItemName(settings.target)
+            if res then return res end
+        end
+    end
+
     local roots = { getgenv and getgenv(), _G, shared }
     for _, r in ipairs(roots) do
         if type(r) == "table" then
             if r.Atlas and type(r.Atlas) == "table" then
-                if r.Atlas.ProgressionTarget then return tostring(r.Atlas.ProgressionTarget) end
-                if r.Atlas.CurrentTarget then return tostring(r.Atlas.CurrentTarget) end
-                if r.Atlas.Target then return tostring(r.Atlas.Target) end
-                if r.Atlas.CurrentPurchase then return tostring(r.Atlas.CurrentPurchase) end
+                if r.Atlas.ProgressionTarget then
+                    local res = resolveItemName(r.Atlas.ProgressionTarget)
+                    if res then return res end
+                end
+                if r.Atlas.CurrentTarget then
+                    local res = resolveItemName(r.Atlas.CurrentTarget)
+                    if res then return res end
+                end
+                if r.Atlas.Target then
+                    local res = resolveItemName(r.Atlas.Target)
+                    if res then return res end
+                end
+                if r.Atlas.CurrentPurchase then
+                    local res = resolveItemName(r.Atlas.CurrentPurchase)
+                    if res then return res end
+                end
                 if r.Atlas.Settings and type(r.Atlas.Settings) == "table" and r.Atlas.Settings.toys then
-                    if r.Atlas.Settings.toys.target then return tostring(r.Atlas.Settings.toys.target) end
+                    if r.Atlas.Settings.toys.target then
+                        local res = resolveItemName(r.Atlas.Settings.toys.target)
+                        if res then return res end
+                    end
                 end
             end
-            if r.ProgressionTarget then return tostring(r.ProgressionTarget) end
-            if r.CurrentTarget then return tostring(r.CurrentTarget) end
-            if r.CurrentPurchase then return tostring(r.CurrentPurchase) end
+            if r.ProgressionTarget then
+                local res = resolveItemName(r.ProgressionTarget)
+                if res then return res end
+            end
+            if r.CurrentTarget then
+                local res = resolveItemName(r.CurrentTarget)
+                if res then return res end
+            end
+            if r.CurrentPurchase then
+                local res = resolveItemName(r.CurrentPurchase)
+                if res then return res end
+            end
         end
     end
 
@@ -672,32 +814,49 @@ local function getAtlasLiveTarget()
     pcall(function() table.insert(uiRoots, CoreGui) end)
     pcall(function() table.insert(uiRoots, player:FindFirstChild("PlayerGui")) end)
 
+    local candidate = nil
     for _, root in ipairs(uiRoots) do
         if root then
             for _, desc in ipairs(root:GetDescendants()) do
                 if desc:IsA("TextLabel") or desc:IsA("TextButton") then
                     local txt = desc.Text
-                    if txt and txt ~= "" and #txt < 100 then
-                        local matched = txt:match("[Tt]arget%s*:%s*([%w%s%-_']+)")
-                            or txt:match("[Cc]urrent%s*:%s*([%w%s%-_']+)")
-                            or txt:match("[Pp]rog%w*%s*:%s*([%w%s%-_']+)")
-                            or txt:match("[Bb]uying%s*:%s*([%w%s%-_']+)")
-                            or txt:match("[Cc]rafting%s*:%s*([%w%s%-_']+)")
-                            or txt:match("[Nn]ext%s*:%s*([%w%s%-_']+)")
+                    if txt and txt ~= "" and #txt < 120 and desc.Name ~= "AutoProg_HUD" and desc.Parent and desc.Parent.Name ~= "AutoProg_HUD" then
+                        local matched = txt:match("[Tt]arget%s*[:%-]?%s*([%w%s%-_']+)")
+                            or txt:match("[Cc]urrent%s*[:%-]?%s*([%w%s%-_']+)")
+                            or txt:match("[Pp]rog%w*%s*[:%-]?%s*([%w%s%-_']+)")
+                            or txt:match("[Aa]uto%s*[Pp]rog%w*%s*[:%-]?%s*([%w%s%-_']+)")
+                            or txt:match("[Bb]uying%s*[:%-]?%s*([%w%s%-_']+)")
+                            or txt:match("[Cc]rafting%s*[:%-]?%s*([%w%s%-_']+)")
+                            or txt:match("[Nn]ext%s*[:%-]?%s*([%w%s%-_']+)")
                         if matched then
-                            local mClean = matched:gsub("^%s+", ""):gsub("%s+$", ""):gsub("[%s%-_']", ""):lower()
-                            for _, entry in ipairs(FullProgressionRoute) do
-                                local eClean = entry.Name:gsub("[%s%-_']", ""):lower()
-                                if mClean == eClean or mClean:find(eClean) or eClean:find(mClean) then
-                                    return entry.Name
-                                end
+                            local resolved = resolveItemName(matched)
+                            if resolved and resolved ~= matched then
+                                return resolved
                             end
+                        end
+
+                        local tLow = txt:lower()
+                        if tLow:find("diamask") then
+                            return "Diamond Mask"
+                        end
+
+                        local resolved = resolveItemName(txt)
+                        if resolved and resolved ~= txt then
+                            local pName = desc.Parent and desc.Parent.Name:lower() or ""
+                            local dName = desc.Name:lower()
+                            if pName:find("prog") or pName:find("target") or pName:find("gear") or pName:find("hud") or pName:find("main") or
+                               dName:find("prog") or dName:find("target") or dName:find("gear") or dName:find("hud") or dName:find("main") or
+                               dName:find("status") or pName:find("status") then
+                                return resolved
+                            end
+                            if not candidate then candidate = resolved end
                         end
                     end
                 end
             end
         end
     end
+    if candidate then return candidate end
     return nil
 end
 
@@ -706,9 +865,10 @@ local function evaluateRoute(data, beeCount)
 
     local liveTarget = getAtlasLiveTarget()
     if liveTarget then
+        local canonicalLive = resolveItemName(liveTarget) or liveTarget
         for _, milestone in ipairs(FullProgressionRoute) do
             local c1 = milestone.Name:gsub("[%s%-_']", ""):lower()
-            local c2 = liveTarget:gsub("[%s%-_']", ""):lower()
+            local c2 = canonicalLive:gsub("[%s%-_']", ""):lower()
             if c1 == c2 then
                 if milestone.Ingredients then
                     for _, ing in ipairs(milestone.Ingredients) do
