@@ -1478,6 +1478,25 @@ local function buildBeeIdMap(data)
     local idMap = {}
 
     pcall(function()
+        local etMod = RS:FindFirstChild("EggTypes")
+        if etMod and etMod:IsA("ModuleScript") then
+            local et = require(etMod)
+            if type(et) == "table" and type(et.GetOrderedNames) == "function" then
+                local ord = et:GetOrderedNames() or et.GetOrderedNames()
+                if type(ord) == "table" then
+                    for id, name in pairs(ord) do
+                        local bName = extractBeeName(tostring(name))
+                        local nId = tonumber(id)
+                        if bName and nId then
+                            idMap[nId] = bName
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    pcall(function()
         local btMod = RS:FindFirstChild("BeeTypes")
         if btMod and btMod:IsA("ModuleScript") then
             local bt = require(btMod)
@@ -1492,7 +1511,7 @@ local function buildBeeIdMap(data)
                     for id, name in pairs(numTbl) do
                         local bName = extractBeeName(tostring(name))
                         local nId = tonumber(id)
-                        if bName and nId then
+                        if bName and nId and not idMap[nId] then
                             idMap[nId] = bName
                         end
                     end
@@ -1639,34 +1658,6 @@ local function getGiftedDiscoveredMap()
         end
     end
 
-    pcall(function()
-        local pg = player:FindFirstChild("PlayerGui")
-        if not pg then return end
-        for _, desc in ipairs(pg:GetDescendants()) do
-            if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-                local txt = tostring(desc.Text or "")
-                local bName = extractBeeName(txt)
-                if bName then
-                    local parent = desc.Parent
-                    if parent then
-                        for _, sibling in ipairs(parent:GetChildren()) do
-                            local sName = sibling.Name:lower()
-                            if sName:find("star") or sName:find("gift") then
-                                if (sibling:IsA("ImageLabel") or sibling:IsA("ImageButton")) and sibling.Visible and sibling.ImageTransparency < 0.8 and sibling.Image ~= "" then
-                                    discovered[bName] = true
-                                    break
-                                elseif sibling:IsA("GuiObject") and sibling.Visible then
-                                    discovered[bName] = true
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-
     return discovered
 end
 
@@ -1710,6 +1701,21 @@ debugBtn.MouseButton1Click:Connect(function()
     local idMapList = {}
     for id, name in pairs(idMap) do table.insert(idMapList, id .. "=" .. name) end
     table.insert(report, string.format("Module ID Map (%d found): %s", #idMapList, table.concat(idMapList, ", ")))
+
+    pcall(function()
+        local et = RS:FindFirstChild("EggTypes")
+        if et and et:IsA("ModuleScript") then
+            local em = require(et)
+            if type(em.GetOrderedNames) == "function" then
+                local ord = em:GetOrderedNames() or em.GetOrderedNames()
+                if type(ord) == "table" then
+                    local ordList = {}
+                    for i, name in pairs(ord) do table.insert(ordList, tostring(i) .. "=" .. tostring(name)) end
+                    table.insert(report, string.format("EggTypes.GetOrderedNames (%d): %s", #ordList, table.concat(ordList, ", ")))
+                end
+            end
+        end
+    end)
 
     if data and data.DiscGiftTypes then
         local rawList = {}
