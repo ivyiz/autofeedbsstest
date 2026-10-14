@@ -27,16 +27,6 @@ local RECIPES = {
         { Item = "Coconut", Amount = 10 },
         { Item = "Enzymes", Amount = 2 },
         { Item = "Oil", Amount = 2 }
-    },
-    ["Moon Charm"] = {
-        { Item = "Pineapple", Amount = 5 },
-        { Item = "Blueberry", Amount = 50 }
-    },
-    ["Glitter"] = {
-        { Item = "Moon Charm", Amount = 1 }
-    },
-    ["Star Jelly"] = {
-        { Item = "Glitter", Amount = 3 }
     }
 }
 
@@ -142,8 +132,7 @@ local FullProgressionRoute = {
         Type = "Hat",
         Ingredients = {
             { Item = "Blueberry", Amount = 250 },
-            { Item = "Blue Extract", Amount = 50 },
-            { Item = "Glitter", Amount = 25 }
+            { Item = "Blue Extract", Amount = 50 }
         }
     },
     { 
@@ -157,9 +146,7 @@ local FullProgressionRoute = {
         Name = "Petal Belt", 
         Type = "Belt",
         Ingredients = {
-            { Item = "Star Jelly", Amount = 15 },
             { Item = "Glue", Amount = 25 },
-            { Item = "Glitter", Amount = 50 },
             { Item = "Enzymes", Amount = 75 }
         }
     },
@@ -198,8 +185,7 @@ local FullProgressionRoute = {
         Type = "Hat",
         Ingredients = {
             { Item = "Blue Extract", Amount = 250 },
-            { Item = "Oil", Amount = 150 },
-            { Item = "Glitter", Amount = 100 }
+            { Item = "Oil", Amount = 150 }
         }
     },
     { 
@@ -219,7 +205,6 @@ local FullProgressionRoute = {
         Type = "Boots",
         Ingredients = {
             { Item = "Glue", Amount = 500 },
-            { Item = "Glitter", Amount = 300 },
             { Item = "Tropical Drink", Amount = 100 },
             { Item = "Red Extract", Amount = 250 },
             { Item = "Blue Extract", Amount = 250 }
