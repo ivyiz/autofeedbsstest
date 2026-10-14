@@ -51,6 +51,20 @@ local SPRINKLER_TIERS = {
     ["diamonddrenchers"] = 4, ["thesupremesaturator"] = 5, ["supremesaturator"] = 5
 }
 
+local BLUE_GUARD_TIERS = {
+    ["lookerguard"] = 1,
+    ["eliteblueguard"] = 2,
+    ["buckoguard"] = 3,
+    ["cobaltguard"] = 4
+}
+
+local RED_GUARD_TIERS = {
+    ["braveguard"] = 1,
+    ["eliteredguard"] = 2,
+    ["rileyguard"] = 3,
+    ["crimsonguard"] = 4
+}
+
 local FullProgressionRoute = {
     { Bees = 0, Name = "Backpack", Type = "Bag" },
     { Bees = 0, Name = "Magnet", Type = "Tool" },
@@ -223,6 +237,8 @@ local function isItemOwned(itemName, itemType, char, data)
     local curBelt = eq.Belt
     local curHat = eq.Hat or eq.Mask
     local curSprinkler = eq.Sprinkler
+    local curBlueGuard = eq.BlueGuard or eq.LeftGuard
+    local curRedGuard = eq.RedGuard or eq.RightGuard
 
     if char then
         for _, child in ipairs(char:GetChildren()) do
@@ -232,6 +248,8 @@ local function isItemOwned(itemName, itemType, char, data)
             if not curBelt and BELT_TIERS[c] then curBelt = child.Name end
             if not curHat and HAT_TIERS[c] then curHat = child.Name end
             if not curSprinkler and SPRINKLER_TIERS[c] then curSprinkler = child.Name end
+            if not curBlueGuard and BLUE_GUARD_TIERS[c] then curBlueGuard = child.Name end
+            if not curRedGuard and RED_GUARD_TIERS[c] then curRedGuard = child.Name end
         end
     end
 
@@ -287,6 +305,22 @@ local function isItemOwned(itemName, itemType, char, data)
         end
     end
 
+    if curBlueGuard then
+        local c = tostring(curBlueGuard):gsub("[%s%-_']", ""):lower()
+        if c == cleanName then return true end
+        if BLUE_GUARD_TIERS[c] and BLUE_GUARD_TIERS[cleanName] then
+            if BLUE_GUARD_TIERS[c] >= BLUE_GUARD_TIERS[cleanName] then return true end
+        end
+    end
+
+    if curRedGuard then
+        local c = tostring(curRedGuard):gsub("[%s%-_']", ""):lower()
+        if c == cleanName then return true end
+        if RED_GUARD_TIERS[c] and RED_GUARD_TIERS[cleanName] then
+            if RED_GUARD_TIERS[c] >= RED_GUARD_TIERS[cleanName] then return true end
+        end
+    end
+
     local eqSources = { eq, data and data.Accessories, data and data.Equipment, data and data.Items, data and data.Inventory }
     for _, src in ipairs(eqSources) do
         if type(src) == "table" then
@@ -295,8 +329,26 @@ local function isItemOwned(itemName, itemType, char, data)
                 local kClean = tostring(k):gsub("[%s%-_']", ""):lower()
                 local vClean = tostring(val):gsub("[%s%-_']", ""):lower()
                 if kClean == cleanName or vClean == cleanName then return true end
+                if not curBlueGuard then
+                    if BLUE_GUARD_TIERS[kClean] then curBlueGuard = kClean
+                    elseif BLUE_GUARD_TIERS[vClean] then curBlueGuard = vClean end
+                end
+                if not curRedGuard then
+                    if RED_GUARD_TIERS[kClean] then curRedGuard = kClean
+                    elseif RED_GUARD_TIERS[vClean] then curRedGuard = vClean end
+                end
             end
         end
+    end
+
+    if curBlueGuard and BLUE_GUARD_TIERS[cleanName] then
+        local c = tostring(curBlueGuard):gsub("[%s%-_']", ""):lower()
+        if BLUE_GUARD_TIERS[c] and BLUE_GUARD_TIERS[c] >= BLUE_GUARD_TIERS[cleanName] then return true end
+    end
+
+    if curRedGuard and RED_GUARD_TIERS[cleanName] then
+        local c = tostring(curRedGuard):gsub("[%s%-_']", ""):lower()
+        if RED_GUARD_TIERS[c] and RED_GUARD_TIERS[c] >= RED_GUARD_TIERS[cleanName] then return true end
     end
 
     if (itemType == "Planter" or cleanName:find("planter")) and data then
@@ -596,8 +648,79 @@ local function getAtlasRoute()
     return FullProgressionRoute
 end
 
+local function getAtlasLiveTarget()
+    local roots = { getgenv and getgenv(), _G, shared }
+    for _, r in ipairs(roots) do
+        if type(r) == "table" then
+            if r.Atlas and type(r.Atlas) == "table" then
+                if r.Atlas.ProgressionTarget then return tostring(r.Atlas.ProgressionTarget) end
+                if r.Atlas.CurrentTarget then return tostring(r.Atlas.CurrentTarget) end
+                if r.Atlas.Target then return tostring(r.Atlas.Target) end
+                if r.Atlas.CurrentPurchase then return tostring(r.Atlas.CurrentPurchase) end
+                if r.Atlas.Settings and type(r.Atlas.Settings) == "table" and r.Atlas.Settings.toys then
+                    if r.Atlas.Settings.toys.target then return tostring(r.Atlas.Settings.toys.target) end
+                end
+            end
+            if r.ProgressionTarget then return tostring(r.ProgressionTarget) end
+            if r.CurrentTarget then return tostring(r.CurrentTarget) end
+            if r.CurrentPurchase then return tostring(r.CurrentPurchase) end
+        end
+    end
+
+    local uiRoots = {}
+    pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
+    pcall(function() table.insert(uiRoots, CoreGui) end)
+    pcall(function() table.insert(uiRoots, player:FindFirstChild("PlayerGui")) end)
+
+    for _, root in ipairs(uiRoots) do
+        if root then
+            for _, desc in ipairs(root:GetDescendants()) do
+                if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+                    local txt = desc.Text
+                    if txt and txt ~= "" and #txt < 100 then
+                        local matched = txt:match("[Tt]arget%s*:%s*([%w%s%-_']+)")
+                            or txt:match("[Cc]urrent%s*:%s*([%w%s%-_']+)")
+                            or txt:match("[Pp]rog%w*%s*:%s*([%w%s%-_']+)")
+                            or txt:match("[Bb]uying%s*:%s*([%w%s%-_']+)")
+                            or txt:match("[Cc]rafting%s*:%s*([%w%s%-_']+)")
+                            or txt:match("[Nn]ext%s*:%s*([%w%s%-_']+)")
+                        if matched then
+                            local mClean = matched:gsub("^%s+", ""):gsub("%s+$", ""):gsub("[%s%-_']", ""):lower()
+                            for _, entry in ipairs(FullProgressionRoute) do
+                                local eClean = entry.Name:gsub("[%s%-_']", ""):lower()
+                                if mClean == eClean or mClean:find(eClean) or eClean:find(mClean) then
+                                    return entry.Name
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local function evaluateRoute(data, beeCount)
     local char = player.Character
+
+    local liveTarget = getAtlasLiveTarget()
+    if liveTarget then
+        for _, milestone in ipairs(FullProgressionRoute) do
+            local c1 = milestone.Name:gsub("[%s%-_']", ""):lower()
+            local c2 = liveTarget:gsub("[%s%-_']", ""):lower()
+            if c1 == c2 then
+                if milestone.Ingredients then
+                    for _, ing in ipairs(milestone.Ingredients) do
+                        local missingMat, missingAmt, targetField = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
+                        if targetField then return milestone.Name, missingMat, missingAmt, targetField end
+                    end
+                end
+                return milestone.Name, nil, 0, nil
+            end
+        end
+    end
+
     local activeRoute = getAtlasRoute()
     for _, milestone in ipairs(activeRoute) do
         local owned = isItemOwned(milestone.Name, milestone.Type, char, data)
