@@ -1335,6 +1335,7 @@ local ALL_BEES = {
     {Name = "Looker Bee", Rarity = "Rare"},
     {Name = "Rad Bee", Rarity = "Rare"},
     {Name = "Rascal Bee", Rarity = "Rare"},
+    {Name = "Stubborn Bee", Rarity = "Rare"},
     {Name = "Bubble Bee", Rarity = "Epic"},
     {Name = "Bucko Bee", Rarity = "Epic"},
     {Name = "Commander Bee", Rarity = "Epic"},
@@ -1476,6 +1477,40 @@ end
 local function buildBeeIdMap(data)
     local idMap = {}
 
+    pcall(function()
+        local btMod = RS:FindFirstChild("BeeTypes")
+        if btMod and btMod:IsA("ModuleScript") then
+            local bt = require(btMod)
+            if type(bt) == "table" then
+                local numTbl = nil
+                if type(bt.GetNumberedTypes) == "function" then
+                    numTbl = bt:GetNumberedTypes() or bt.GetNumberedTypes()
+                elseif type(bt.NumberedTypes) == "table" then
+                    numTbl = bt.NumberedTypes
+                end
+                if type(numTbl) == "table" then
+                    for id, name in pairs(numTbl) do
+                        local bName = extractBeeName(tostring(name))
+                        local nId = tonumber(id)
+                        if bName and nId then
+                            idMap[nId] = bName
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    if data and type(data.DiscoveredBees) == "table" then
+        for k, v in pairs(data.DiscoveredBees) do
+            local bn = extractBeeName(tostring(v))
+            local nId = tonumber(k)
+            if bn and nId and not idMap[nId] then
+                idMap[nId] = bn
+            end
+        end
+    end
+
     local function scanTbl(tbl, depth)
         if type(tbl) ~= "table" or depth > 3 then return end
         for k, v in pairs(tbl) do
@@ -1509,17 +1544,17 @@ local function buildBeeIdMap(data)
                     beeName = extractBeeName(k)
                 end
 
-                if numId and beeName then
+                if numId and beeName and not idMap[numId] then
                     idMap[numId] = beeName
                 end
 
                 scanTbl(v, depth + 1)
             elseif type(v) == "string" and type(k) == "number" and k > 0 and k <= 100 then
                 local bn = extractBeeName(v)
-                if bn then idMap[k] = bn end
+                if bn and not idMap[k] then idMap[k] = bn end
             elseif type(k) == "string" and type(v) == "number" and v > 0 and v <= 100 then
                 local bn = extractBeeName(k)
-                if bn then idMap[v] = bn end
+                if bn and not idMap[v] then idMap[v] = bn end
             end
         end
     end
@@ -1529,13 +1564,17 @@ local function buildBeeIdMap(data)
         pcall(function()
             local res = require(mod)
             if type(res) == "table" then
+                if type(res.GetTypes) == "function" then
+                    local t = res:GetTypes() or res.GetTypes()
+                    if type(t) == "table" then scanTbl(t, 1) end
+                end
                 scanTbl(res, 1)
             end
         end)
     end
 
     local moduleNames = {
-        "EggTypes", "BeeTypes", "Types", "Bees", "BeeData",
+        "EggTypes", "HCCellTypes", "Types", "Bees", "BeeData",
         "Events", "EventTypes", "EventBees", "EventData",
         "ToyTypes", "ItemTypes", "ItemData", "CollectorTypes",
         "Accessories", "ShopData", "Shops"
@@ -1551,18 +1590,6 @@ local function buildBeeIdMap(data)
                 if child:IsA("ModuleScript") then
                     safeInspect(child)
                 end
-            end
-        end
-    end
-
-    if data and type(data.DiscoveredBees) == "table" then
-        for k, v in pairs(data.DiscoveredBees) do
-            if type(k) == "number" and type(v) == "string" and k > 0 and k <= 100 then
-                local bn = extractBeeName(v)
-                if bn and not idMap[k] then idMap[k] = bn end
-            elseif type(k) == "string" and type(v) == "number" and v > 0 and v <= 100 then
-                local bn = extractBeeName(k)
-                if bn and not idMap[v] then idMap[v] = bn end
             end
         end
     end
