@@ -1474,8 +1474,60 @@ local function isEntryGifted(v, kStr, parentName)
     return false
 end
 
-local function buildBeeIdMap(data)
+local CANONICAL_BEE_IDS = {
+    [1] = "Basic Bee",
+    [2] = "Bomber Bee",
+    [3] = "Brave Bee",
+    [4] = "Bumble Bee",
+    [5] = "Cool Bee",
+    [6] = "Hasty Bee",
+    [7] = "Looker Bee",
+    [8] = "Rad Bee",
+    [9] = "Rascal Bee",
+    [10] = "Stubborn Bee",
+    [11] = "Bubble Bee",
+    [12] = "Bucko Bee",
+    [13] = "Commander Bee",
+    [14] = "Demo Bee",
+    [15] = "Exhausted Bee",
+    [16] = "Fire Bee",
+    [17] = "Frosty Bee",
+    [18] = "Honey Bee",
+    [19] = "Rage Bee",
+    [20] = "Riley Bee",
+    [21] = "Shocked Bee",
+    [22] = "Baby Bee",
+    [23] = "Carpenter Bee",
+    [24] = "Demon Bee",
+    [25] = "Diamond Bee",
+    [26] = "Lion Bee",
+    [27] = "Music Bee",
+    [28] = "Ninja Bee",
+    [29] = "Shy Bee",
+    [30] = "Buoyant Bee",
+    [31] = "Fuzzy Bee",
+    [32] = "Precise Bee",
+    [33] = "Spicy Bee",
+    [34] = "Tadpole Bee",
+    [35] = "Vector Bee",
+    [36] = "Bear Bee",
+    [37] = "Cobalt Bee",
+    [38] = "Crimson Bee",
+    [39] = "Digital Bee",
+    [40] = "Festive Bee",
+    [41] = "Gummy Bee",
+    [42] = "Photon Bee",
+    [43] = "Puppy Bee",
+    [44] = "Tabby Bee",
+    [45] = "Vicious Bee",
+    [46] = "Windy Bee"
+}
+
+local function buildBeeIdMap()
     local idMap = {}
+    for id, name in pairs(CANONICAL_BEE_IDS) do
+        idMap[id] = name
+    end
 
     pcall(function()
         local etMod = RS:FindFirstChild("EggTypes")
@@ -1484,134 +1536,20 @@ local function buildBeeIdMap(data)
             if type(et) == "table" and type(et.GetOrderedNames) == "function" then
                 local ord = et:GetOrderedNames() or et.GetOrderedNames()
                 if type(ord) == "table" then
-                    for id, name in pairs(ord) do
-                        local bName = extractBeeName(tostring(name))
-                        local nId = tonumber(id)
-                        if bName and nId then
-                            idMap[nId] = bName
+                    for idx, name in pairs(ord) do
+                        local nIdx = tonumber(idx)
+                        if nIdx and nIdx >= 112 and nIdx <= 249 and (nIdx - 112) % 3 == 0 then
+                            local beeId = math.floor((nIdx - 112) / 3) + 1
+                            local bName = extractBeeName(tostring(name))
+                            if bName and beeId >= 1 and beeId <= 46 then
+                                idMap[beeId] = bName
+                            end
                         end
                     end
                 end
             end
         end
     end)
-
-    pcall(function()
-        local btMod = RS:FindFirstChild("BeeTypes")
-        if btMod and btMod:IsA("ModuleScript") then
-            local bt = require(btMod)
-            if type(bt) == "table" then
-                local numTbl = nil
-                if type(bt.GetNumberedTypes) == "function" then
-                    numTbl = bt:GetNumberedTypes() or bt.GetNumberedTypes()
-                elseif type(bt.NumberedTypes) == "table" then
-                    numTbl = bt.NumberedTypes
-                end
-                if type(numTbl) == "table" then
-                    for id, name in pairs(numTbl) do
-                        local bName = extractBeeName(tostring(name))
-                        local nId = tonumber(id)
-                        if bName and nId and not idMap[nId] then
-                            idMap[nId] = bName
-                        end
-                    end
-                end
-            end
-        end
-    end)
-
-    if data and type(data.DiscoveredBees) == "table" then
-        for k, v in pairs(data.DiscoveredBees) do
-            local bn = extractBeeName(tostring(v))
-            local nId = tonumber(k)
-            if bn and nId and not idMap[nId] then
-                idMap[nId] = bn
-            end
-        end
-    end
-
-    local function scanTbl(tbl, depth)
-        if type(tbl) ~= "table" or depth > 3 then return end
-        for k, v in pairs(tbl) do
-            if type(v) == "table" then
-                local numId = nil
-                local beeName = nil
-
-                for _, idKey in ipairs({"Id", "ID", "id", "Index", "index", "BeeId", "TypeId", "TypeID", "Code", "Value"}) do
-                    if type(v[idKey]) == "number" and v[idKey] > 0 and v[idKey] <= 100 then
-                        numId = v[idKey]
-                        break
-                    end
-                end
-                if not numId and type(k) == "number" and k > 0 and k <= 100 then
-                    numId = k
-                end
-
-                for _, nameKey in ipairs({"Name", "name", "Species", "species", "Bee", "bee", "BeeName"}) do
-                    if type(v[nameKey]) == "string" then
-                        local bn = extractBeeName(v[nameKey])
-                        if bn then
-                            beeName = bn
-                            break
-                        end
-                    end
-                end
-                if not beeName and type(v.Type) == "string" then
-                    beeName = extractBeeName(v.Type)
-                end
-                if not beeName and type(k) == "string" then
-                    beeName = extractBeeName(k)
-                end
-
-                if numId and beeName and not idMap[numId] then
-                    idMap[numId] = beeName
-                end
-
-                scanTbl(v, depth + 1)
-            elseif type(v) == "string" and type(k) == "number" and k > 0 and k <= 100 then
-                local bn = extractBeeName(v)
-                if bn and not idMap[k] then idMap[k] = bn end
-            elseif type(k) == "string" and type(v) == "number" and v > 0 and v <= 100 then
-                local bn = extractBeeName(k)
-                if bn and not idMap[v] then idMap[v] = bn end
-            end
-        end
-    end
-
-    local function safeInspect(mod)
-        if not mod or not mod:IsA("ModuleScript") then return end
-        pcall(function()
-            local res = require(mod)
-            if type(res) == "table" then
-                if type(res.GetTypes) == "function" then
-                    local t = res:GetTypes() or res.GetTypes()
-                    if type(t) == "table" then scanTbl(t, 1) end
-                end
-                scanTbl(res, 1)
-            end
-        end)
-    end
-
-    local moduleNames = {
-        "EggTypes", "HCCellTypes", "Types", "Bees", "BeeData",
-        "Events", "EventTypes", "EventBees", "EventData",
-        "ToyTypes", "ItemTypes", "ItemData", "CollectorTypes",
-        "Accessories", "ShopData", "Shops"
-    }
-    for _, mName in ipairs(moduleNames) do
-        safeInspect(RS:FindFirstChild(mName))
-    end
-
-    for _, folderName in ipairs({"Modules", "Data", "Bees", "Events", "Types"}) do
-        local folder = RS:FindFirstChild(folderName)
-        if folder and folder:IsA("Folder") then
-            for _, child in ipairs(folder:GetChildren()) do
-                if child:IsA("ModuleScript") then
-                    safeInspect(child)
-                end
-            end
-        end
-    end
 
     return idMap
 end
