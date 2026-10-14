@@ -125,31 +125,128 @@ local function getItemAmount(item, data)
     return 0
 end
 
+local TOOL_TIERS = {
+    ["scooper"] = 1, ["rake"] = 2, ["clipper"] = 3, ["magnet"] = 4, ["vacuum"] = 5,
+    ["superscooper"] = 6, ["pulsar"] = 7, ["electromagnet"] = 8, ["scissors"] = 9,
+    ["honeydipper"] = 10, ["bubblewand"] = 11, ["scythe"] = 11, ["goldenrake"] = 12,
+    ["porcelaindipper"] = 13, ["petalwand"] = 14, ["tidepopper"] = 15, ["darkscythe"] = 15,
+    ["gummyballer"] = 15
+}
+
+local BAG_TIERS = {
+    ["pouch"] = 1, ["backpack"] = 2, ["jar"] = 3, ["canister"] = 4, ["jug"] = 5,
+    ["megajug"] = 6, ["barrel"] = 7, ["compressor"] = 8, ["elitebarrel"] = 9,
+    ["portohive"] = 10, ["blueportohive"] = 11, ["redportohive"] = 11,
+    ["porcelainportohive"] = 12, ["coconutcanister"] = 13
+}
+
+local BOOTS_TIERS = {
+    ["hikingboots"] = 1, ["cleanboots"] = 2, ["beekeepersboots"] = 3,
+    ["coconutclogs"] = 4, ["gummyboots"] = 5
+}
+
+local BELT_TIERS = {
+    ["beltpocket"] = 1, ["utilitybelt"] = 2, ["beltbag"] = 3,
+    ["mondobeltbag"] = 4, ["honeycombbelt"] = 5, ["petalbelt"] = 6
+}
+
+local HAT_TIERS = {
+    ["helmet"] = 1, ["propellerhat"] = 2, ["beekeepersmask"] = 3,
+    ["honeymask"] = 4, ["bubblemask"] = 4, ["firemask"] = 4,
+    ["gummymask"] = 5, ["demonmask"] = 5, ["diamondmask"] = 5
+}
+
+local SPRINKLER_TIERS = {
+    ["basicsprinkler"] = 1, ["silversoakers"] = 2, ["goldengushers"] = 3,
+    ["diamonddrenchers"] = 4, ["thesupremesaturator"] = 5, ["supremesaturator"] = 5
+}
+
 local function isItemOwned(itemName, itemType, char, data)
     if not itemName then return false end
-    if char and char:FindFirstChild(itemName) then return true end
-    if player.Backpack and player.Backpack:FindFirstChild(itemName) then return true end
+    local cleanName = tostring(itemName):gsub("[%s%-_']", ""):lower()
+
+    if char and (char:FindFirstChild(itemName) or char:FindFirstChild(cleanName)) then return true end
+    if player.Backpack and (player.Backpack:FindFirstChild(itemName) or player.Backpack:FindFirstChild(cleanName)) then return true end
     if char then
         for _, child in ipairs(char:GetChildren()) do
-            if child.Name == itemName then return true end
+            local cName = child.Name:gsub("[%s%-_']", ""):lower()
+            if cName == cleanName then return true end
         end
     end
-    if data then
-        local equipTables = { data.Equipped, data.Equipment }
-        for _, eqTable in ipairs(equipTables) do
-            if type(eqTable) == "table" then
-                for _, eq in pairs(eqTable) do
-                    if tostring(eq) == itemName then return true end
+
+    local eq = (data and (data.Equipped or data.Equipment)) or {}
+
+    local curTool = eq.Collector or (char and char:FindFirstChildWhichIsA("Tool") and char:FindFirstChildWhichIsA("Tool").Name)
+    if curTool then
+        local curToolClean = tostring(curTool):gsub("[%s%-_']", ""):lower()
+        if curToolClean == cleanName then return true end
+        if TOOL_TIERS[curToolClean] and TOOL_TIERS[cleanName] then
+            if TOOL_TIERS[curToolClean] >= TOOL_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curBag = eq.Bag
+    if curBag then
+        local curBagClean = tostring(curBag):gsub("[%s%-_']", ""):lower()
+        if curBagClean == cleanName then return true end
+        if BAG_TIERS[curBagClean] and BAG_TIERS[cleanName] then
+            if BAG_TIERS[curBagClean] >= BAG_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curBoots = eq.Boots
+    if curBoots then
+        local curBootsClean = tostring(curBoots):gsub("[%s%-_']", ""):lower()
+        if curBootsClean == cleanName then return true end
+        if BOOTS_TIERS[curBootsClean] and BOOTS_TIERS[cleanName] then
+            if BOOTS_TIERS[curBootsClean] >= BOOTS_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curBelt = eq.Belt
+    if curBelt then
+        local curBeltClean = tostring(curBelt):gsub("[%s%-_']", ""):lower()
+        if curBeltClean == cleanName then return true end
+        if BELT_TIERS[curBeltClean] and BELT_TIERS[cleanName] then
+            if BELT_TIERS[curBeltClean] >= BELT_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curHat = eq.Hat
+    if curHat then
+        local curHatClean = tostring(curHat):gsub("[%s%-_']", ""):lower()
+        if curHatClean == cleanName then return true end
+        if HAT_TIERS[curHatClean] and HAT_TIERS[cleanName] then
+            if HAT_TIERS[curHatClean] >= HAT_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curSprinkler = eq.Sprinkler
+    if curSprinkler then
+        local curSprinklerClean = tostring(curSprinkler):gsub("[%s%-_']", ""):lower()
+        if curSprinklerClean == cleanName then return true end
+        if SPRINKLER_TIERS[curSprinklerClean] and SPRINKLER_TIERS[cleanName] then
+            if SPRINKLER_TIERS[curSprinklerClean] >= SPRINKLER_TIERS[cleanName] then return true end
+        end
+    end
+
+    if type(eq) == "table" then
+        for _, val in pairs(eq) do
+            if tostring(val):gsub("[%s%-_']", ""):lower() == cleanName then return true end
+        end
+    end
+
+    if itemType == "Planter" and data then
+        local planterTables = { data.Planters, data.PurchasedPlanters }
+        for _, pTable in ipairs(planterTables) do
+            if type(pTable) == "table" then
+                for pName in pairs(pTable) do
+                    if tostring(pName):gsub("[%s%-_']", ""):lower() == cleanName then return true end
                 end
             end
         end
-        if itemType == "Planter" then
-            local planterTables = { data.Planters, data.PurchasedPlanters }
-            for _, pTable in ipairs(planterTables) do
-                if type(pTable) == "table" and pTable[itemName] then return true end
-            end
-        end
     end
+
     return false
 end
 

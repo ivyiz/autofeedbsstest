@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 
 local RECIPES = {
@@ -11,6 +12,42 @@ local RECIPES = {
     ["Gumdrop"] = { { Item = "Strawberry", Amount = 3 }, { Item = "Blueberry", Amount = 3 }, { Item = "Pineapple", Amount = 3 } },
     ["Glue"] = { { Item = "Gumdrop", Amount = 50 } },
     ["Tropical Drink"] = { { Item = "Coconut", Amount = 10 }, { Item = "Enzymes", Amount = 2 }, { Item = "Oil", Amount = 2 } }
+}
+
+local TOOL_TIERS = {
+    ["scooper"] = 1, ["rake"] = 2, ["clipper"] = 3, ["magnet"] = 4, ["vacuum"] = 5,
+    ["superscooper"] = 6, ["pulsar"] = 7, ["electromagnet"] = 8, ["scissors"] = 9,
+    ["honeydipper"] = 10, ["bubblewand"] = 11, ["scythe"] = 11, ["goldenrake"] = 12,
+    ["porcelaindipper"] = 13, ["petalwand"] = 14, ["tidepopper"] = 15, ["darkscythe"] = 15,
+    ["gummyballer"] = 15
+}
+
+local BAG_TIERS = {
+    ["pouch"] = 1, ["backpack"] = 2, ["jar"] = 3, ["canister"] = 4, ["jug"] = 5,
+    ["megajug"] = 6, ["barrel"] = 7, ["compressor"] = 8, ["elitebarrel"] = 9,
+    ["portohive"] = 10, ["blueportohive"] = 11, ["redportohive"] = 11,
+    ["porcelainportohive"] = 12, ["coconutcanister"] = 13
+}
+
+local BOOTS_TIERS = {
+    ["hikingboots"] = 1, ["cleanboots"] = 2, ["beekeepersboots"] = 3,
+    ["coconutclogs"] = 4, ["gummyboots"] = 5
+}
+
+local BELT_TIERS = {
+    ["beltpocket"] = 1, ["utilitybelt"] = 2, ["beltbag"] = 3,
+    ["mondobeltbag"] = 4, ["honeycombbelt"] = 5, ["petalbelt"] = 6
+}
+
+local HAT_TIERS = {
+    ["helmet"] = 1, ["propellerhat"] = 2, ["beekeepersmask"] = 3,
+    ["honeymask"] = 4, ["bubblemask"] = 4, ["firemask"] = 4,
+    ["gummymask"] = 5, ["demonmask"] = 5, ["diamondmask"] = 5
+}
+
+local SPRINKLER_TIERS = {
+    ["basicsprinkler"] = 1, ["silversoakers"] = 2, ["goldengushers"] = 3,
+    ["diamonddrenchers"] = 4, ["thesupremesaturator"] = 5, ["supremesaturator"] = 5
 }
 
 local FullProgressionRoute = {
@@ -127,29 +164,90 @@ end
 
 local function isItemOwned(itemName, itemType, char, data)
     if not itemName then return false end
-    if char and char:FindFirstChild(itemName) then return true end
-    if player.Backpack and player.Backpack:FindFirstChild(itemName) then return true end
+    local cleanName = tostring(itemName):gsub("[%s%-_']", ""):lower()
+
+    if char and (char:FindFirstChild(itemName) or char:FindFirstChild(cleanName)) then return true end
+    if player.Backpack and (player.Backpack:FindFirstChild(itemName) or player.Backpack:FindFirstChild(cleanName)) then return true end
     if char then
         for _, child in ipairs(char:GetChildren()) do
-            if child.Name == itemName then return true end
+            local cName = child.Name:gsub("[%s%-_']", ""):lower()
+            if cName == cleanName then return true end
         end
     end
-    if data then
-        local equipTables = { data.Equipped, data.Equipment }
-        for _, eqTable in ipairs(equipTables) do
-            if type(eqTable) == "table" then
-                for _, eq in pairs(eqTable) do
-                    if tostring(eq) == itemName then return true end
+
+    local eq = (data and (data.Equipped or data.Equipment)) or {}
+
+    local curTool = eq.Collector or (char and char:FindFirstChildWhichIsA("Tool") and char:FindFirstChildWhichIsA("Tool").Name)
+    if curTool then
+        local curToolClean = tostring(curTool):gsub("[%s%-_']", ""):lower()
+        if curToolClean == cleanName then return true end
+        if TOOL_TIERS[curToolClean] and TOOL_TIERS[cleanName] then
+            if TOOL_TIERS[curToolClean] >= TOOL_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curBag = eq.Bag
+    if curBag then
+        local curBagClean = tostring(curBag):gsub("[%s%-_']", ""):lower()
+        if curBagClean == cleanName then return true end
+        if BAG_TIERS[curBagClean] and BAG_TIERS[cleanName] then
+            if BAG_TIERS[curBagClean] >= BAG_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curBoots = eq.Boots
+    if curBoots then
+        local curBootsClean = tostring(curBoots):gsub("[%s%-_']", ""):lower()
+        if curBootsClean == cleanName then return true end
+        if BOOTS_TIERS[curBootsClean] and BOOTS_TIERS[cleanName] then
+            if BOOTS_TIERS[curBootsClean] >= BOOTS_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curBelt = eq.Belt
+    if curBelt then
+        local curBeltClean = tostring(curBelt):gsub("[%s%-_']", ""):lower()
+        if curBeltClean == cleanName then return true end
+        if BELT_TIERS[curBeltClean] and BELT_TIERS[cleanName] then
+            if BELT_TIERS[curBeltClean] >= BELT_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curHat = eq.Hat
+    if curHat then
+        local curHatClean = tostring(curHat):gsub("[%s%-_']", ""):lower()
+        if curHatClean == cleanName then return true end
+        if HAT_TIERS[curHatClean] and HAT_TIERS[cleanName] then
+            if HAT_TIERS[curHatClean] >= HAT_TIERS[cleanName] then return true end
+        end
+    end
+
+    local curSprinkler = eq.Sprinkler
+    if curSprinkler then
+        local curSprinklerClean = tostring(curSprinkler):gsub("[%s%-_']", ""):lower()
+        if curSprinklerClean == cleanName then return true end
+        if SPRINKLER_TIERS[curSprinklerClean] and SPRINKLER_TIERS[cleanName] then
+            if SPRINKLER_TIERS[curSprinklerClean] >= SPRINKLER_TIERS[cleanName] then return true end
+        end
+    end
+
+    if type(eq) == "table" then
+        for _, val in pairs(eq) do
+            if tostring(val):gsub("[%s%-_']", ""):lower() == cleanName then return true end
+        end
+    end
+
+    if itemType == "Planter" and data then
+        local planterTables = { data.Planters, data.PurchasedPlanters }
+        for _, pTable in ipairs(planterTables) do
+            if type(pTable) == "table" then
+                for pName in pairs(pTable) do
+                    if tostring(pName):gsub("[%s%-_']", ""):lower() == cleanName then return true end
                 end
             end
         end
-        if itemType == "Planter" then
-            local planterTables = { data.Planters, data.PurchasedPlanters }
-            for _, pTable in ipairs(planterTables) do
-                if type(pTable) == "table" and pTable[itemName] then return true end
-            end
-        end
     end
+
     return false
 end
 
@@ -195,65 +293,83 @@ local function resolveMissingMaterial(item, neededAmount, data, beeCount)
     return nil
 end
 
-local function getAtlasRoute()
-    if getgenv and getgenv().Atlas then
-        local atlas = getgenv().Atlas
-        local candidateRoutes = {
-            atlas.ProgressionRoute,
-            atlas.AutoProgRoute,
-            atlas.Route,
-            atlas.Progression and atlas.Progression.Route,
-            atlas.AutoProgression and atlas.AutoProgression.Route,
-            atlas.Settings and atlas.Settings.AutoProgression and atlas.Settings.AutoProgression.Route,
-            atlas.Settings and atlas.Settings.Progression and atlas.Settings.Progression.Route,
-            atlas.Settings and atlas.Settings.Route
-        }
-
-        local itemMap = {}
-        for _, entry in ipairs(FullProgressionRoute) do
-            local clean = entry.Name:gsub("%s+", ""):lower()
-            itemMap[clean] = entry
-            itemMap[entry.Name:lower()] = entry
+local function extractPurchaseList(tbl, depth)
+    if type(tbl) ~= "table" or ((depth or 0) > 4) then return nil end
+    for _, block in pairs(tbl) do
+        if type(block) == "table" and block.Type == "Purchase" and type(block.Data) == "table" then
+            return block.Data
         end
+    end
+    if #tbl > 0 and type(tbl[1]) == "string" then
+        local clean = tbl[1]:gsub("[%s%-_']", ""):lower()
+        if TOOL_TIERS[clean] or BAG_TIERS[clean] or HAT_TIERS[clean] then
+            return tbl
+        end
+    end
+    for k, v in pairs(tbl) do
+        if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
+            local res = extractPurchaseList(v, (depth or 0) + 1)
+            if res then return res end
+        end
+    end
+    return nil
+end
 
-        for _, routeList in ipairs(candidateRoutes) do
-            if type(routeList) == "table" and #routeList > 0 then
-                local rawItemsList = nil
+local function getAtlasRoute()
+    local rawItemsList = nil
 
-                for _, block in ipairs(routeList) do
-                    if type(block) == "table" and block.Type == "Purchase" and type(block.Data) == "table" then
-                        rawItemsList = block.Data
-                        break
-                    end
-                end
+    if getgenv then
+        if getgenv().AtlasRoute then
+            rawItemsList = extractPurchaseList(getgenv().AtlasRoute, 0) or (type(getgenv().AtlasRoute) == "table" and getgenv().AtlasRoute)
+        end
+        if not rawItemsList and getgenv().Atlas then
+            rawItemsList = extractPurchaseList(getgenv().Atlas, 0)
+        end
+    end
 
-                if not rawItemsList and (type(routeList[1]) == "string" or (type(routeList[1]) == "table" and routeList[1].Name)) then
-                    rawItemsList = routeList
-                end
-
-                if rawItemsList then
-                    local dynamicRoute = {}
-                    for _, rawItem in ipairs(rawItemsList) do
-                        local name = (type(rawItem) == "table" and (rawItem.Name or rawItem.Item or rawItem.Target or rawItem.Gear)) or (type(rawItem) == "string" and rawItem)
-                        local reqBees = (type(rawItem) == "table" and (rawItem.Bees or rawItem.BeeCount or rawItem.ReqBees))
-                        if name then
-                            local cleanName = tostring(name):gsub("%s+", ""):lower()
-                            local base = itemMap[cleanName] or itemMap[tostring(name):lower()]
-                            table.insert(dynamicRoute, {
-                                Name = base and base.Name or name,
-                                Type = base and base.Type or "Gear",
-                                Bees = tonumber(reqBees) or (base and base.Bees) or 0,
-                                Ingredients = base and base.Ingredients or nil
-                            })
-                        end
-                    end
-                    if #dynamicRoute > 0 then
-                        return dynamicRoute
+    if not rawItemsList and isfile and readfile then
+        local files = { "route.json", "Atlas/route.json", "Atlas/progression.json", "Atlas/AutoProgression.json", "Atlas/AutoProg.json" }
+        for _, path in ipairs(files) do
+            if isfile(path) then
+                local ok, content = pcall(readfile, path)
+                if ok and content and content ~= "" then
+                    local s, decoded = pcall(function() return HttpService:JSONDecode(content) end)
+                    if s and type(decoded) == "table" then
+                        rawItemsList = extractPurchaseList(decoded, 0)
+                        if rawItemsList then break end
                     end
                 end
             end
         end
     end
+
+    if rawItemsList and type(rawItemsList) == "table" and #rawItemsList > 0 then
+        local itemMap = {}
+        for _, entry in ipairs(FullProgressionRoute) do
+            local clean = entry.Name:gsub("[%s%-_']", ""):lower()
+            itemMap[clean] = entry
+        end
+
+        local dynamicRoute = {}
+        for _, rawItem in ipairs(rawItemsList) do
+            local name = (type(rawItem) == "table" and (rawItem.Name or rawItem.Item or rawItem.Target or rawItem.Gear)) or (type(rawItem) == "string" and rawItem)
+            local reqBees = (type(rawItem) == "table" and (rawItem.Bees or rawItem.BeeCount or rawItem.ReqBees))
+            if name then
+                local cleanName = tostring(name):gsub("[%s%-_']", ""):lower()
+                local base = itemMap[cleanName]
+                table.insert(dynamicRoute, {
+                    Name = base and base.Name or tostring(name),
+                    Type = base and base.Type or "Gear",
+                    Bees = tonumber(reqBees) or (base and base.Bees) or 0,
+                    Ingredients = base and base.Ingredients or nil
+                })
+            end
+        end
+        if #dynamicRoute > 0 then
+            return dynamicRoute
+        end
+    end
+
     return FullProgressionRoute
 end
 
