@@ -30,13 +30,14 @@ local BAG_TIERS = {
 }
 
 local BOOTS_TIERS = {
-    ["hikingboots"] = 1, ["cleanboots"] = 2, ["beekeepersboots"] = 3,
-    ["coconutclogs"] = 4, ["gummyboots"] = 5
+    ["basicboots"] = 1, ["hikingboots"] = 2, ["cleanboots"] = 3,
+    ["beekeepersboots"] = 4, ["coconutclogs"] = 5, ["gummyboots"] = 6
 }
 
 local BELT_TIERS = {
     ["beltpocket"] = 1, ["utilitybelt"] = 2, ["beltbag"] = 3,
-    ["mondobeltbag"] = 4, ["honeycombbelt"] = 5, ["petalbelt"] = 6
+    ["mondobeltbag"] = 4, ["honeycombbelt"] = 5, ["petalbelt"] = 6,
+    ["coconutbelt"] = 7
 }
 
 local HAT_TIERS = {
@@ -51,52 +52,66 @@ local SPRINKLER_TIERS = {
 }
 
 local FullProgressionRoute = {
+    { Bees = 0, Name = "Backpack", Type = "Bag" },
+    { Bees = 0, Name = "Magnet", Type = "Tool" },
+    { Bees = 0, Name = "Canister", Type = "Bag" },
     { Bees = 0, Name = "Vacuum", Type = "Tool" },
-    { Bees = 3, Name = "Backpack", Type = "Bag" },
-    { Bees = 3, Name = "Helmet", Type = "Hat" },
     { Bees = 3, Name = "Belt Pocket", Type = "Belt" },
-    { Bees = 5, Name = "Canister", Type = "Bag" },
-    { Bees = 10, Name = "Super-Scooper", Type = "Tool" },
+    { Bees = 3, Name = "Basic Boots", Type = "Boots" },
+    { Bees = 5, Name = "Compressor", Type = "Bag" },
+    { Bees = 5, Name = "Super-Scooper", Type = "Tool" },
+    { Bees = 5, Name = "Helmet", Type = "Hat" },
+    { Bees = 10, Name = "Port-O-Hive", Type = "Bag" },
     { Bees = 10, Name = "Mega-Jug", Type = "Bag" },
-    { Bees = 10, Name = "Brave Guard", Type = "Guard" },
-    { Bees = 10, Name = "Looker Guard", Type = "Guard" },
+    { Bees = 10, Name = "Electro-Magnet", Type = "Tool" },
+    { Bees = 10, Name = "Honey Dipper", Type = "Tool" },
     { Bees = 10, Name = "Propeller Hat", Type = "Hat" },
+    { Bees = 10, Name = "Looker Guard", Type = "Guard" },
+    { Bees = 10, Name = "Brave Guard", Type = "Guard" },
+    { Bees = 10, Name = "Hiking Boots", Type = "Boots" },
     { Bees = 12, Name = "Pulsar", Type = "Tool" },
-    { Bees = 12, Name = "Compressor", Type = "Bag" },
     { Bees = 12, Name = "Belt Bag", Type = "Belt" },
-    { Bees = 12, Name = "Electro-Magnet", Type = "Tool" },
     { Bees = 15, Name = "Scissors", Type = "Tool" },
     { Bees = 15, Name = "Elite Barrel", Type = "Bag" },
-    { Bees = 15, Name = "Honey Dipper", Type = "Tool" },
-    { Bees = 15, Name = "Port-O-Hive", Type = "Bag" },
     { Bees = 20, Name = "Bubble Wand", Type = "Tool", Ingredients = { { Item = "Blueberry", Amount = 50 } } },
+    { Bees = 20, Name = "Basic Sprinkler", Type = "Sprinkler" },
+    { Bees = 20, Name = "Plastic Planter", Type = "Planter" },
+    { Bees = 20, Name = "Beekeeper's Mask", Type = "Hat" },
+    { Bees = 20, Name = "Beekeeper's Boots", Type = "Boots" },
+    { Bees = 25, Name = "Mondo Belt Bag", Type = "Belt", Ingredients = { { Item = "Sunflower Seed", Amount = 50 }, { Item = "Pineapple", Amount = 50 } } },
     { Bees = 20, Name = "Blue Port-O-Hive", Type = "Bag", Ingredients = { { Item = "Blueberry", Amount = 100 } } },
+    { Bees = 20, Name = "Silver Soakers", Type = "Sprinkler" },
     { Bees = 20, Name = "Elite Blue Guard", Type = "Guard", Ingredients = { { Item = "Blueberry", Amount = 50 } } },
     { Bees = 20, Name = "Elite Red Guard", Type = "Guard", Ingredients = { { Item = "Strawberry", Amount = 50 } } },
-    { Bees = 20, Name = "Plastic Planter", Type = "Planter" },
     { Bees = 25, Name = "Bucko Guard", Type = "Guard", Ingredients = { { Item = "Blueberry", Amount = 100 }, { Item = "Blue Extract", Amount = 5 } } },
     { Bees = 25, Name = "Riley Guard", Type = "Guard", Ingredients = { { Item = "Strawberry", Amount = 100 }, { Item = "Red Extract", Amount = 5 } } },
+    { Bees = 25, Name = "Candy Planter", Type = "Planter", Ingredients = { { Item = "Gumdrop", Amount = 100 } } },
     { Bees = 25, Name = "Glider", Type = "Glider" },
-    { Bees = 25, Name = "Beekeeper's Boots", Type = "Boots" },
-    { Bees = 25, Name = "Mondo Belt Bag", Type = "Belt", Ingredients = { { Item = "Sunflower Seed", Amount = 50 }, { Item = "Pineapple", Amount = 50 } } },
+    { Bees = 25, Name = "Golden Rake", Type = "Tool" },
+    { Bees = 25, Name = "Porcelain Dipper", Type = "Tool" },
+    { Bees = 25, Name = "Porcelain Port-O-Hive", Type = "Bag" },
     { Bees = 25, Name = "Blue Clay Planter", Type = "Planter", Ingredients = { { Item = "Blueberry", Amount = 50 } } },
     { Bees = 25, Name = "Red Clay Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 50 } } },
-    { Bees = 27, Name = "Beekeeper's Mask", Type = "Hat" },
-    { Bees = 27, Name = "Candy Planter", Type = "Planter", Ingredients = { { Item = "Gumdrop", Amount = 100 } } },
-    { Bees = 29, Name = "Golden Rake", Type = "Tool" },
-    { Bees = 29, Name = "Porcelain Dipper", Type = "Tool" },
-    { Bees = 29, Name = "Porcelain Port-O-Hive", Type = "Bag" },
-    { Bees = 29, Name = "Golden Gushers", Type = "Sprinkler" },
-    { Bees = 35, Name = "Bubble Mask", Type = "Hat", Ingredients = { { Item = "Blueberry", Amount = 250 }, { Item = "Blue Extract", Amount = 50 } } },
+    { Bees = 20, Name = "Bubble Mask", Type = "Hat", Ingredients = { { Item = "Blueberry", Amount = 250 }, { Item = "Blue Extract", Amount = 50 } } },
+    { Bees = 20, Name = "Cobalt Guard", Type = "Guard", Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
+    { Bees = 25, Name = "Golden Gushers", Type = "Sprinkler" },
     { Bees = 35, Name = "Tacky Planter", Type = "Planter", Ingredients = { { Item = "Sunflower Seed", Amount = 500 } } },
-    { Bees = 35, Name = "Petal Belt", Type = "Belt", Ingredients = { { Item = "Glue", Amount = 25 }, { Item = "Enzymes", Amount = 75 } } },
-    { Bees = 35, Name = "Cobalt Guard", Type = "Guard", Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
-    { Bees = 35, Name = "Crimson Guard", Type = "Guard", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
-    { Bees = 37, Name = "Pesticide Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 500 } } },
-    { Bees = 37, Name = "Diamond Drenchers", Type = "Sprinkler" },
     { Bees = 20, Name = "Diamond Mask", Type = "Hat", Ingredients = { { Item = "Blue Extract", Amount = 250 }, { Item = "Oil", Amount = 150 } } },
+    { Bees = 20, Name = "Crimson Guard", Type = "Guard", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
+    { Bees = 35, Name = "Diamond Drenchers", Type = "Sprinkler" },
     { Bees = 35, Name = "Coconut Canister", Type = "Bag", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } },
-    { Bees = 35, Name = "Gummy Boots", Type = "Boots", Ingredients = { { Item = "Glue", Amount = 500 }, { Item = "Tropical Drink", Amount = 100 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } }
+    { Bees = 35, Name = "Pesticide Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 500 } } },
+    { Bees = 35, Name = "Coconut Clogs", Type = "Boots", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 50 }, { Item = "Glue", Amount = 100 }, { Item = "Oil", Amount = 100 } } },
+    { Bees = 35, Name = "The Supreme Saturator", Type = "Sprinkler" },
+    { Bees = 35, Name = "Tide Popper", Type = "Tool", Ingredients = { { Item = "Blue Extract", Amount = 1500 }, { Item = "Tropical Drink", Amount = 150 } } },
+    { Bees = 35, Name = "Hydroponic Planter", Type = "Planter", Ingredients = { { Item = "Blue Extract", Amount = 100 } } },
+    { Bees = 35, Name = "Petal Planter", Type = "Planter", Ingredients = { { Item = "Enzymes", Amount = 100 } } },
+    { Bees = 35, Name = "Heat-Treated Planter", Type = "Planter", Ingredients = { { Item = "Red Extract", Amount = 100 } } },
+    { Bees = 35, Name = "Gummy Boots", Type = "Boots", Ingredients = { { Item = "Glue", Amount = 500 }, { Item = "Tropical Drink", Amount = 100 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } },
+    { Bees = 35, Name = "Coconut Belt", Type = "Belt", Ingredients = { { Item = "Coconut", Amount = 500 }, { Item = "Tropical Drink", Amount = 250 }, { Item = "Glue", Amount = 150 }, { Item = "Enzymes", Amount = 150 } } },
+    { Bees = 35, Name = "Plenty Planter", Type = "Planter" },
+    { Bees = 35, Name = "Petal Belt", Type = "Belt", Ingredients = { { Item = "Glue", Amount = 25 }, { Item = "Enzymes", Amount = 75 } } },
+    { Bees = 35, Name = "Petal Wand", Type = "Tool", Ingredients = { { Item = "Enzymes", Amount = 75 } } }
 }
 
 local function getStatData()
@@ -177,7 +192,24 @@ local function isItemOwned(itemName, itemType, char, data)
 
     local eq = (data and (data.Equipped or data.Equipment)) or {}
 
-    local curTool = eq.Collector or (char and char:FindFirstChildWhichIsA("Tool") and char:FindFirstChildWhichIsA("Tool").Name)
+    local curTool = eq.Collector or eq.Tool
+    if not curTool then
+        local toolContainers = { char, player.Backpack }
+        for _, cont in ipairs(toolContainers) do
+            if cont then
+                local t = cont:FindFirstChildWhichIsA("Tool")
+                if t then
+                    local c = t.Name:gsub("[%s%-_']", ""):lower()
+                    if TOOL_TIERS[c] then curTool = t.Name break end
+                end
+                for _, ch in ipairs(cont:GetChildren()) do
+                    local c = ch.Name:gsub("[%s%-_']", ""):lower()
+                    if TOOL_TIERS[c] then curTool = ch.Name break end
+                end
+            end
+            if curTool then break end
+        end
+    end
     if curTool then
         local curToolClean = tostring(curTool):gsub("[%s%-_']", ""):lower()
         if curToolClean == cleanName then return true end
@@ -186,7 +218,30 @@ local function isItemOwned(itemName, itemType, char, data)
         end
     end
 
-    local curBag = eq.Bag
+    local curBag = eq.Bag or eq.Backpack
+    local curBoots = eq.Boots or eq.Shoes
+    local curBelt = eq.Belt
+    local curHat = eq.Hat or eq.Mask
+    local curSprinkler = eq.Sprinkler
+
+    if char then
+        for _, child in ipairs(char:GetChildren()) do
+            local c = child.Name:gsub("[%s%-_']", ""):lower()
+            if not curBag and BAG_TIERS[c] then curBag = child.Name end
+            if not curBoots and BOOTS_TIERS[c] then curBoots = child.Name end
+            if not curBelt and BELT_TIERS[c] then curBelt = child.Name end
+            if not curHat and HAT_TIERS[c] then curHat = child.Name end
+            if not curSprinkler and SPRINKLER_TIERS[c] then curSprinkler = child.Name end
+        end
+    end
+
+    if player.Backpack then
+        for _, child in ipairs(player.Backpack:GetChildren()) do
+            local c = child.Name:gsub("[%s%-_']", ""):lower()
+            if not curSprinkler and SPRINKLER_TIERS[c] then curSprinkler = child.Name end
+        end
+    end
+
     if curBag then
         local curBagClean = tostring(curBag):gsub("[%s%-_']", ""):lower()
         if curBagClean == cleanName then return true end
@@ -195,7 +250,6 @@ local function isItemOwned(itemName, itemType, char, data)
         end
     end
 
-    local curBoots = eq.Boots
     if curBoots then
         local curBootsClean = tostring(curBoots):gsub("[%s%-_']", ""):lower()
         if curBootsClean == cleanName then return true end
@@ -204,7 +258,6 @@ local function isItemOwned(itemName, itemType, char, data)
         end
     end
 
-    local curBelt = eq.Belt
     if curBelt then
         local curBeltClean = tostring(curBelt):gsub("[%s%-_']", ""):lower()
         if curBeltClean == cleanName then return true end
@@ -218,7 +271,6 @@ local function isItemOwned(itemName, itemType, char, data)
         ["gummymask"] = true, ["demonmask"] = true, ["diamondmask"] = true
     }
 
-    local curHat = eq.Hat
     if curHat then
         local curHatClean = tostring(curHat):gsub("[%s%-_']", ""):lower()
         if curHatClean == cleanName then return true end
@@ -227,7 +279,6 @@ local function isItemOwned(itemName, itemType, char, data)
         end
     end
 
-    local curSprinkler = eq.Sprinkler
     if curSprinkler then
         local curSprinklerClean = tostring(curSprinkler):gsub("[%s%-_']", ""):lower()
         if curSprinklerClean == cleanName then return true end
@@ -248,8 +299,8 @@ local function isItemOwned(itemName, itemType, char, data)
         end
     end
 
-    if itemType == "Planter" and data then
-        local planterTables = { data.Planters, data.PurchasedPlanters }
+    if (itemType == "Planter" or cleanName:find("planter")) and data then
+        local planterTables = { data.Planters, data.PurchasedPlanters, data.Items, data.Inventory }
         for _, pTable in ipairs(planterTables) do
             if type(pTable) == "table" then
                 for pName in pairs(pTable) do
@@ -375,12 +426,39 @@ local function extractPurchaseList(tbl, depth)
 
     local function scan(t, d)
         if type(t) ~= "table" or d > 6 then return end
-        if t.Type == "Purchase" and type(t.Data) == "table" then
-            for _, itm in ipairs(t.Data) do
-                table.insert(items, itm)
+
+        local p = t.purchase or t.Purchase
+        if p then
+            local reqBees = t.required_bees or t.Bees or t.req_bees or 0
+            if type(p) == "table" then
+                for _, itm in ipairs(p) do
+                    if type(itm) == "string" then
+                        table.insert(items, { Name = itm, Bees = reqBees })
+                    elseif type(itm) == "table" then
+                        table.insert(items, itm)
+                    end
+                end
+            elseif type(p) == "string" then
+                table.insert(items, { Name = p, Bees = reqBees })
             end
-            return
         end
+
+        if (t.Type == "Purchase" or t.type == "purchase" or t.type == "Purchase") and (t.Data or t.data) then
+            local data = t.Data or t.data
+            local reqBees = t.Bees or t.required_bees or 0
+            if type(data) == "table" then
+                for _, itm in ipairs(data) do
+                    if type(itm) == "string" then
+                        table.insert(items, { Name = itm, Bees = reqBees })
+                    elseif type(itm) == "table" then
+                        table.insert(items, itm)
+                    end
+                end
+            elseif type(data) == "string" then
+                table.insert(items, { Name = data, Bees = reqBees })
+            end
+        end
+
         for k, v in pairs(t) do
             if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
                 scan(v, d + 1)
@@ -447,10 +525,16 @@ local function readAtlasFileRoute()
     for _, path in ipairs(filesToTry) do
         if isfile(path) then
             local ok, content = pcall(readfile, path)
-            if ok and content and content:find('"toys"') and content:find('"route"') then
+            if ok and content and content ~= "" then
                 local s, decoded = pcall(function() return HttpService:JSONDecode(content) end)
-                if s and type(decoded) == "table" and decoded.toys and decoded.toys.route then
-                    return decoded.toys.route
+                if s and type(decoded) == "table" then
+                    if decoded.toys and decoded.toys.route then
+                        return decoded.toys.route
+                    elseif decoded.route then
+                        return decoded.route
+                    elseif #decoded > 0 then
+                        return decoded
+                    end
                 end
             end
         end
