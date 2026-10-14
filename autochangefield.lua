@@ -195,9 +195,54 @@ local function resolveMissingMaterial(item, neededAmount, data, beeCount)
     return nil
 end
 
+local function getAtlasRoute()
+    if getgenv and getgenv().Atlas then
+        local atlas = getgenv().Atlas
+        local candidateRoutes = {
+            atlas.ProgressionRoute,
+            atlas.AutoProgRoute,
+            atlas.Route,
+            atlas.Progression and atlas.Progression.Route,
+            atlas.AutoProgression and atlas.AutoProgression.Route,
+            atlas.Settings and atlas.Settings.AutoProgression and atlas.Settings.AutoProgression.Route,
+            atlas.Settings and atlas.Settings.Progression and atlas.Settings.Progression.Route,
+            atlas.Settings and atlas.Settings.Route
+        }
+
+        local itemMap = {}
+        for _, entry in ipairs(FullProgressionRoute) do
+            itemMap[entry.Name:lower()] = entry
+        end
+
+        for _, routeList in ipairs(candidateRoutes) do
+            if type(routeList) == "table" and #routeList > 0 then
+                local dynamicRoute = {}
+                for _, rawItem in ipairs(routeList) do
+                    local name = (type(rawItem) == "table" and (rawItem.Name or rawItem.Item or rawItem.Target or rawItem.Gear)) or (type(rawItem) == "string" and rawItem)
+                    local reqBees = (type(rawItem) == "table" and (rawItem.Bees or rawItem.BeeCount or rawItem.ReqBees))
+                    if name then
+                        local base = itemMap[name:lower()]
+                        table.insert(dynamicRoute, {
+                            Name = base and base.Name or name,
+                            Type = base and base.Type or "Gear",
+                            Bees = tonumber(reqBees) or (base and base.Bees) or 0,
+                            Ingredients = base and base.Ingredients or nil
+                        })
+                    end
+                end
+                if #dynamicRoute > 0 then
+                    return dynamicRoute
+                end
+            end
+        end
+    end
+    return FullProgressionRoute
+end
+
 local function evaluateRoute(data, beeCount)
     local char = player.Character
-    for _, milestone in ipairs(FullProgressionRoute) do
+    local activeRoute = getAtlasRoute()
+    for _, milestone in ipairs(activeRoute) do
         local owned = isItemOwned(milestone.Name, milestone.Type, char, data)
         if not owned and beeCount >= milestone.Bees then
             if milestone.Ingredients then
