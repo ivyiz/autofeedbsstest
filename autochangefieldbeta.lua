@@ -94,9 +94,9 @@ local FullProgressionRoute = {
     { Bees = 35, Name = "Crimson Guard", Type = "Guard", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
     { Bees = 37, Name = "Pesticide Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 500 } } },
     { Bees = 37, Name = "Diamond Drenchers", Type = "Sprinkler" },
-    { Bees = 39, Name = "Diamond Mask", Type = "Hat", Ingredients = { { Item = "Blue Extract", Amount = 250 }, { Item = "Oil", Amount = 150 } } },
-    { Bees = 39, Name = "Coconut Canister", Type = "Bag", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } },
-    { Bees = 45, Name = "Gummy Boots", Type = "Boots", Ingredients = { { Item = "Glue", Amount = 500 }, { Item = "Tropical Drink", Amount = 100 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } }
+    { Bees = 20, Name = "Diamond Mask", Type = "Hat", Ingredients = { { Item = "Blue Extract", Amount = 250 }, { Item = "Oil", Amount = 150 } } },
+    { Bees = 35, Name = "Coconut Canister", Type = "Bag", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } },
+    { Bees = 35, Name = "Gummy Boots", Type = "Boots", Ingredients = { { Item = "Glue", Amount = 500 }, { Item = "Tropical Drink", Amount = 100 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } }
 }
 
 local function getStatData()
@@ -213,11 +213,16 @@ local function isItemOwned(itemName, itemType, char, data)
         end
     end
 
+    local SPECIAL_MASKS = {
+        ["honeymask"] = true, ["bubblemask"] = true, ["firemask"] = true,
+        ["gummymask"] = true, ["demonmask"] = true, ["diamondmask"] = true
+    }
+
     local curHat = eq.Hat
     if curHat then
         local curHatClean = tostring(curHat):gsub("[%s%-_']", ""):lower()
         if curHatClean == cleanName then return true end
-        if HAT_TIERS[curHatClean] and HAT_TIERS[cleanName] then
+        if not SPECIAL_MASKS[cleanName] and HAT_TIERS[curHatClean] and HAT_TIERS[cleanName] then
             if HAT_TIERS[curHatClean] >= HAT_TIERS[cleanName] then return true end
         end
     end
@@ -231,9 +236,15 @@ local function isItemOwned(itemName, itemType, char, data)
         end
     end
 
-    if type(eq) == "table" then
-        for _, val in pairs(eq) do
-            if tostring(val):gsub("[%s%-_']", ""):lower() == cleanName then return true end
+    local eqSources = { eq, data and data.Accessories, data and data.Equipment, data and data.Items, data and data.Inventory }
+    for _, src in ipairs(eqSources) do
+        if type(src) == "table" then
+            if src[itemName] or src[cleanName] then return true end
+            for k, val in pairs(src) do
+                local kClean = tostring(k):gsub("[%s%-_']", ""):lower()
+                local vClean = tostring(val):gsub("[%s%-_']", ""):lower()
+                if kClean == cleanName or vClean == cleanName then return true end
+            end
         end
     end
 
@@ -257,20 +268,85 @@ local function getTargetField(material, beeCount)
         local map = { ["Blueberry"] = "Blue Flower Field", ["Strawberry"] = "Mushroom Field", ["Sunflower Seed"] = "Sunflower Field", ["Pineapple"] = "Dandelion Field" }
         return map[material]
     elseif beeCount < 15 then
-        local map = { ["Blueberry"] = "Bamboo Field", ["Strawberry"] = "Strawberry Field", ["Sunflower Seed"] = "Sunflower Field", ["Pineapple"] = "Pineapple Field" }
+        local map = { ["Blueberry"] = "Bamboo Field", ["Strawberry"] = "Strawberry Field", ["Sunflower Seed"] = "Sunflower Field", ["Pineapple"] = "Pineapple Patch" }
         return map[material]
     else
-        local map = { ["Blueberry"] = "Pine Tree Field", ["Strawberry"] = "Strawberry Field", ["Sunflower Seed"] = "Sunflower Field", ["Pineapple"] = "Pineapple Field", ["Coconut"] = (beeCount >= 35) and "Coconut Field" or nil }
+        local map = { ["Blueberry"] = "Pine Tree Forest", ["Strawberry"] = "Strawberry Field", ["Sunflower Seed"] = "Sunflower Field", ["Pineapple"] = "Pineapple Patch", ["Coconut"] = (beeCount >= 35) and "Coconut Field" or nil }
         return map[material]
     end
 end
 
+local _cachedAtlasSettings = nil
+
+local function findAtlasSettings()
+    if _cachedAtlasSettings and type(_cachedAtlasSettings) == "table" and _cachedAtlasSettings.toys and _cachedAtlasSettings.autofarm then
+        return _cachedAtlasSettings
+    end
+
+    local roots = { getgenv and getgenv(), _G, shared }
+    for _, root in ipairs(roots) do
+        if type(root) == "table" then
+            if rawget(root, "toys") and rawget(root, "autofarm") then
+                _cachedAtlasSettings = root
+                return root
+            end
+            for k, v in pairs(root) do
+                if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
+                    if rawget(v, "toys") and rawget(v, "autofarm") then
+                        _cachedAtlasSettings = v
+                        return v
+                    end
+                    if rawget(v, "Settings") and type(v.Settings) == "table" and rawget(v.Settings, "toys") and rawget(v.Settings, "autofarm") then
+                        _cachedAtlasSettings = v.Settings
+                        return v.Settings
+                    end
+                end
+            end
+        end
+    end
+
+    if getgc then
+        local ok, gc = pcall(getgc, true)
+        if not ok or type(gc) ~= "table" then ok, gc = pcall(getgc) end
+        if ok and type(gc) == "table" then
+            for _, obj in ipairs(gc) do
+                if type(obj) == "table" and rawget(obj, "toys") and rawget(obj, "autofarm") then
+                    _cachedAtlasSettings = obj
+                    return obj
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
 local function setAtlasField(field)
     if not field then return end
-    if getgenv and getgenv().Atlas and getgenv().Atlas.Settings then
-        getgenv().Atlas.Settings.Field = field
-    elseif getgenv and getgenv().Config then
-        getgenv().Config.Field = field
+    local settings = findAtlasSettings()
+    if settings then
+        if settings.autofarm and type(settings.autofarm) == "table" then
+            settings.autofarm.field1 = field
+            settings.autofarm.field2 = field
+            settings.autofarm.field3 = field
+        end
+        settings.Field = field
+    end
+    if getgenv then
+        if getgenv().Atlas and getgenv().Atlas.Settings then
+            getgenv().Atlas.Settings.Field = field
+            if getgenv().Atlas.Settings.autofarm then
+                getgenv().Atlas.Settings.autofarm.field1 = field
+                getgenv().Atlas.Settings.autofarm.field2 = field
+                getgenv().Atlas.Settings.autofarm.field3 = field
+            end
+        end
+        if getgenv().Config then
+            getgenv().Config.Field = field
+            if getgenv().Config.autofarm then
+                getgenv().Config.autofarm.field1 = field
+            end
+        end
     end
 end
 
@@ -294,22 +370,89 @@ local function resolveMissingMaterial(item, neededAmount, data, beeCount)
 end
 
 local function extractPurchaseList(tbl, depth)
-    if type(tbl) ~= "table" or ((depth or 0) > 4) then return nil end
-    for _, block in pairs(tbl) do
-        if type(block) == "table" and block.Type == "Purchase" and type(block.Data) == "table" then
-            return block.Data
+    if type(tbl) ~= "table" or ((depth or 0) > 6) then return nil end
+    local items = {}
+
+    local function scan(t, d)
+        if type(t) ~= "table" or d > 6 then return end
+        if t.Type == "Purchase" and type(t.Data) == "table" then
+            for _, itm in ipairs(t.Data) do
+                table.insert(items, itm)
+            end
+            return
+        end
+        for k, v in pairs(t) do
+            if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
+                scan(v, d + 1)
+            end
         end
     end
+
+    scan(tbl, 0)
+    if #items > 0 then return items end
+
     if #tbl > 0 and type(tbl[1]) == "string" then
-        local clean = tbl[1]:gsub("[%s%-_']", ""):lower()
-        if TOOL_TIERS[clean] or BAG_TIERS[clean] or HAT_TIERS[clean] then
-            return tbl
+        return tbl
+    end
+    return nil
+end
+
+local function readAtlasFileRoute()
+    if not (readfile and isfile) then return nil end
+
+    local testPaths = {
+        "atlas1/preset1.json",
+        "atlas1/preset 1.json",
+        "atlas1/preset_1.json",
+        "atlas1/1.json",
+        "atlas1/config.json",
+        "atlas1/settings.json",
+        "Atlas1/preset1.json",
+        "Atlas1/preset 1.json",
+        "Atlas1/config.json",
+        "Atlas/preset1.json",
+        "Atlas/preset 1.json",
+        "Atlas/configs/preset1.json",
+        "Atlas/settings/preset1.json",
+        "Atlas/config.json",
+        "Atlas/settings.json",
+        "preset1.json",
+        "preset 1.json",
+        "config.json",
+        "route.json"
+    }
+
+    local filesToTry = {}
+    if getgenv and getgenv().AtlasConfigPath and isfile(getgenv().AtlasConfigPath) then
+        table.insert(filesToTry, getgenv().AtlasConfigPath)
+    end
+    for _, p in ipairs(testPaths) do
+        table.insert(filesToTry, p)
+    end
+
+    if listfiles then
+        local dirs = { "atlas1", "Atlas", "Atlas/configs", "Atlas/settings", "Atlas1", "atlas1/configs", "atlas1/settings", "" }
+        for _, dir in ipairs(dirs) do
+            local ok, list = pcall(listfiles, dir)
+            if ok and type(list) == "table" then
+                for _, f in ipairs(list) do
+                    if tostring(f):lower():find("%.json$") then
+                        table.insert(filesToTry, f)
+                    end
+                end
+            end
         end
     end
-    for k, v in pairs(tbl) do
-        if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
-            local res = extractPurchaseList(v, (depth or 0) + 1)
-            if res then return res end
+
+    for _, path in ipairs(filesToTry) do
+        if isfile(path) then
+            local ok, content = pcall(readfile, path)
+            if ok and content and content:find('"toys"') and content:find('"route"') then
+                local s, decoded = pcall(function() return HttpService:JSONDecode(content) end)
+                if s and type(decoded) == "table" and decoded.toys and decoded.toys.route then
+                    return decoded.toys.route
+                end
+            end
         end
     end
     return nil
@@ -318,7 +461,12 @@ end
 local function getAtlasRoute()
     local rawItemsList = nil
 
-    if getgenv then
+    local settings = findAtlasSettings()
+    if settings and settings.toys and settings.toys.route then
+        rawItemsList = extractPurchaseList(settings.toys.route, 0) or extractPurchaseList(settings.toys, 0)
+    end
+
+    if not rawItemsList and getgenv then
         if getgenv().AtlasRoute then
             rawItemsList = extractPurchaseList(getgenv().AtlasRoute, 0) or (type(getgenv().AtlasRoute) == "table" and getgenv().AtlasRoute)
         end
@@ -327,19 +475,10 @@ local function getAtlasRoute()
         end
     end
 
-    if not rawItemsList and isfile and readfile then
-        local files = { "route.json", "Atlas/route.json", "Atlas/progression.json", "Atlas/AutoProgression.json", "Atlas/AutoProg.json" }
-        for _, path in ipairs(files) do
-            if isfile(path) then
-                local ok, content = pcall(readfile, path)
-                if ok and content and content ~= "" then
-                    local s, decoded = pcall(function() return HttpService:JSONDecode(content) end)
-                    if s and type(decoded) == "table" then
-                        rawItemsList = extractPurchaseList(decoded, 0)
-                        if rawItemsList then break end
-                    end
-                end
-            end
+    if not rawItemsList then
+        local fileRoute = readAtlasFileRoute()
+        if fileRoute then
+            rawItemsList = extractPurchaseList(fileRoute, 0)
         end
     end
 
