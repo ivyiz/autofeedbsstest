@@ -293,6 +293,17 @@ local function resolveItemName(raw)
     return raw
 end
 
+local function isKnownProgressionItem(name)
+    if not name or type(name) ~= "string" or #name < 2 then return false end
+    local clean = name:gsub("[%s%-_':%[%]%(%)]", ""):lower()
+    if ITEM_ALIASES[clean] then return true end
+    for _, milestone in ipairs(FullProgressionRoute) do
+        local c = milestone.Name:gsub("[%s%-_':%[%]%(%)]", ""):lower()
+        if c == clean then return true end
+    end
+    return false
+end
+
 local function isItemOwned(itemName, itemType, char, data)
     if not itemName then return false end
     local canonical = resolveItemName(itemName) or itemName
@@ -480,25 +491,50 @@ end
 
 local _cachedAtlasSettings = nil
 
+local function isAtlasSettingsTable(t)
+    if type(t) ~= "table" then return false end
+    local ok, hasToys = pcall(function() return t.toys end)
+    local ok2, hasFarm = pcall(function() return t.autofarm or t.farming or (t.toys and t.toys.route) end)
+    return ok and ok2 and type(hasToys) == "table" and (type(hasFarm) == "table" or hasFarm ~= nil)
+end
+
 local function findAtlasSettings()
-    if _cachedAtlasSettings and type(_cachedAtlasSettings) == "table" and _cachedAtlasSettings.toys and _cachedAtlasSettings.autofarm then
+    if _cachedAtlasSettings and isAtlasSettingsTable(_cachedAtlasSettings) then
         return _cachedAtlasSettings
     end
 
     local roots = { getgenv and getgenv(), _G, shared }
     for _, root in ipairs(roots) do
         if type(root) == "table" then
-            if rawget(root, "toys") and rawget(root, "autofarm") then
+            if isAtlasSettingsTable(root) then
                 _cachedAtlasSettings = root
                 return root
             end
+            if root.Atlas and type(root.Atlas) == "table" then
+                if isAtlasSettingsTable(root.Atlas.Settings) then
+                    _cachedAtlasSettings = root.Atlas.Settings
+                    return root.Atlas.Settings
+                end
+                if isAtlasSettingsTable(root.Atlas) then
+                    _cachedAtlasSettings = root.Atlas
+                    return root.Atlas
+                end
+            end
+            if isAtlasSettingsTable(root.Settings) then
+                _cachedAtlasSettings = root.Settings
+                return root.Settings
+            end
+            if isAtlasSettingsTable(root.Config) then
+                _cachedAtlasSettings = root.Config
+                return root.Config
+            end
             for k, v in pairs(root) do
                 if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
-                    if rawget(v, "toys") and rawget(v, "autofarm") then
+                    if isAtlasSettingsTable(v) then
                         _cachedAtlasSettings = v
                         return v
                     end
-                    if rawget(v, "Settings") and type(v.Settings) == "table" and rawget(v.Settings, "toys") and rawget(v.Settings, "autofarm") then
+                    if isAtlasSettingsTable(v.Settings) then
                         _cachedAtlasSettings = v.Settings
                         return v.Settings
                     end
@@ -512,7 +548,7 @@ local function findAtlasSettings()
         if not ok or type(gc) ~= "table" then ok, gc = pcall(getgc) end
         if ok and type(gc) == "table" then
             for _, obj in ipairs(gc) do
-                if type(obj) == "table" and rawget(obj, "toys") and rawget(obj, "autofarm") then
+                if isAtlasSettingsTable(obj) then
                     _cachedAtlasSettings = obj
                     return obj
                 end
@@ -523,33 +559,81 @@ local function findAtlasSettings()
     return nil
 end
 
+local _lastAppliedField = nil
+
 local function setAtlasField(field)
-    if not field then return end
+    if not field or field == "Idle" then return end
+
     local settings = findAtlasSettings()
+    local currentSetField = settings and settings.autofarm and settings.autofarm.field1
+
+    if _lastAppliedField == field and currentSetField == field then
+        return
+    end
+
     if settings then
         if settings.autofarm and type(settings.autofarm) == "table" then
             settings.autofarm.field1 = field
             settings.autofarm.field2 = field
             settings.autofarm.field3 = field
+            settings.autofarm.field = field
+        end
+        if settings.farming and type(settings.farming) == "table" then
+            settings.farming.field1 = field
+            settings.farming.field = field
         end
         settings.Field = field
     end
+
     if getgenv then
-        if getgenv().Atlas and getgenv().Atlas.Settings then
-            getgenv().Atlas.Settings.Field = field
-            if getgenv().Atlas.Settings.autofarm then
-                getgenv().Atlas.Settings.autofarm.field1 = field
-                getgenv().Atlas.Settings.autofarm.field2 = field
-                getgenv().Atlas.Settings.autofarm.field3 = field
+        if getgenv().Atlas and type(getgenv().Atlas) == "table" then
+            getgenv().Atlas.Field = field
+            getgenv().Atlas.CurrentField = field
+            if getgenv().Atlas.Settings and type(getgenv().Atlas.Settings) == "table" then
+                getgenv().Atlas.Settings.Field = field
+                if getgenv().Atlas.Settings.autofarm then
+                    getgenv().Atlas.Settings.autofarm.field1 = field
+                    getgenv().Atlas.Settings.autofarm.field2 = field
+                    getgenv().Atlas.Settings.autofarm.field3 = field
+                end
+            end
+            if type(getgenv().Atlas.SetField) == "function" then
+                pcall(getgenv().Atlas.SetField, field)
             end
         end
-        if getgenv().Config then
+        if getgenv().Config and type(getgenv().Config) == "table" then
             getgenv().Config.Field = field
             if getgenv().Config.autofarm then
                 getgenv().Config.autofarm.field1 = field
+                getgenv().Config.autofarm.field2 = field
+                getgenv().Config.autofarm.field3 = field
             end
         end
     end
+
+    if _lastAppliedField ~= field then
+        print(string.format("[Auto Prog] Switched farm field -> %s", field))
+        _lastAppliedField = field
+    end
+end
+
+local _routeDefaultFields = {
+    [0] = "Dandelion Field",
+    [5] = "Bamboo Field",
+    [10] = "Pineapple Patch",
+    [15] = "Pine Tree Forest"
+}
+
+local function getDefaultProgressionField(beeCount)
+    local bestBees = -1
+    local bestField = "Pine Tree Forest"
+    for reqBees, fld in pairs(_routeDefaultFields) do
+        if beeCount >= reqBees and reqBees > bestBees then
+            bestBees = reqBees
+            bestField = fld
+        end
+    end
+    return bestField
 end
 
 local function resolveMissingMaterial(item, neededAmount, data, beeCount)
@@ -571,16 +655,33 @@ local function resolveMissingMaterial(item, neededAmount, data, beeCount)
     return nil
 end
 
+local function isRouteStep(step)
+    if type(step) ~= "table" then return false end
+    if step.purchase or step.Purchase then return true end
+    local st = tostring(step.Type or step.type or ""):lower()
+    if st == "purchase" or st == "buy" or st == "craft" then return true end
+    if step.config == "farming.field1" or step.group or step.target or step.gear then return true end
+    return false
+end
+
 local function extractPurchaseList(tbl, depth)
-    if type(tbl) ~= "table" or ((depth or 0) > 6) then return nil end
+    if type(tbl) ~= "table" or ((depth or 0) > 8) then return nil end
     local items = {}
+    local seen = {}
 
     local function scan(t, d)
-        if type(t) ~= "table" or d > 6 then return end
+        if type(t) ~= "table" or d > 8 then return end
+        if seen[t] then return end
+        seen[t] = true
+
+        if t.config == "farming.field1" and t.data and type(t.data) == "string" then
+            local reqBees = tonumber(t.required_bees or t.Bees) or 0
+            _routeDefaultFields[reqBees] = t.data
+        end
 
         local p = t.purchase or t.Purchase
         if p then
-            local reqBees = t.required_bees or t.Bees or t.req_bees or 0
+            local reqBees = tonumber(t.required_bees or t.Bees or t.req_bees) or 0
             if type(p) == "table" then
                 for _, itm in ipairs(p) do
                     if type(itm) == "string" then
@@ -594,9 +695,10 @@ local function extractPurchaseList(tbl, depth)
             end
         end
 
-        if (t.Type == "Purchase" or t.type == "purchase" or t.type == "Purchase") and (t.Data or t.data) then
+        local stepType = tostring(t.Type or t.type or ""):lower()
+        if (stepType == "purchase" or stepType == "buy" or stepType == "craft") and (t.Data or t.data) then
             local data = t.Data or t.data
-            local reqBees = t.Bees or t.required_bees or 0
+            local reqBees = tonumber(t.Bees or t.required_bees or t.req_bees) or 0
             if type(data) == "table" then
                 for _, itm in ipairs(data) do
                     if type(itm) == "string" then
@@ -610,8 +712,22 @@ local function extractPurchaseList(tbl, depth)
             end
         end
 
+        local directName = t.target or t.Target or t.gear or t.Gear
+        if directName and type(directName) == "string" then
+            local reqBees = tonumber(t.Bees or t.required_bees) or 0
+            table.insert(items, { Name = directName, Bees = reqBees })
+        end
+
+        if #t > 0 then
+            for i = 1, #t do
+                if type(t[i]) == "table" then
+                    scan(t[i], d + 1)
+                end
+            end
+        end
+
         for k, v in pairs(t) do
-            if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
+            if type(k) ~= "number" and type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
                 scan(v, d + 1)
             end
         end
@@ -626,41 +742,100 @@ local function extractPurchaseList(tbl, depth)
     return nil
 end
 
+local function findAtlasRouteInMemory()
+    local settings = findAtlasSettings()
+    if settings then
+        if settings.toys and type(settings.toys) == "table" and settings.toys.route then
+            return settings.toys.route
+        end
+        if settings.route and type(settings.route) == "table" then
+            return settings.route
+        end
+    end
+
+    local roots = { getgenv and getgenv(), _G, shared }
+    for _, r in ipairs(roots) do
+        if type(r) == "table" then
+            if r.Atlas and type(r.Atlas) == "table" then
+                if r.Atlas.Route and type(r.Atlas.Route) == "table" then return r.Atlas.Route end
+                if r.Atlas.Toys and type(r.Atlas.Toys) == "table" and r.Atlas.Toys.route then return r.Atlas.Toys.route end
+                if r.Atlas.Settings and type(r.Atlas.Settings) == "table" then
+                    if r.Atlas.Settings.toys and r.Atlas.Settings.toys.route then return r.Atlas.Settings.toys.route end
+                    if r.Atlas.Settings.route then return r.Atlas.Settings.route end
+                end
+            end
+            if r.AtlasRoute and type(r.AtlasRoute) == "table" then return r.AtlasRoute end
+            if r.Route and type(r.Route) == "table" and (#r.Route > 0 or r.Route.purchase) then return r.Route end
+            if r.ProgressionRoute and type(r.ProgressionRoute) == "table" then return r.ProgressionRoute end
+        end
+    end
+
+    if getgc then
+        local ok, gc = pcall(getgc, true)
+        if not ok or type(gc) ~= "table" then ok, gc = pcall(getgc) end
+        if ok and type(gc) == "table" then
+            for _, obj in ipairs(gc) do
+                if type(obj) == "table" then
+                    if obj.toys and type(obj.toys) == "table" and obj.toys.route then
+                        return obj.toys.route
+                    end
+                    if obj.route and type(obj.route) == "table" then
+                        local rt = obj.route
+                        if type(rt) == "table" and #rt > 0 then
+                            for _, step in ipairs(rt) do
+                                if isRouteStep(step) then return rt end
+                            end
+                        end
+                    end
+                    if #obj > 0 and type(obj[1]) == "table" then
+                        for _, step in ipairs(obj) do
+                            if isRouteStep(step) then return obj end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
 local function readAtlasFileRoute()
     if not (readfile and isfile) then return nil end
 
-    local testPaths = {
+    local knownPaths = {
         "atlas1/preset1.json",
         "atlas1/preset 1.json",
-        "atlas1/preset_1.json",
-        "atlas1/1.json",
-        "atlas1/config.json",
+        "atlas1/preset2.json",
         "atlas1/settings.json",
-        "Atlas1/preset1.json",
-        "Atlas1/preset 1.json",
-        "Atlas1/config.json",
+        "atlas1/config.json",
+        "atlas1/routes/default.json",
+        "atlas1/routes/route.json",
+        "atlas1/routes/progression.json",
+        "atlas1/route.json",
         "Atlas/preset1.json",
-        "Atlas/preset 1.json",
-        "Atlas/configs/preset1.json",
-        "Atlas/settings/preset1.json",
-        "Atlas/config.json",
         "Atlas/settings.json",
-        "preset1.json",
-        "preset 1.json",
-        "config.json",
-        "route.json"
+        "Atlas/routes/default.json",
+        "Atlas/routes/route.json",
+        "Atlas/routes/progression.json",
+        "Atlas/route.json",
+        "routes/default.json",
+        "routes/route.json",
+        "routes/progression.json",
+        "route.json",
+        "default.json"
     }
 
     local filesToTry = {}
     if getgenv and getgenv().AtlasConfigPath and isfile(getgenv().AtlasConfigPath) then
         table.insert(filesToTry, getgenv().AtlasConfigPath)
     end
-    for _, p in ipairs(testPaths) do
+    for _, p in ipairs(knownPaths) do
         table.insert(filesToTry, p)
     end
 
     if listfiles then
-        local dirs = { "atlas1", "Atlas", "Atlas/configs", "Atlas/settings", "Atlas1", "atlas1/configs", "atlas1/settings", "" }
+        local dirs = { "atlas1", "atlas1/routes", "Atlas", "Atlas/routes", "routes", "presets" }
         for _, dir in ipairs(dirs) do
             local ok, list = pcall(listfiles, dir)
             if ok and type(list) == "table" then
@@ -673,18 +848,27 @@ local function readAtlasFileRoute()
         end
     end
 
+    local visited = {}
     for _, path in ipairs(filesToTry) do
-        if isfile(path) then
+        if not visited[path] and isfile(path) then
+            visited[path] = true
             local ok, content = pcall(readfile, path)
             if ok and content and content ~= "" then
-                local s, decoded = pcall(function() return HttpService:JSONDecode(content) end)
-                if s and type(decoded) == "table" then
-                    if decoded.toys and decoded.toys.route then
-                        return decoded.toys.route
-                    elseif decoded.route then
-                        return decoded.route
-                    elseif #decoded > 0 then
-                        return decoded
+                local cLow = content:lower()
+                if cLow:find('"purchase"') or cLow:find('"route"') or cLow:find('"toys"') or cLow:find('"farming.field1"') or cLow:find('"diamask"') then
+                    local s, decoded = pcall(function() return HttpService:JSONDecode(content) end)
+                    if s and type(decoded) == "table" then
+                        if decoded.toys and decoded.toys.route then
+                            return decoded.toys.route
+                        elseif decoded.route then
+                            return decoded.route
+                        elseif #decoded > 0 then
+                            for _, step in ipairs(decoded) do
+                                if isRouteStep(step) then
+                                    return decoded
+                                end
+                            end
+                        end
                     end
                 end
             end
@@ -693,29 +877,16 @@ local function readAtlasFileRoute()
     return nil
 end
 
+local _cachedParsedRoute = nil
+local _lastRouteSourceTime = 0
+
 local function getAtlasRoute()
-    local rawItemsList = nil
-
-    local settings = findAtlasSettings()
-    if settings and settings.toys and settings.toys.route then
-        rawItemsList = extractPurchaseList(settings.toys.route, 0) or extractPurchaseList(settings.toys, 0)
+    if _cachedParsedRoute and (tick() - _lastRouteSourceTime < 30) then
+        return _cachedParsedRoute
     end
 
-    if not rawItemsList and getgenv then
-        if getgenv().AtlasRoute then
-            rawItemsList = extractPurchaseList(getgenv().AtlasRoute, 0) or (type(getgenv().AtlasRoute) == "table" and getgenv().AtlasRoute)
-        end
-        if not rawItemsList and getgenv().Atlas then
-            rawItemsList = extractPurchaseList(getgenv().Atlas, 0)
-        end
-    end
-
-    if not rawItemsList then
-        local fileRoute = readAtlasFileRoute()
-        if fileRoute then
-            rawItemsList = extractPurchaseList(fileRoute, 0)
-        end
-    end
+    local rawRoute = findAtlasRouteInMemory() or readAtlasFileRoute()
+    local rawItemsList = rawRoute and extractPurchaseList(rawRoute, 0)
 
     if rawItemsList and type(rawItemsList) == "table" and #rawItemsList > 0 then
         local itemMap = {}
@@ -732,19 +903,25 @@ local function getAtlasRoute()
                 local canonical = resolveItemName(name) or name
                 local cleanName = tostring(canonical):gsub("[%s%-_']", ""):lower()
                 local base = itemMap[cleanName]
+                local rBees = tonumber(reqBees)
+                local itemBees = (rBees and rBees > 0 and rBees) or (base and base.Bees) or 0
                 table.insert(dynamicRoute, {
                     Name = base and base.Name or tostring(canonical),
                     Type = base and base.Type or "Gear",
-                    Bees = tonumber(reqBees) or (base and base.Bees) or 0,
+                    Bees = itemBees,
                     Ingredients = base and base.Ingredients or nil
                 })
             end
         end
         if #dynamicRoute > 0 then
+            _cachedParsedRoute = dynamicRoute
+            _lastRouteSourceTime = tick()
             return dynamicRoute
         end
     end
 
+    _cachedParsedRoute = FullProgressionRoute
+    _lastRouteSourceTime = tick()
     return FullProgressionRoute
 end
 
@@ -754,16 +931,40 @@ local function getAtlasLiveTarget()
         if settings.toys and type(settings.toys) == "table" then
             if settings.toys.target then
                 local res = resolveItemName(settings.toys.target)
-                if res then return res end
+                if isKnownProgressionItem(res) then return res end
             end
             if settings.toys.current then
                 local res = resolveItemName(settings.toys.current)
-                if res then return res end
+                if isKnownProgressionItem(res) then return res end
+            end
+            if settings.toys.current_target then
+                local res = resolveItemName(settings.toys.current_target)
+                if isKnownProgressionItem(res) then return res end
+            end
+            if settings.toys.current_purchase then
+                local res = resolveItemName(settings.toys.current_purchase)
+                if isKnownProgressionItem(res) then return res end
+            end
+            if settings.toys.route and type(settings.toys.route) == "table" then
+                local pList = extractPurchaseList(settings.toys.route, 0)
+                if pList and #pList > 0 then
+                    local char = player.Character
+                    local data = getStatData()
+                    for _, p in ipairs(pList) do
+                        local pName = (type(p) == "table" and (p.Name or p.Item or p.Target or p.Gear)) or (type(p) == "string" and p)
+                        if pName then
+                            local resolved = resolveItemName(pName)
+                            if isKnownProgressionItem(resolved) and not isItemOwned(resolved, "Gear", char, data) then
+                                return resolved
+                            end
+                        end
+                    end
+                end
             end
         end
         if settings.target then
             local res = resolveItemName(settings.target)
-            if res then return res end
+            if isKnownProgressionItem(res) then return res end
         end
     end
 
@@ -771,40 +972,20 @@ local function getAtlasLiveTarget()
     for _, r in ipairs(roots) do
         if type(r) == "table" then
             if r.Atlas and type(r.Atlas) == "table" then
-                if r.Atlas.ProgressionTarget then
-                    local res = resolveItemName(r.Atlas.ProgressionTarget)
-                    if res then return res end
-                end
-                if r.Atlas.CurrentTarget then
-                    local res = resolveItemName(r.Atlas.CurrentTarget)
-                    if res then return res end
-                end
-                if r.Atlas.Target then
-                    local res = resolveItemName(r.Atlas.Target)
-                    if res then return res end
-                end
-                if r.Atlas.CurrentPurchase then
-                    local res = resolveItemName(r.Atlas.CurrentPurchase)
-                    if res then return res end
-                end
-                if r.Atlas.Settings and type(r.Atlas.Settings) == "table" and r.Atlas.Settings.toys then
-                    if r.Atlas.Settings.toys.target then
-                        local res = resolveItemName(r.Atlas.Settings.toys.target)
-                        if res then return res end
+                local targets = { r.Atlas.ProgressionTarget, r.Atlas.CurrentTarget, r.Atlas.Target, r.Atlas.CurrentPurchase }
+                for _, tgt in ipairs(targets) do
+                    if tgt then
+                        local res = resolveItemName(tgt)
+                        if isKnownProgressionItem(res) then return res end
                     end
                 end
             end
-            if r.ProgressionTarget then
-                local res = resolveItemName(r.ProgressionTarget)
-                if res then return res end
-            end
-            if r.CurrentTarget then
-                local res = resolveItemName(r.CurrentTarget)
-                if res then return res end
-            end
-            if r.CurrentPurchase then
-                local res = resolveItemName(r.CurrentPurchase)
-                if res then return res end
+            local targets = { r.ProgressionTarget, r.CurrentTarget, r.CurrentPurchase, r.Target }
+            for _, tgt in ipairs(targets) do
+                if tgt then
+                    local res = resolveItemName(tgt)
+                    if isKnownProgressionItem(res) then return res end
+                end
             end
         end
     end
@@ -821,6 +1002,11 @@ local function getAtlasLiveTarget()
                 if desc:IsA("TextLabel") or desc:IsA("TextButton") then
                     local txt = desc.Text
                     if txt and txt ~= "" and #txt < 120 and desc.Name ~= "AutoProg_HUD" and desc.Parent and desc.Parent.Name ~= "AutoProg_HUD" then
+                        local tLow = txt:lower()
+                        if tLow:find("diamask") then
+                            return "Diamond Mask"
+                        end
+
                         local matched = txt:match("[Tt]arget%s*[:%-]?%s*([%w%s%-_']+)")
                             or txt:match("[Cc]urrent%s*[:%-]?%s*([%w%s%-_']+)")
                             or txt:match("[Pp]rog%w*%s*[:%-]?%s*([%w%s%-_']+)")
@@ -830,18 +1016,13 @@ local function getAtlasLiveTarget()
                             or txt:match("[Nn]ext%s*[:%-]?%s*([%w%s%-_']+)")
                         if matched then
                             local resolved = resolveItemName(matched)
-                            if resolved and resolved ~= matched then
+                            if isKnownProgressionItem(resolved) then
                                 return resolved
                             end
                         end
 
-                        local tLow = txt:lower()
-                        if tLow:find("diamask") then
-                            return "Diamond Mask"
-                        end
-
                         local resolved = resolveItemName(txt)
-                        if resolved and resolved ~= txt then
+                        if isKnownProgressionItem(resolved) then
                             local pName = desc.Parent and desc.Parent.Name:lower() or ""
                             local dName = desc.Name:lower()
                             if pName:find("prog") or pName:find("target") or pName:find("gear") or pName:find("hud") or pName:find("main") or
@@ -860,23 +1041,44 @@ local function getAtlasLiveTarget()
     return nil
 end
 
+local _activeTargetName = nil
+
 local function evaluateRoute(data, beeCount)
     local char = player.Character
 
     local liveTarget = getAtlasLiveTarget()
     if liveTarget then
         local canonicalLive = resolveItemName(liveTarget) or liveTarget
-        for _, milestone in ipairs(FullProgressionRoute) do
-            local c1 = milestone.Name:gsub("[%s%-_']", ""):lower()
-            local c2 = canonicalLive:gsub("[%s%-_']", ""):lower()
-            if c1 == c2 then
-                if milestone.Ingredients then
-                    for _, ing in ipairs(milestone.Ingredients) do
+        if canonicalLive and isKnownProgressionItem(canonicalLive) then
+            _activeTargetName = canonicalLive
+        end
+    end
+
+    if _activeTargetName then
+        if isItemOwned(_activeTargetName, "Gear", char, data) then
+            _activeTargetName = nil
+        else
+            local matchedMilestone = nil
+            local cTarget = _activeTargetName:gsub("[%s%-_']", ""):lower()
+            for _, milestone in ipairs(FullProgressionRoute) do
+                local cMilestone = milestone.Name:gsub("[%s%-_']", ""):lower()
+                if cTarget == cMilestone then
+                    matchedMilestone = milestone
+                    break
+                end
+            end
+
+            if matchedMilestone then
+                if matchedMilestone.Ingredients then
+                    for _, ing in ipairs(matchedMilestone.Ingredients) do
                         local missingMat, missingAmt, targetField = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
-                        if targetField then return milestone.Name, missingMat, missingAmt, targetField end
+                        if targetField then
+                            return matchedMilestone.Name, missingMat, missingAmt, targetField
+                        end
                     end
                 end
-                return milestone.Name, nil, 0, nil
+                local defaultField = getDefaultProgressionField(beeCount)
+                return matchedMilestone.Name, nil, 0, defaultField
             end
         end
     end
@@ -888,13 +1090,18 @@ local function evaluateRoute(data, beeCount)
             if milestone.Ingredients then
                 for _, ing in ipairs(milestone.Ingredients) do
                     local missingMat, missingAmt, targetField = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
-                    if targetField then return milestone.Name, missingMat, missingAmt, targetField end
+                    if targetField then
+                        return milestone.Name, missingMat, missingAmt, targetField
+                    end
                 end
             end
-            return milestone.Name, nil, 0, nil
+            local defaultField = getDefaultProgressionField(beeCount)
+            return milestone.Name, nil, 0, defaultField
         end
     end
-    return nil, nil, 0, nil
+
+    local fallbackField = getDefaultProgressionField(beeCount)
+    return nil, nil, 0, fallbackField
 end
 
 local guiParent
@@ -931,9 +1138,12 @@ local function printDebugInfo()
     local data = getStatData()
     local beeCount = getBeeCount(data)
     local liveTarget = getAtlasLiveTarget()
+    local activeRoute = getAtlasRoute()
     print("========== [Auto Prog Debug] ==========")
     print("Bee Count:", beeCount)
     print("Atlas Live Target:", tostring(liveTarget))
+    print("Active Latched Target:", tostring(_activeTargetName))
+    print("Route Source Items Count:", #activeRoute)
     if data then
         print("Equipped/Stats:")
         print("  Collector:", tostring(data.Collector or data.Tool))

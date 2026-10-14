@@ -62,14 +62,34 @@ end
 print("3. Atlas Settings & Environment:")
 local atlasSettings = nil
 local roots = { getgenv and getgenv(), _G, shared }
+local function isAtlasSettingsTable(t)
+    if type(t) ~= "table" then return false end
+    local ok, hasToys = pcall(function() return t.toys end)
+    local ok2, hasFarm = pcall(function() return t.autofarm or t.farming or (t.toys and t.toys.route) end)
+    return ok and ok2 and type(hasToys) == "table" and (type(hasFarm) == "table" or hasFarm ~= nil)
+end
+
 for _, r in ipairs(roots) do
     if type(r) == "table" then
-        if rawget(r, "toys") and rawget(r, "autofarm") then
+        if isAtlasSettingsTable(r) then
             atlasSettings = r
             break
         end
-        if r.Atlas and type(r.Atlas) == "table" and r.Atlas.Settings then
-            atlasSettings = r.Atlas.Settings
+        if r.Atlas and type(r.Atlas) == "table" then
+            if isAtlasSettingsTable(r.Atlas.Settings) then
+                atlasSettings = r.Atlas.Settings
+                break
+            elseif isAtlasSettingsTable(r.Atlas) then
+                atlasSettings = r.Atlas
+                break
+            end
+        end
+        if isAtlasSettingsTable(r.Settings) then
+            atlasSettings = r.Settings
+            break
+        end
+        if isAtlasSettingsTable(r.Config) then
+            atlasSettings = r.Config
             break
         end
     end
