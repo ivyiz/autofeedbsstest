@@ -228,33 +228,19 @@ hudGui.Name = "AutoProg_HUD"
 hudGui.ResetOnSpawn = false
 hudGui.Parent = guiParent
 
-local hudFrame = Instance.new("Frame")
-hudFrame.AnchorPoint = Vector2.new(1, 1)
-hudFrame.Position = UDim2.new(1, -12, 1, -12)
-hudFrame.Size = UDim2.new(0, 0, 0, 26)
-hudFrame.AutomaticSize = Enum.AutomaticSize.X
-hudFrame.BackgroundColor3 = Color3.fromRGB(12, 14, 18)
-hudFrame.BorderSizePixel = 0
-hudFrame.Parent = hudGui
-Instance.new("UICorner", hudFrame).CornerRadius = UDim.new(0, 6)
-
-local hudStroke = Instance.new("UIStroke", hudFrame)
-hudStroke.Color = Color3.fromRGB(30, 36, 48)
-hudStroke.Thickness = 1
-
-local hudPadding = Instance.new("UIPadding", hudFrame)
-hudPadding.PaddingLeft = UDim.new(0, 10)
-hudPadding.PaddingRight = UDim.new(0, 10)
-
 local hudLabel = Instance.new("TextLabel")
-hudLabel.Size = UDim2.new(1, 0, 1, 0)
+hudLabel.AnchorPoint = Vector2.new(1, 1)
+hudLabel.Position = UDim2.new(1, -15, 1, -10)
+hudLabel.Size = UDim2.new(0, 600, 0, 20)
 hudLabel.BackgroundTransparency = 1
 hudLabel.Font = Enum.Font.GothamBold
-hudLabel.TextSize = 11
-hudLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
-hudLabel.TextXAlignment = Enum.TextXAlignment.Center
+hudLabel.TextSize = 13
+hudLabel.TextColor3 = Color3.fromRGB(255, 65, 65)
+hudLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+hudLabel.TextStrokeTransparency = 0
+hudLabel.TextXAlignment = Enum.TextXAlignment.Right
 hudLabel.Text = "[Auto Prog] Initializing..."
-hudLabel.Parent = hudFrame
+hudLabel.Parent = hudGui
 
 task.spawn(function()
     while true do
