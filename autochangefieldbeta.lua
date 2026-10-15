@@ -98,35 +98,41 @@ local FullProgressionRoute = {
     { Bees = 20, Name = "Silver Soakers", Type = "Sprinkler" },
     { Bees = 20, Name = "Elite Blue Guard", Type = "Guard", Ingredients = { { Item = "Blueberry", Amount = 50 } } },
     { Bees = 20, Name = "Elite Red Guard", Type = "Guard", Ingredients = { { Item = "Strawberry", Amount = 50 } } },
-    { Bees = 25, Name = "Bucko Guard", Type = "Guard", Ingredients = { { Item = "Blueberry", Amount = 100 }, { Item = "Blue Extract", Amount = 5 } } },
-    { Bees = 25, Name = "Riley Guard", Type = "Guard", Ingredients = { { Item = "Strawberry", Amount = 100 }, { Item = "Red Extract", Amount = 5 } } },
+    { Bees = 25, Name = "Bucko Guard", Type = "Guard", Ingredients = { { Item = "Blueberry", Amount = 100 }, { Item = "Blue Extract", Amount = 5 }, { Item = "Stinger", Amount = 15 } } },
+    { Bees = 25, Name = "Riley Guard", Type = "Guard", Ingredients = { { Item = "Strawberry", Amount = 100 }, { Item = "Red Extract", Amount = 5 }, { Item = "Stinger", Amount = 15 } } },
     { Bees = 25, Name = "Candy Planter", Type = "Planter", Ingredients = { { Item = "Gumdrop", Amount = 100 } } },
     { Bees = 25, Name = "Glider", Type = "Glider" },
     { Bees = 25, Name = "Golden Rake", Type = "Tool" },
     { Bees = 25, Name = "Porcelain Dipper", Type = "Tool" },
     { Bees = 25, Name = "Porcelain Port-O-Hive", Type = "Bag" },
-    { Bees = 25, Name = "Blue Clay Planter", Type = "Planter", Ingredients = { { Item = "Blueberry", Amount = 50 } } },
-    { Bees = 25, Name = "Red Clay Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 50 } } },
-    { Bees = 20, Name = "Bubble Mask", Type = "Hat", Ingredients = { { Item = "Blueberry", Amount = 250 }, { Item = "Blue Extract", Amount = 50 } } },
-    { Bees = 20, Name = "Cobalt Guard", Type = "Guard", Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
+    { Bees = 25, Name = "Blue Clay Planter", Type = "Planter", Ingredients = { { Item = "Blueberry", Amount = 50 }, { Item = "Soft Wax", Amount = 10 } } },
+    { Bees = 25, Name = "Red Clay Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 50 }, { Item = "Soft Wax", Amount = 10 } } },
+    { Bees = 20, Name = "Bubble Mask", Type = "Hat", Ingredients = { { Item = "Blueberry", Amount = 250 }, { Item = "Blue Extract", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Glitter", Amount = 25 } } },
+    { Bees = 20, Name = "Honey Mask", Type = "Hat", Ingredients = { { Item = "Oil", Amount = 50 }, { Item = "Enzymes", Amount = 25 }, { Item = "Golden Egg", Amount = 5 }, { Item = "Treat", Amount = 9999 } } },
+    { Bees = 20, Name = "Fire Mask", Type = "Hat", Ingredients = { { Item = "Strawberry", Amount = 250 }, { Item = "Red Extract", Amount = 50 }, { Item = "Enzymes", Amount = 25 }, { Item = "Glitter", Amount = 25 } } },
+    { Bees = 20, Name = "Cobalt Guard", Type = "Guard", Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Stinger", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
+    { Bees = 20, Name = "Crimson Guard", Type = "Guard", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Stinger", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
     { Bees = 25, Name = "Golden Gushers", Type = "Sprinkler" },
-    { Bees = 35, Name = "Tacky Planter", Type = "Planter", Ingredients = { { Item = "Sunflower Seed", Amount = 500 } } },
-    { Bees = 20, Name = "Diamond Mask", Type = "Hat", Ingredients = { { Item = "Blue Extract", Amount = 250 }, { Item = "Oil", Amount = 150 } } },
-    { Bees = 20, Name = "Crimson Guard", Type = "Guard", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
+    { Bees = 35, Name = "Tacky Planter", Type = "Planter", Ingredients = { { Item = "Sunflower Seed", Amount = 500 }, { Item = "Soft Wax", Amount = 25 }, { Item = "Hard Wax", Amount = 5 } } },
+    { Bees = 20, Name = "Diamond Mask", Type = "Hat", Ingredients = { { Item = "Diamond Egg", Amount = 5 }, { Item = "Blue Extract", Amount = 250 }, { Item = "Oil", Amount = 150 }, { Item = "Glitter", Amount = 100 } } },
+    { Bees = 20, Name = "Demon Mask", Type = "Hat", Ingredients = { { Item = "Red Extract", Amount = 250 }, { Item = "Stinger", Amount = 500 }, { Item = "Enzymes", Amount = 150 }, { Item = "Glitter", Amount = 100 } } },
+    { Bees = 20, Name = "Gummy Mask", Type = "Hat", Ingredients = { { Item = "Glue", Amount = 250 }, { Item = "Glitter", Amount = 100 }, { Item = "Oil", Amount = 100 }, { Item = "Enzymes", Amount = 100 } } },
     { Bees = 35, Name = "Diamond Drenchers", Type = "Sprinkler" },
     { Bees = 35, Name = "Coconut Canister", Type = "Bag", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } },
-    { Bees = 35, Name = "Pesticide Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 500 } } },
+    { Bees = 35, Name = "Pesticide Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 500 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 } } },
     { Bees = 35, Name = "Coconut Clogs", Type = "Boots", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 50 }, { Item = "Glue", Amount = 100 }, { Item = "Oil", Amount = 100 } } },
     { Bees = 35, Name = "The Supreme Saturator", Type = "Sprinkler" },
-    { Bees = 35, Name = "Tide Popper", Type = "Tool", Ingredients = { { Item = "Blue Extract", Amount = 1500 }, { Item = "Tropical Drink", Amount = 150 } } },
-    { Bees = 35, Name = "Hydroponic Planter", Type = "Planter", Ingredients = { { Item = "Blue Extract", Amount = 100 } } },
-    { Bees = 35, Name = "Petal Planter", Type = "Planter", Ingredients = { { Item = "Enzymes", Amount = 100 } } },
-    { Bees = 35, Name = "Heat-Treated Planter", Type = "Planter", Ingredients = { { Item = "Red Extract", Amount = 100 } } },
-    { Bees = 35, Name = "Gummy Boots", Type = "Boots", Ingredients = { { Item = "Glue", Amount = 500 }, { Item = "Tropical Drink", Amount = 100 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } },
-    { Bees = 35, Name = "Coconut Belt", Type = "Belt", Ingredients = { { Item = "Coconut", Amount = 500 }, { Item = "Tropical Drink", Amount = 250 }, { Item = "Glue", Amount = 150 }, { Item = "Enzymes", Amount = 150 } } },
+    { Bees = 35, Name = "Tide Popper", Type = "Tool", Ingredients = { { Item = "Blue Extract", Amount = 1500 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Stinger", Amount = 50 }, { Item = "Swirled Wax", Amount = 75 }, { Item = "Super Smoothie", Amount = 3 } } },
+    { Bees = 35, Name = "Dark Scythe", Type = "Tool", Ingredients = { { Item = "Red Extract", Amount = 1500 }, { Item = "Super Smoothie", Amount = 3 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 100 }, { Item = "Stinger", Amount = 500 } } },
+    { Bees = 35, Name = "Gummyballer", Type = "Tool", Ingredients = { { Item = "Glue", Amount = 1500 }, { Item = "Gumdrop", Amount = 1500 }, { Item = "Super Smoothie", Amount = 5 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Swirled Wax", Amount = 50 } } },
+    { Bees = 35, Name = "Hydroponic Planter", Type = "Planter", Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 }, { Item = "Caustic Wax", Amount = 5 } } },
+    { Bees = 35, Name = "Heat-Treated Planter", Type = "Planter", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 }, { Item = "Caustic Wax", Amount = 5 } } },
+    { Bees = 35, Name = "Petal Planter", Type = "Planter", Ingredients = { { Item = "Spirit Petal", Amount = 1 }, { Item = "Enzymes", Amount = 100 }, { Item = "Soft Wax", Amount = 100 }, { Item = "Hard Wax", Amount = 30 }, { Item = "Caustic Wax", Amount = 10 }, { Item = "Swirled Wax", Amount = 5 } } },
+    { Bees = 35, Name = "Gummy Boots", Type = "Boots", Ingredients = { { Item = "Glue", Amount = 500 }, { Item = "Glitter", Amount = 300 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } },
+    { Bees = 35, Name = "Coconut Belt", Type = "Belt", Ingredients = { { Item = "Coconut", Amount = 500 }, { Item = "Tropical Drink", Amount = 250 }, { Item = "Glue", Amount = 150 }, { Item = "Enzymes", Amount = 150 }, { Item = "Super Smoothie", Amount = 25 } } },
     { Bees = 35, Name = "Plenty Planter", Type = "Planter" },
-    { Bees = 35, Name = "Petal Belt", Type = "Belt", Ingredients = { { Item = "Glue", Amount = 25 }, { Item = "Enzymes", Amount = 75 } } },
-    { Bees = 35, Name = "Petal Wand", Type = "Tool", Ingredients = { { Item = "Enzymes", Amount = 75 } } }
+    { Bees = 35, Name = "Petal Belt", Type = "Belt", Ingredients = { { Item = "Spirit Petal", Amount = 1 }, { Item = "Star Jelly", Amount = 25 }, { Item = "Glitter", Amount = 50 }, { Item = "Glue", Amount = 25 }, { Item = "Enzymes", Amount = 75 } } },
+    { Bees = 35, Name = "Petal Wand", Type = "Tool", Ingredients = { { Item = "Spirit Petal", Amount = 1 }, { Item = "Star Jelly", Amount = 10 }, { Item = "Glitter", Amount = 25 }, { Item = "Enzymes", Amount = 75 } } }
 }
 
 local _serverStatsCache = nil
@@ -213,15 +219,34 @@ local function getBeeCount(data)
 end
 
 local function getItemAmount(item, data)
-    if not data then return 0 end
+    if not data or not item then return 0 end
     local cleanKey = item:gsub("%s+", "")
     local keys = { item, cleanKey }
-    local folders = { data.Eggs, data.Inventory, data.Items, data }
+
+    local eggBase = item:match("^(.+)%s+[Ee]gg$") or item:match("^(.+)[Ee]gg$")
+    if eggBase then
+        table.insert(keys, eggBase)
+        table.insert(keys, eggBase .. "Egg")
+        table.insert(keys, eggBase .. " Egg")
+        if eggBase:lower() == "golden" then
+            table.insert(keys, "Gold")
+            table.insert(keys, "GoldEgg")
+        end
+    end
+
+    local cItem = item:gsub("[%s%-_']", ""):lower()
+    local folders = { data.Eggs, data.Inventory, data.Items, data.Totals, data }
     for _, folder in ipairs(folders) do
         if type(folder) == "table" then
             for _, k in ipairs(keys) do
                 if folder[k] ~= nil then
                     local num = tonumber(folder[k])
+                    if num then return num end
+                end
+            end
+            for k, v in pairs(folder) do
+                if type(k) == "string" and tostring(k):gsub("[%s%-_']", ""):lower() == cItem then
+                    local num = tonumber(v)
                     if num then return num end
                 end
             end
@@ -1484,6 +1509,20 @@ local function getAllTargetIngredients(targetItem, data)
             break
         end
     end
+
+    if not matched then
+        local activeRoute = _cachedParsedRoute or getAtlasRoute()
+        if type(activeRoute) == "table" then
+            for _, m in ipairs(activeRoute) do
+                local cm = tostring(m.Name or ""):gsub("[%s%-_']", ""):lower()
+                if cm == cTarget then
+                    matched = m
+                    break
+                end
+            end
+        end
+    end
+
     if not matched or not matched.Ingredients or #matched.Ingredients == 0 then
         return "Honey Only"
     end
