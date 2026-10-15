@@ -48,6 +48,7 @@ local TREAT_BOND = 10
 local TREAT_COST = 10000
 local autoRunning = false
 local targetLevel = 15
+local targetBeeCount = 50
 local isTweening = false
 
 local bondTable = {
@@ -950,26 +951,26 @@ afCtrlRow.BackgroundTransparency = 1
 afCtrlRow.Parent = autoFeedPage
 
 local targetCard = Instance.new("Frame")
-targetCard.Size = UDim2.new(0.48, 0, 1, 0)
+targetCard.Size = UDim2.new(0.31, 0, 1, 0)
 targetCard.BackgroundColor3 = Color3.fromRGB(15, 16, 21)
 targetCard.BorderSizePixel = 0
 targetCard.Parent = afCtrlRow
 Instance.new("UICorner", targetCard).CornerRadius = UDim.new(0, 6)
 
 local targetLabel = Instance.new("TextLabel")
-targetLabel.Size = UDim2.new(1, -50, 1, 0)
-targetLabel.Position = UDim2.new(0, 8, 0, 0)
+targetLabel.Size = UDim2.new(1, -36, 1, 0)
+targetLabel.Position = UDim2.new(0, 6, 0, 0)
 targetLabel.BackgroundTransparency = 1
-targetLabel.Text = "Target Level:"
+targetLabel.Text = "Lvl:"
 targetLabel.TextColor3 = Color3.fromRGB(190, 195, 205)
 targetLabel.Font = Enum.Font.GothamBold
-targetLabel.TextSize = 11
+targetLabel.TextSize = 10
 targetLabel.TextXAlignment = Enum.TextXAlignment.Left
 targetLabel.Parent = targetCard
 
 local targetBox = Instance.new("TextBox")
-targetBox.Size = UDim2.new(0, 40, 0, 20)
-targetBox.Position = UDim2.new(1, -46, 0.5, -10)
+targetBox.Size = UDim2.new(0, 30, 0, 20)
+targetBox.Position = UDim2.new(1, -34, 0.5, -10)
 targetBox.BackgroundColor3 = Color3.fromRGB(8, 9, 12)
 targetBox.Text = tostring(targetLevel)
 targetBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -980,29 +981,61 @@ targetBox.ClearTextOnFocus = false
 targetBox.Parent = targetCard
 Instance.new("UICorner", targetBox).CornerRadius = UDim.new(0, 4)
 
+local targetBeesCard = Instance.new("Frame")
+targetBeesCard.Size = UDim2.new(0.34, 0, 1, 0)
+targetBeesCard.Position = UDim2.new(0.33, 0, 0, 0)
+targetBeesCard.BackgroundColor3 = Color3.fromRGB(15, 16, 21)
+targetBeesCard.BorderSizePixel = 0
+targetBeesCard.Parent = afCtrlRow
+Instance.new("UICorner", targetBeesCard).CornerRadius = UDim.new(0, 6)
+
+local targetBeesLabel = Instance.new("TextLabel")
+targetBeesLabel.Size = UDim2.new(1, -36, 1, 0)
+targetBeesLabel.Position = UDim2.new(0, 6, 0, 0)
+targetBeesLabel.BackgroundTransparency = 1
+targetBeesLabel.Text = "Bees:"
+targetBeesLabel.TextColor3 = Color3.fromRGB(190, 195, 205)
+targetBeesLabel.Font = Enum.Font.GothamBold
+targetBeesLabel.TextSize = 10
+targetBeesLabel.TextXAlignment = Enum.TextXAlignment.Left
+targetBeesLabel.Parent = targetBeesCard
+
+local targetBeesBox = Instance.new("TextBox")
+targetBeesBox.Size = UDim2.new(0, 30, 0, 20)
+targetBeesBox.Position = UDim2.new(1, -34, 0.5, -10)
+targetBeesBox.BackgroundColor3 = Color3.fromRGB(8, 9, 12)
+targetBeesBox.Text = tostring(targetBeeCount)
+targetBeesBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+targetBeesBox.Font = Enum.Font.GothamBold
+targetBeesBox.TextSize = 11
+targetBeesBox.BorderSizePixel = 0
+targetBeesBox.ClearTextOnFocus = false
+targetBeesBox.Parent = targetBeesCard
+Instance.new("UICorner", targetBeesBox).CornerRadius = UDim.new(0, 4)
+
 local autoBuyCard = Instance.new("Frame")
-autoBuyCard.Size = UDim2.new(0.48, 0, 1, 0)
-autoBuyCard.Position = UDim2.new(0.52, 0, 0, 0)
+autoBuyCard.Size = UDim2.new(0.31, 0, 1, 0)
+autoBuyCard.Position = UDim2.new(0.69, 0, 0, 0)
 autoBuyCard.BackgroundColor3 = Color3.fromRGB(15, 16, 21)
 autoBuyCard.BorderSizePixel = 0
 autoBuyCard.Parent = afCtrlRow
 Instance.new("UICorner", autoBuyCard).CornerRadius = UDim.new(0, 6)
 
 local autoBuyLabel = Instance.new("TextLabel")
-autoBuyLabel.Size = UDim2.new(1, -50, 1, 0)
-autoBuyLabel.Position = UDim2.new(0, 8, 0, 0)
+autoBuyLabel.Size = UDim2.new(1, -36, 1, 0)
+autoBuyLabel.Position = UDim2.new(0, 6, 0, 0)
 autoBuyLabel.BackgroundTransparency = 1
-autoBuyLabel.Text = "Auto Buy Treats:"
+autoBuyLabel.Text = "Buy:"
 autoBuyLabel.TextColor3 = Color3.fromRGB(190, 195, 205)
 autoBuyLabel.Font = Enum.Font.GothamBold
-autoBuyLabel.TextSize = 11
+autoBuyLabel.TextSize = 10
 autoBuyLabel.TextXAlignment = Enum.TextXAlignment.Left
 autoBuyLabel.Parent = autoBuyCard
 
 local autoBuyEnabled = true
 local autoBuyBtn = Instance.new("TextButton")
-autoBuyBtn.Size = UDim2.new(0, 38, 0, 20)
-autoBuyBtn.Position = UDim2.new(1, -44, 0.5, -10)
+autoBuyBtn.Size = UDim2.new(0, 30, 0, 20)
+autoBuyBtn.Position = UDim2.new(1, -34, 0.5, -10)
 autoBuyBtn.BackgroundColor3 = Color3.fromRGB(20, 48, 28)
 autoBuyBtn.Text = "ON"
 autoBuyBtn.TextColor3 = Color3.fromRGB(74, 222, 128)
@@ -1752,6 +1785,11 @@ local function refreshBeeList()
         if val and val > 0 then targetLevel = math.floor(val) end
         targetBox.Text = tostring(targetLevel)
 
+        local beeDigits = string.match(tostring(targetBeesBox.Text), "%d+")
+        local beeVal = beeDigits and tonumber(beeDigits)
+        if beeVal and beeVal > 0 then targetBeeCount = math.clamp(math.floor(beeVal), 1, 50) end
+        targetBeesBox.Text = tostring(targetBeeCount)
+
         local spdDigits = string.match(tostring(speedBox.Text), "%d+")
         local spd = spdDigits and tonumber(spdDigits)
         if spd and spd > 0 then WALK_SPEED = spd end
@@ -1774,25 +1812,66 @@ local function refreshBeeList()
             return
         end
 
-        local beeCount, totalTreats = 0, 0
-        local totalBondDone, totalBondReq = 0, 0
+        local alreadyAtTarget = 0
+        local candidates = {}
+        local totalBeesInHive = 0
 
         for slot, bee in pairs(bees) do
             local b = extractBee(bee) or bee
             if type(b) == "table" then
+                totalBeesInHive = totalBeesInHive + 1
                 local lvl = math.max(1, math.floor(tonumber(b.Level) or 1))
                 local bond = math.max(0, tonumber(b.Bond) or 0)
-                beeCount = beeCount + 1
+                local r = b.row or slotToRowCol(slot)
+                local c = b.col
+                if not c then
+                    local _, nc = slotToRowCol(slot)
+                    c = nc
+                end
 
-                local treats, totalPct, lvlPct, remBond, reqBond = calcBeeTreats(lvl, bond, targetLevel, bftBonus)
-                totalTreats = totalTreats + treats
-                totalBondReq = totalBondReq + reqBond
-                totalBondDone = totalBondDone + (reqBond - remBond)
+                if lvl >= targetLevel then
+                    alreadyAtTarget = alreadyAtTarget + 1
+                else
+                    table.insert(candidates, {
+                        slot = slot,
+                        bee = b,
+                        lvl = lvl,
+                        bond = bond,
+                        row = r,
+                        col = c
+                    })
+                end
             end
         end
 
-        local overall = totalBondReq > 0 and math.floor((totalBondDone / totalBondReq) * 10000) / 100 or 100
-        beeCountLabel.Text = (bftBonus > 0) and (beeCount .. " bees | +" .. bftBonus .. "% BFT") or (beeCount .. " bees")
+        local effectiveTargetBees = math.min(targetBeeCount, totalBeesInHive)
+        local needToUpgradeCount = math.max(0, effectiveTargetBees - alreadyAtTarget)
+
+        table.sort(candidates, function(a, b)
+            if a.lvl ~= b.lvl then return a.lvl > b.lvl end
+            return a.bond > b.bond
+        end)
+
+        local totalTreats = 0
+        local totalBondDone, totalBondReq = 0, 0
+
+        for i = 1, math.min(#candidates, needToUpgradeCount) do
+            local cand = candidates[i]
+            local treats, totalPct, lvlPct, remBond, reqBond = calcBeeTreats(cand.lvl, cand.bond, targetLevel, bftBonus)
+            totalTreats = totalTreats + treats
+            totalBondReq = totalBondReq + reqBond
+            totalBondDone = totalBondDone + (reqBond - remBond)
+        end
+
+        local overall = (needToUpgradeCount == 0) and 100 or (totalBondReq > 0 and math.floor((totalBondDone / totalBondReq) * 10000) / 100 or 100)
+        if needToUpgradeCount == 0 then
+            beeCountLabel.Text = string.format("%d/%d at Lvl %d (Done)", alreadyAtTarget, effectiveTargetBees, targetLevel)
+        else
+            beeCountLabel.Text = string.format("%d/%d at Lvl %d (%d left)", alreadyAtTarget, effectiveTargetBees, targetLevel, needToUpgradeCount)
+        end
+        if bftBonus > 0 then
+            beeCountLabel.Text = beeCountLabel.Text .. " | +" .. bftBonus .. "% BFT"
+        end
         overallLabel.Text = overall .. "%"
         totalTreatsLabel.Text = formatNum(totalTreats)
         totalHoneyLabel.Text = formatNum(totalTreats * TREAT_COST)
@@ -1806,6 +1885,7 @@ end
 calcBtn.MouseButton1Click:Connect(refreshBeeList)
 calcBtn.Activated:Connect(refreshBeeList)
 targetBox.FocusLost:Connect(refreshBeeList)
+targetBeesBox.FocusLost:Connect(refreshBeeList)
 speedBox.FocusLost:Connect(refreshBeeList)
 
 toggleBtn.MouseButton1Click:Connect(function()
@@ -1844,61 +1924,86 @@ spawn(function()
             local bftBonus = autoDetectBFT(data, bees)
 
             if next(bees) then
-                local totalNeeded = 0
-                for _, bee in pairs(bees) do
+                local alreadyAtTarget = 0
+                local candidates = {}
+                local totalBeesInHive = 0
+
+                for slot, bee in pairs(bees) do
                     local b = extractBee(bee) or bee
                     if type(b) == "table" then
+                        totalBeesInHive = totalBeesInHive + 1
                         local lvl = math.max(1, math.floor(tonumber(b.Level) or 1))
                         local bond = math.max(0, tonumber(b.Bond) or 0)
-                        if lvl < targetLevel then
-                            local treats = calcBeeTreats(lvl, bond, targetLevel, bftBonus)
-                            totalNeeded = totalNeeded + treats
+                        local r = b.row or slotToRowCol(slot)
+                        local c = b.col
+                        if not c then
+                            local _, nc = slotToRowCol(slot)
+                            c = nc
+                        end
+
+                        if lvl >= targetLevel then
+                            alreadyAtTarget = alreadyAtTarget + 1
+                        else
+                            table.insert(candidates, {
+                                slot = slot,
+                                bee = b,
+                                lvl = lvl,
+                                bond = bond,
+                                row = r,
+                                col = c
+                            })
                         end
                     end
                 end
 
-                local owned = getTreats(data)
-                local honey = getHoney(data)
-                if autoBuyEnabled and owned < totalNeeded and honey >= TREAT_COST then
-                    local maxCanBuy = math.floor(honey / TREAT_COST)
-                    local toBuy = math.min(totalNeeded - owned, maxCanBuy)
-                    if toBuy > 0 then
-                        local char = player.Character
-                        local root = char and char:FindFirstChild("HumanoidRootPart")
-                        local savedPos = root and root.CFrame
-                        local arrived = tweenTo(getTreatShopCFrame())
-                        if arrived and autoRunning then
-                            wait(0.5)
-                            buyTreats(toBuy)
-                            wait(0.8)
-                            if returnHiveEnabled and savedPos then tweenTo(savedPos) end
+                local effectiveTargetBees = math.min(targetBeeCount, totalBeesInHive)
+                local needToUpgradeCount = math.max(0, effectiveTargetBees - alreadyAtTarget)
+
+                if needToUpgradeCount > 0 then
+                    table.sort(candidates, function(a, b)
+                        if a.lvl ~= b.lvl then return a.lvl > b.lvl end
+                        return a.bond > b.bond
+                    end)
+
+                    local targetsToFeed = {}
+                    local totalNeeded = 0
+                    for i = 1, math.min(#candidates, needToUpgradeCount) do
+                        local cand = candidates[i]
+                        local treats = calcBeeTreats(cand.lvl, cand.bond, targetLevel, bftBonus)
+                        totalNeeded = totalNeeded + treats
+                        table.insert(targetsToFeed, cand)
+                    end
+
+                    local owned = getTreats(data)
+                    local honey = getHoney(data)
+                    if autoBuyEnabled and owned < totalNeeded and honey >= TREAT_COST then
+                        local maxCanBuy = math.floor(honey / TREAT_COST)
+                        local toBuy = math.min(totalNeeded - owned, maxCanBuy)
+                        if toBuy > 0 then
+                            local char = player.Character
+                            local root = char and char:FindFirstChild("HumanoidRootPart")
+                            local savedPos = root and root.CFrame
+                            local arrived = tweenTo(getTreatShopCFrame())
+                            if arrived and autoRunning then
+                                wait(0.5)
+                                buyTreats(toBuy)
+                                wait(0.8)
+                                if returnHiveEnabled and savedPos then tweenTo(savedPos) end
+                            end
                         end
                     end
-                end
 
-                data = getStatData() or data
-                local availableTreats = getTreats(data)
-                if availableTreats > 0 then
-                    for slot, bee in pairs(bees) do
-                        if not autoRunning or availableTreats <= 0 then break end
-                        local b = extractBee(bee) or bee
-                        if type(b) == "table" then
-                            local lvl = math.max(1, math.floor(tonumber(b.Level) or 1))
-                            local bond = math.max(0, tonumber(b.Bond) or 0)
-                            if lvl < targetLevel then
-                                local treatsNeeded = calcBeeTreats(lvl, bond, targetLevel, bftBonus)
-                                local toFeed = math.min(treatsNeeded, availableTreats)
-                                if toFeed > 0 then
-                                    local r = b.row or slotToRowCol(slot)
-                                    local c = b.col
-                                    if not c then
-                                        local _, nc = slotToRowCol(slot)
-                                        c = nc
-                                    end
-                                    feedBee(r, c, toFeed)
-                                    availableTreats = availableTreats - toFeed
-                                    wait(0.3)
-                                end
+                    data = getStatData() or data
+                    local availableTreats = getTreats(data)
+                    if availableTreats > 0 then
+                        for _, cand in ipairs(targetsToFeed) do
+                            if not autoRunning or availableTreats <= 0 then break end
+                            local treatsNeeded = calcBeeTreats(cand.lvl, cand.bond, targetLevel, bftBonus)
+                            local toFeed = math.min(treatsNeeded, availableTreats)
+                            if toFeed > 0 then
+                                feedBee(cand.row, cand.col, toFeed)
+                                availableTreats = availableTreats - toFeed
+                                wait(0.3)
                             end
                         end
                     end
