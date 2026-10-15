@@ -429,11 +429,17 @@ end
 local _knownOwnedPlanters = {}
 
 local function isPlanterOwned(cleanName, rawClean, canonical, data)
+    local rootPlanter = cleanName:gsub("planter", "")
+    if rootPlanter == "" then rootPlanter = cleanName end
+
     if getgenv then
         local g = getgenv()
-        if g.SkipPlanters or g.SkipCandyPlanter then return true end
+        if g.SkipPlanters then return true end
+        if g.SkipCandyPlanter and rootPlanter == "candy" then return true end
+        local skipVar = "Skip" .. tostring(canonical or cleanName):gsub("[%s%-_']", "")
+        if g[skipVar] then return true end
         if type(g.OwnedPlanters) == "table" then
-            if g.OwnedPlanters[canonical] or g.OwnedPlanters[cleanName] or g.OwnedPlanters[rawClean] then
+            if g.OwnedPlanters[canonical] or g.OwnedPlanters[cleanName] or g.OwnedPlanters[rawClean] or g.OwnedPlanters[rootPlanter] then
                 return true
             end
         end
@@ -442,9 +448,6 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
     if _knownOwnedPlanters[cleanName] or (canonical and _knownOwnedPlanters[canonical:lower()]) then
         return true
     end
-
-    local rootPlanter = cleanName:gsub("planter", "")
-    if rootPlanter == "" then rootPlanter = cleanName end
 
     local function matches(s)
         if not s then return false end
