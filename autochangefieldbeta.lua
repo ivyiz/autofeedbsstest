@@ -429,6 +429,16 @@ end
 local _knownOwnedPlanters = {}
 
 local function isPlanterOwned(cleanName, rawClean, canonical, data)
+    if getgenv then
+        local g = getgenv()
+        if g.SkipPlanters or g.SkipCandyPlanter then return true end
+        if type(g.OwnedPlanters) == "table" then
+            if g.OwnedPlanters[canonical] or g.OwnedPlanters[cleanName] or g.OwnedPlanters[rawClean] then
+                return true
+            end
+        end
+    end
+
     if _knownOwnedPlanters[cleanName] or (canonical and _knownOwnedPlanters[canonical:lower()]) then
         return true
     end
@@ -453,6 +463,24 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
         return false
     end
 
+    if player.Backpack then
+        for _, item in ipairs(player.Backpack:GetChildren()) do
+            if matches(item.Name) then
+                _knownOwnedPlanters[cleanName] = true
+                return true
+            end
+        end
+    end
+    local char = player.Character
+    if char then
+        for _, item in ipairs(char:GetChildren()) do
+            if matches(item.Name) then
+                _knownOwnedPlanters[cleanName] = true
+                return true
+            end
+        end
+    end
+
     if data then
         if (canonical and getItemAmount(canonical, data) > 0)
             or getItemAmount(cleanName, data) > 0
@@ -464,36 +492,36 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
         end
 
         local pTables = {
-            data.Eggs,
             data.Planters,
+            data.PlanterTypes,
             data.PurchasedPlanters,
             data.PlanterInventory,
             data.ActivePlanters,
             data.PlantedPlanters,
+            data.Eggs,
             data.Items,
             data.Inventory,
             data.Equipment,
             data.Accessories
         }
-        for _, tbl in ipairs(compact(pTables, 10)) do
+        for _, tbl in ipairs(compact(pTables, 11)) do
             if type(tbl) == "table" then
                 for k, v in pairs(tbl) do
-                    if matches(k) and truthyOwned(v) then
+                    if matches(k) then
                         _knownOwnedPlanters[cleanName] = true
                         return true
                     end
-                    if type(v) == "string" or type(v) == "number" then
-                        if matches(v) or ((type(v) == "number") and v > 0 and matches(k)) then
-                            _knownOwnedPlanters[cleanName] = true
-                            return true
-                        end
-                    elseif type(v) == "table" then
+                    if type(v) == "string" and matches(v) then
+                        _knownOwnedPlanters[cleanName] = true
+                        return true
+                    end
+                    if type(v) == "table" then
                         if matches(v.Type) or matches(v.Name) or matches(v.PlanterType) or matches(v.Item) or matches(v.Id) then
                             _knownOwnedPlanters[cleanName] = true
                             return true
                         end
                         for k2, v2 in pairs(v) do
-                            if (matches(k2) and truthyOwned(v2)) or ((type(v2) == "string" or type(v2) == "number") and matches(v2)) then
+                            if matches(k2) or (type(v2) == "string" and matches(v2)) then
                                 _knownOwnedPlanters[cleanName] = true
                                 return true
                             end
@@ -507,16 +535,91 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
     local clientStat = RS:FindFirstChild("ClientStatCache")
     local myStats = clientStat and clientStat:FindFirstChild(player.Name)
     if myStats then
-        local checkFolders = { myStats:FindFirstChild("Eggs"), myStats:FindFirstChild("Items"), myStats:FindFirstChild("Planters") }
-        for _, fld in ipairs(compact(checkFolders, 3)) do
-            if fld then
-                for _, child in ipairs(fld:GetChildren()) do
-                    if matches(child.Name) then
-                        local isOwned = true
-                        if child:IsA("ValueBase") and tonumber(child.Value) ~= nil then
-                            isOwned = (tonumber(child.Value) > 0)
+        for _, desc in ipairs(myStats:GetDescendants()) do
+            if matches(desc.Name) then
+                _knownOwnedPlanters[cleanName] = true
+                return true
+            end
+            if desc:IsA("StringValue") and matches(desc.Value) then
+                _knownOwnedPlanters[cleanName] = true
+                return true
+            end
+        end
+    end
+
+    pcall(function()
+        if player:FindFirstChild("PlayerGui") then
+            for _, desc in ipairs(player.PlayerGui:GetDescendants()) do
+                if desc:IsA("TextLabel") and matches(desc.Text) then
+                    local isShop = false
+                    local cur = desc
+                    for _ = 1, 6 do
+                        if not cur then break end
+                        local n = cur.Name:lower()
+                        if n:find("shop") or n:find("dapper") then isShop = true; break end
+                        cur = cur.Parent
+                    end
+                    if not isShop then
+                        _knownOwnedPlanters[cleanName] = true
+                        return
+                    end
+                end
+            end
+        end
+    end)
+    if _knownOwnedPlanters[cleanName] then return true end
+
+    local pName = player.Name:lower()
+    local pUserId = tostring(player.UserId)
+    local pDisplay = player.DisplayName and player.DisplayName:lower() or pName
+
+    local searchContainers = {
+        workspace:FindFirstChild("Planters"),
+        workspace:FindFirstChild("ActivePlanters"),
+        workspace:FindFirstChild("CorePlanters"),
+        workspace:FindFirstChild("Fields")
+    }
+
+    for _, c in ipairs(compact(searchContainers, 4)) do
+        if c then
+            for _, desc in ipairs(c:GetDescendants()) do
+                if desc:IsA("TextLabel") then
+                    local t = desc.Text:lower()
+                    if (t:find(pName, 1, true) or t:find(pDisplay, 1, true) or t:find(pUserId, 1, true))
+                        and (t:find(rootPlanter, 1, true) or t:find("planter", 1, true)) then
+                        _knownOwnedPlanters[cleanName] = true
+                        return true
+                    end
+                end
+                if desc:IsA("Model") then
+                    local isMine = false
+                    local owner = desc:FindFirstChild("Owner") or desc:FindFirstChild("Player") or desc:FindFirstChild("User")
+                    if owner then
+                        local ov = tostring(owner.Value):lower()
+                        if ov == pName or ov == pUserId or (owner:IsA("ObjectValue") and (owner.Value == player or (char and owner.Value == char))) then
+                            isMine = true
                         end
-                        if isOwned then
+                    end
+                    local attr = desc:GetAttribute("Owner") or desc:GetAttribute("OwnerId") or desc:GetAttribute("Player")
+                    if attr and (tostring(attr):lower() == pName or tostring(attr) == pUserId) then
+                        isMine = true
+                    end
+                    if desc.Name:lower():find(pName, 1, true) then
+                        isMine = true
+                    end
+
+                    if isMine then
+                        if matches(desc.Name) then
+                            _knownOwnedPlanters[cleanName] = true
+                            return true
+                        end
+                        local pType = desc:FindFirstChild("Type") or desc:FindFirstChild("PlanterType") or desc:FindFirstChild("PlantType")
+                        if pType and matches(pType.Value) then
+                            _knownOwnedPlanters[cleanName] = true
+                            return true
+                        end
+                        local aType = desc:GetAttribute("Type") or desc:GetAttribute("PlanterType")
+                        if aType and matches(aType) then
                             _knownOwnedPlanters[cleanName] = true
                             return true
                         end
@@ -526,108 +629,19 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
         end
     end
 
-    local guiOwned = false
-    pcall(function()
-        if player:FindFirstChild("PlayerGui") then
-            for _, desc in ipairs(player.PlayerGui:GetDescendants()) do
-                if desc:IsA("TextLabel") and desc.Visible and matches(desc.Text) then
-                    local p = desc.Parent
-                    if p then
-                        local fullTxt = ""
-                        for _, sibling in ipairs(p:GetChildren()) do
-                            if sibling:IsA("TextLabel") then fullTxt = fullTxt .. " " .. sibling.Text end
-                        end
-                        -- bo find("1") (khop moi chu so 1) va "x1" (khop nut Buy x1 trong shop)
-                        if fullTxt:find("1/1", 1, true) or fullTxt:find("Grows", 1, true) then
-                            guiOwned = true
-                            return
-                        end
-                    end
-                end
-            end
-        end
-    end)
-    if guiOwned then
-        _knownOwnedPlanters[cleanName] = true
-        return true
-    end
-
-    local function checkPlanterModel(model)
-        if not (model and model:IsA("Model")) then return false end
-        local isMine = false
-
-        local owner = model:FindFirstChild("Owner") or model:FindFirstChild("Player") or model:FindFirstChild("User")
-        if owner then
-            if owner:IsA("ObjectValue") and (owner.Value == player or owner.Value == player.Character) then
-                isMine = true
-            elseif owner:IsA("StringValue") or owner:IsA("IntValue") or owner:IsA("NumberValue") then
-                local sVal = tostring(owner.Value):lower()
-                if sVal == player.Name:lower() or sVal == tostring(player.UserId) then
-                    isMine = true
-                end
-            end
-        end
-
-        local attrOwner = model:GetAttribute("Owner") or model:GetAttribute("OwnerId") or model:GetAttribute("Player")
-        if attrOwner then
-            local sAttr = tostring(attrOwner):lower()
-            if sAttr == player.Name:lower() or sAttr == tostring(player.UserId) then
-                isMine = true
-            end
-        end
-
-        if not isMine then
-            for _, child in ipairs(model:GetChildren()) do
-                if child:IsA("BillboardGui") or child:IsA("SurfaceGui") then
-                    for _, desc in ipairs(child:GetDescendants()) do
-                        if desc:IsA("TextLabel") and desc.Text:lower():find(player.Name:lower(), 1, true) then
-                            isMine = true
-                            break
-                        end
-                    end
-                end
-                if isMine then break end
-            end
-        end
-
-        if isMine then
-            if matches(model.Name) then return true end
-            local pType = model:FindFirstChild("Type") or model:FindFirstChild("PlanterType") or model:FindFirstChild("PlantType")
-            if pType and matches(pType.Value) then return true end
-            local aType = model:GetAttribute("Type") or model:GetAttribute("PlanterType")
-            if aType and matches(aType) then return true end
-            for _, desc in ipairs(model:GetDescendants()) do
-                if desc:IsA("TextLabel") and matches(desc.Text) then
-                    return true
-                end
-            end
-        end
-        return false
-    end
-
-    local containers = {
-        workspace:FindFirstChild("Planters"),
-        workspace:FindFirstChild("ActivePlanters"),
-        workspace:FindFirstChild("CorePlanters"),
-        workspace:FindFirstChild("Fields")
-    }
-
-    for _, c in ipairs(compact(containers, 4)) do
-        if c then
-            for _, m in ipairs(c:GetChildren()) do
-                if checkPlanterModel(m) then
+    local settings = findAtlasSettings()
+    if settings then
+        local pSettings = settings.planters or settings.Planters or (settings.toys and settings.toys.planters)
+        if type(pSettings) == "table" then
+            for k, v in pairs(pSettings) do
+                if matches(k) or (type(v) == "string" and matches(v)) then
                     _knownOwnedPlanters[cleanName] = true
                     return true
                 end
-            end
-        end
-    end
-
-    for _, m in ipairs(workspace:GetChildren()) do
-        if m:IsA("Model") and (m.Name:lower():find("planter") or m.Name:lower():find(rootPlanter)) then
-            if checkPlanterModel(m) then
-                _knownOwnedPlanters[cleanName] = true
-                return true
+                if type(v) == "table" and (matches(v.Type) or matches(v.Name) or matches(v.Planter)) then
+                    _knownOwnedPlanters[cleanName] = true
+                    return true
+                end
             end
         end
     end
