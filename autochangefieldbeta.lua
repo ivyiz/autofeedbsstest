@@ -1421,6 +1421,121 @@ hudLabel.TextXAlignment = Enum.TextXAlignment.Right
 hudLabel.Text = "[Auto Prog] Initializing..."
 hudLabel.Parent = hudGui
 
+local function getAllTargetIngredients(targetItem, data)
+    if not targetItem or targetItem == "None" then return "None" end
+    local matched = nil
+    local cTarget = targetItem:gsub("[%s%-_']", ""):lower()
+    for _, m in ipairs(FullProgressionRoute) do
+        local cm = m.Name:gsub("[%s%-_']", ""):lower()
+        if cm == cTarget then
+            matched = m
+            break
+        end
+    end
+    if not matched or not matched.Ingredients or #matched.Ingredients == 0 then
+        return "Honey Only"
+    end
+
+    local lines = {}
+    for _, ing in ipairs(matched.Ingredients) do
+        local invCount = getItemAmount(ing.Item, data)
+        local statusIcon = (invCount >= ing.Amount) and "✅" or "⏳"
+        local line = string.format("%s **%s**: %d/%d", statusIcon, ing.Item, invCount, ing.Amount)
+        if invCount < ing.Amount and RECIPES[ing.Item] then
+            local def = ing.Amount - invCount
+            local subParts = {}
+            for _, sub in ipairs(RECIPES[ing.Item]) do
+                local totalFruit = def * sub.Amount
+                local curFruit = getItemAmount(sub.Item, data)
+                table.insert(subParts, string.format("%d %s [have %d]", totalFruit, sub.Item, curFruit))
+            end
+            if #subParts > 0 then
+                line = line .. "\n   └ *Raw: " .. table.concat(subParts, ", ") .. "*"
+            end
+        end
+        table.insert(lines, line)
+    end
+    return table.concat(lines, "\n")
+end
+
+local _lastWebhookSendTime = 0
+local _lastWebhookTarget = nil
+local _lastWebhookField = nil
+
+local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data)
+    local roots = { getgenv and getgenv(), _G, shared }
+    local webhookUrl = nil
+    local interval = 60
+
+    for _, r in ipairs(roots) do
+        if type(r) == "table" then
+            if r.DiscordWebhookUrl and type(r.DiscordWebhookUrl) == "string" and r.DiscordWebhookUrl ~= "" then
+                webhookUrl = r.DiscordWebhookUrl
+            elseif r.WebhookUrl and type(r.WebhookUrl) == "string" and r.WebhookUrl ~= "" then
+                webhookUrl = r.WebhookUrl
+            end
+            if r.WebhookInterval and tonumber(r.WebhookInterval) then
+                interval = tonumber(r.WebhookInterval)
+            end
+        end
+    end
+
+    if not webhookUrl or webhookUrl == "" then return end
+
+    local now = tick()
+    local stateChanged = (targetStr ~= _lastWebhookTarget or fieldStr ~= _lastWebhookField)
+    if not stateChanged and (now - _lastWebhookSendTime < interval) then
+        return
+    end
+    if stateChanged and (now - _lastWebhookSendTime < 10) then
+        return
+    end
+
+    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if not httpRequest then return end
+
+    _lastWebhookSendTime = now
+    _lastWebhookTarget = targetStr
+    _lastWebhookField = fieldStr
+
+    local needIngredients = getAllTargetIngredients(targetStr, data)
+
+    local embedDesc = string.format("**Bees :** %d\n**Current Target :** %s\n**Need :**\n%s\n**Field :** %s\n**Route :** %s",
+        beeCount,
+        targetStr,
+        needIngredients,
+        fieldStr,
+        routeStr
+    )
+
+    local payload = {
+        username = "Ivyiz Auto Change Field",
+        embeds = {
+            {
+                title = "Ivyiz Auto Change Field Webhook v1.0",
+                description = embedDesc,
+                color = 3447003,
+                footer = {
+                    text = string.format("Player: %s", player.Name)
+                },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }
+        }
+    }
+
+    local ok, encoded = pcall(function() return HttpService:JSONEncode(payload) end)
+    if ok and encoded then
+        pcall(function()
+            httpRequest({
+                Url = webhookUrl,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = encoded
+            })
+        end)
+    end
+end
+
 local function printDebugInfo()
     local data = getStatData()
     local beeCount = getBeeCount(data)
@@ -1477,6 +1592,9 @@ task.spawn(function()
         if field then
             setAtlasField(field)
         end
+
+        task.spawn(sendDiscordWebhook, beeCount, targetStr, fieldStr, routeStr, data)
+
         task.wait(10)
     end
 end)
