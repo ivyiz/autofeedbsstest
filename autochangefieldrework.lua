@@ -894,18 +894,6 @@ local function getGuiText(gui)
     return tostring(gui.Name or "")
 end
 
-local function bringIntoView(gui)
-    if not gui or not gui:IsA("GuiObject") then return end
-    local scroll = gui:FindFirstAncestorWhichIsA("ScrollingFrame")
-    if scroll and scroll.AbsoluteSize.Y > 0 then
-        pcall(function()
-            local relY = gui.AbsolutePosition.Y - scroll.AbsolutePosition.Y + scroll.CanvasPosition.Y
-            scroll.CanvasPosition = Vector2.new(0, math.max(0, relY - scroll.AbsoluteSize.Y / 2))
-            task.wait(0.04)
-        end)
-    end
-end
-
 local function isGuiVisibleOnScreen(gui)
     if not gui or not gui:IsA("GuiObject") then return false end
     local cur = gui
@@ -914,6 +902,19 @@ local function isGuiVisibleOnScreen(gui)
         cur = cur.Parent
     end
     return gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0
+end
+
+local function bringIntoView(gui)
+    if not gui or not gui:IsA("GuiObject") then return end
+    if not isGuiVisibleOnScreen(gui) then return end
+    local scroll = gui:FindFirstAncestorWhichIsA("ScrollingFrame")
+    if scroll and scroll.AbsoluteSize.Y > 0 then
+        pcall(function()
+            local relY = gui.AbsolutePosition.Y - scroll.AbsolutePosition.Y + scroll.CanvasPosition.Y
+            scroll.CanvasPosition = Vector2.new(0, math.max(0, relY - scroll.AbsoluteSize.Y / 2))
+            task.wait(0.04)
+        end)
+    end
 end
 
 local function clickElement(gui)
@@ -956,7 +957,7 @@ local function clickElement(gui)
             fired = true
         end
 
-        if isGuiVisibleOnScreen(clickable) then
+        if not fired and isGuiVisibleOnScreen(clickable) then
             local x = clickable.AbsolutePosition.X + clickable.AbsoluteSize.X / 2
             local y = clickable.AbsolutePosition.Y + clickable.AbsoluteSize.Y / 2
             if VIM then
@@ -967,7 +968,7 @@ local function clickElement(gui)
                     fired = true
                 end)
             end
-            if VU then
+            if not fired and VU then
                 pcall(function()
                     VU:Button1Down(Vector2.new(x, y))
                     task.wait(0.02)
@@ -980,29 +981,102 @@ local function clickElement(gui)
     return fired
 end
 
-local function isFarmingDropdownHeader(gui)
-    if not (gui:IsA("TextLabel") or gui:IsA("TextButton")) then return false end
-    if gui.Name == "AutoProg_HUD" then return false end
-    local txt = getGuiText(gui):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
-    local low = txt:lower()
+local function findFarmingSection(root)
+    if not root then return nil end
+    local descs = root:GetDescendants()
+    for _, obj in ipairs(descs) do
+        if obj:IsA("Frame") or obj:IsA("ImageLabel") or obj:IsA("ScrollingFrame") then
+            local hasTitle = false
+            for _, ch in ipairs(obj:GetChildren()) do
+                local t = getGuiText(ch):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+                if t == "farming" then
+                    hasTitle = true
+                    break
+                end
+            end
+            if not hasTitle then
+                for _, d in ipairs(obj:GetDescendants()) do
+                    if d:IsA("TextLabel") or d:IsA("TextButton") then
+                        local t = getGuiText(d):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+                        if t == "farming" then
+                            local p = d.Parent
+                            if p == obj or (p and p.Parent == obj) then
+                                hasTitle = true
+                                break
+                            end
+                        end
+                    end
+                end
+            end
 
-    if not low:match("^field%s*:") then return false end
-    if low:match("^best") or low:match("^allowed") or low:match("^quest") or low:match("^sprout") then
-        return false
-    end
+            if hasTitle then
+                local hasAutofarm = false
+                local hasField = false
+                local isQuestSection = false
 
-    local p = gui.Parent
-    for _ = 1, 5 do
-        if not p then break end
-        for _, desc in ipairs(p:GetDescendants()) do
-            local dt = getGuiText(desc):lower():gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
-            if dt == "autofarm" or dt == "auto sprinkler" or dt == "auto dig" then
-                return true, txt
+                for _, d in ipairs(obj:GetDescendants()) do
+                    local t = getGuiText(d):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+                    if t == "autofarm" then
+                        hasAutofarm = true
+                    elseif t:match("^field%s*:") then
+                        hasField = true
+                    elseif t:match("^best") or t:match("quest") then
+                        isQuestSection = true
+                    end
+                end
+
+                if hasTitle and hasAutofarm and hasField and not isQuestSection then
+                    return obj
+                end
             end
         end
-        p = p.Parent
     end
-    return false
+    return nil
+end
+
+local function getFarmingSectionAndDropdown(root)
+    if not root then return nil, nil, nil end
+
+    local section = findFarmingSection(root)
+    if section then
+        for _, d in ipairs(section:GetDescendants()) do
+            if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Name ~= "AutoProg_HUD" then
+                local txt = getGuiText(d):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                local low = txt:lower()
+                if low:match("^field%s*:") and not (low:match("^best") or low:match("^allowed") or low:match("^quest") or low:match("^sprout")) then
+                    return section, d, txt
+                end
+            end
+        end
+    end
+
+    for _, d in ipairs(root:GetDescendants()) do
+        if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Name ~= "AutoProg_HUD" then
+            local txt = getGuiText(d):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            local low = txt:lower()
+            if low:match("^field%s*:") and not (low:match("^best") or low:match("^allowed") or low:match("^quest") or low:match("^sprout")) then
+                local p = d.Parent
+                for _ = 1, 3 do
+                    if not p or p.Name == "Tabs" or p.Name == "Window" or p:IsA("ScreenGui") then break end
+                    local hasAuto = false
+                    local hasFarmTitle = false
+                    local hasQuest = false
+                    for _, desc in ipairs(p:GetDescendants()) do
+                        local dt = getGuiText(desc):lower():gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                        if dt == "autofarm" then hasAuto = true end
+                        if dt == "farming" then hasFarmTitle = true end
+                        if dt:match("^best") or dt:match("quest") then hasQuest = true end
+                    end
+                    if hasAuto and (hasFarmTitle or not hasQuest) then
+                        return p, d, txt
+                    end
+                    p = p.Parent
+                end
+            end
+        end
+    end
+
+    return nil, nil, nil
 end
 
 local function setAtlasFieldViaUI(targetField)
@@ -1015,32 +1089,23 @@ local function setAtlasFieldViaUI(targetField)
 
     for _, root in ipairs(uiRoots) do
         if root then
-            local descs = root:GetDescendants()
-            local farmingHeader = nil
-            local headerTxt = nil
-
-            for _, d in ipairs(descs) do
-                local isFarming, txt = isFarmingDropdownHeader(d)
-                if isFarming then
-                    farmingHeader = d
-                    headerTxt = txt
-                    break
-                end
-            end
-
-            if farmingHeader then
+            local section, farmingHeader, headerTxt = getFarmingSectionAndDropdown(root)
+            if section and farmingHeader then
                 local curVal = headerTxt:match("^[Ff]ield%s*:%s*(.+)")
                 if curVal and curVal:gsub("[%s%-_']", ""):lower() == targetClean then
                     return true, "ui_already_set"
                 end
 
-                local container = farmingHeader:FindFirstAncestorWhichIsA("Frame") or farmingHeader.Parent.Parent or farmingHeader.Parent
-                local clickTarget = farmingHeader:IsA("TextButton") and farmingHeader or farmingHeader.Parent
+                local clickTarget = farmingHeader:IsA("TextButton") and farmingHeader
+                    or farmingHeader:FindFirstAncestorWhichIsA("TextButton")
+                    or farmingHeader:FindFirstAncestorWhichIsA("ImageButton")
+                    or farmingHeader.Parent
+
                 clickElement(clickTarget)
                 task.wait(0.12)
 
-                for _, btn in ipairs(container:GetDescendants()) do
-                    if (btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("ImageButton")) and btn ~= farmingHeader and btn.Name ~= "AutoProg_HUD" then
+                for _, btn in ipairs(section:GetDescendants()) do
+                    if (btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("ImageButton")) and btn ~= farmingHeader and btn ~= clickTarget and btn.Name ~= "AutoProg_HUD" then
                         local rawTxt = getGuiText(btn):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
                         if rawTxt:gsub("[%s%-_']", ""):lower() == targetClean then
                             local clicked = clickElement(btn)
