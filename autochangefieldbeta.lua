@@ -388,7 +388,17 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
     end
 
     if data then
+        if (canonical and getItemAmount(canonical, data) > 0)
+            or getItemAmount(cleanName, data) > 0
+            or getItemAmount(rawClean, data) > 0
+            or (rootPlanter ~= "" and getItemAmount(rootPlanter, data) > 0)
+            or (rootPlanter ~= "" and getItemAmount(rootPlanter .. " Planter", data) > 0) then
+            _knownOwnedPlanters[cleanName] = true
+            return true
+        end
+
         local pTables = {
+            data.Eggs,
             data.Planters,
             data.PurchasedPlanters,
             data.PlanterInventory,
@@ -407,7 +417,7 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
                         return true
                     end
                     if type(v) == "string" or type(v) == "number" then
-                        if matches(v) then
+                        if matches(v) or ((type(v) == "number") and v > 0 and matches(k)) then
                             _knownOwnedPlanters[cleanName] = true
                             return true
                         end
@@ -427,6 +437,48 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
             end
         end
     end
+
+    local clientStat = RS:FindFirstChild("ClientStatCache")
+    local myStats = clientStat and clientStat:FindFirstChild(player.Name)
+    if myStats then
+        local checkFolders = { myStats:FindFirstChild("Eggs"), myStats:FindFirstChild("Items"), myStats:FindFirstChild("Planters") }
+        for _, fld in ipairs(checkFolders) do
+            if fld then
+                for _, child in ipairs(fld:GetChildren()) do
+                    if matches(child.Name) then
+                        local isOwned = true
+                        if child:IsA("ValueBase") and tonumber(child.Value) ~= nil then
+                            isOwned = (tonumber(child.Value) > 0)
+                        end
+                        if isOwned then
+                            _knownOwnedPlanters[cleanName] = true
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    pcall(function()
+        if player:FindFirstChild("PlayerGui") then
+            for _, desc in ipairs(player.PlayerGui:GetDescendants()) do
+                if desc:IsA("TextLabel") and desc.Visible and matches(desc.Text) then
+                    local p = desc.Parent
+                    if p then
+                        local fullTxt = ""
+                        for _, sibling in ipairs(p:GetChildren()) do
+                            if sibling:IsA("TextLabel") then fullTxt = fullTxt .. " " .. sibling.Text end
+                        end
+                        if fullTxt:find("1/1") or fullTxt:find("x1") or fullTxt:find("1") or fullTxt:find("Grows") then
+                            _knownOwnedPlanters[cleanName] = true
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end)
 
     local function checkPlanterModel(model)
         if not (model and model:IsA("Model")) then return false end
