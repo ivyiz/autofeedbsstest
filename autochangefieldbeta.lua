@@ -4,6 +4,17 @@ local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 
+-- ipairs() dung lai o phan tu nil dau tien. Bang kieu { data.Eggs, data.Items, ... }
+-- thuong co "lo" nil, nen phai loc truoc khi lap.
+local function compact(t, n)
+    local out = {}
+    for i = 1, n do
+        local v = t[i]
+        if v ~= nil and v ~= false then out[#out + 1] = v end
+    end
+    return out
+end
+
 local RECIPES = {
     ["Blue Extract"] = { { Item = "Blueberry", Amount = 50 } },
     ["Red Extract"] = { { Item = "Strawberry", Amount = 50 } },
@@ -235,7 +246,7 @@ local function getItemAmount(item, data)
     end
 
     local cItem = item:gsub("[%s%-_']", ""):lower()
-    local folders = { data.Eggs, data.Inventory, data.Items, data.Totals, data }
+    local folders = compact({ data.Eggs, data.Inventory, data.Items, data.Totals, data }, 5)
     for _, folder in ipairs(folders) do
         if type(folder) == "table" then
             for _, k in ipairs(keys) do
@@ -309,6 +320,7 @@ local ITEM_ALIASES = {
     ["porcportohive"] = "Porcelain Port-O-Hive",
     ["porcport"] = "Porcelain Port-O-Hive",
     ["blueportohive"] = "Blue Port-O-Hive",
+    ["redportohive"] = "Red Port-O-Hive",
     ["portohive"] = "Port-O-Hive",
     ["coconutcanister"] = "Coconut Canister",
     ["cococanister"] = "Coconut Canister",
@@ -349,13 +361,42 @@ local function resolveItemName(raw)
     if not raw then return nil end
     local clean = tostring(raw):gsub("[%s%-_':%[%]%(%)]", ""):lower()
     if ITEM_ALIASES[clean] then return ITEM_ALIASES[clean] end
-    if clean:find("diamask", 1, true) then return "Diamond Mask" end
+    -- khop chuoi con: chon alias DAI NHAT (xac dinh), khong phu thuoc thu tu pairs()
+    local bestK, bestV = nil, nil
     for k, v in pairs(ITEM_ALIASES) do
         if #k >= 6 and clean:find(k, 1, true) then
-            return v
+            if not bestK or #k > #bestK or (#k == #bestK and k < bestK) then
+                bestK, bestV = k, v
+            end
         end
     end
-    return raw
+    return bestV or raw
+end
+
+-- Chi khop CHINH XAC (alias hoac ten trong route). Dung cho text lay tu UI.
+local function resolveItemNameStrict(raw)
+    if not raw then return nil end
+    local clean = tostring(raw):gsub("[%s%-_':%[%]%(%)]", ""):lower()
+    if clean == "" then return nil end
+    if ITEM_ALIASES[clean] then return ITEM_ALIASES[clean] end
+    for _, m in ipairs(FullProgressionRoute) do
+        if m.Name:gsub("[%s%-_':%[%]%(%)]", ""):lower() == clean then return m.Name end
+    end
+    return nil
+end
+
+local function canonKey(s)
+    return tostring(resolveItemName(s) or s):gsub("[%s%-_']", ""):lower()
+end
+
+-- 0 / false / "" / {} khong tinh la "so huu" (trong Lua so 0 van la truthy!)
+local function truthyOwned(v)
+    if v == nil or v == false then return false end
+    local t = type(v)
+    if t == "number" then return v > 0 end
+    if t == "string" then return v ~= "" and v ~= "0" end
+    if t == "table" then return next(v) ~= nil end
+    return true
 end
 
 local function isKnownProgressionItem(name)
@@ -434,10 +475,10 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
             data.Equipment,
             data.Accessories
         }
-        for _, tbl in ipairs(pTables) do
+        for _, tbl in ipairs(compact(pTables, 10)) do
             if type(tbl) == "table" then
                 for k, v in pairs(tbl) do
-                    if matches(k) then
+                    if matches(k) and truthyOwned(v) then
                         _knownOwnedPlanters[cleanName] = true
                         return true
                     end
@@ -452,7 +493,7 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
                             return true
                         end
                         for k2, v2 in pairs(v) do
-                            if matches(k2) or ((type(v2) == "string" or type(v2) == "number") and matches(v2)) then
+                            if (matches(k2) and truthyOwned(v2)) or ((type(v2) == "string" or type(v2) == "number") and matches(v2)) then
                                 _knownOwnedPlanters[cleanName] = true
                                 return true
                             end
@@ -467,7 +508,7 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
     local myStats = clientStat and clientStat:FindFirstChild(player.Name)
     if myStats then
         local checkFolders = { myStats:FindFirstChild("Eggs"), myStats:FindFirstChild("Items"), myStats:FindFirstChild("Planters") }
-        for _, fld in ipairs(checkFolders) do
+        for _, fld in ipairs(compact(checkFolders, 3)) do
             if fld then
                 for _, child in ipairs(fld:GetChildren()) do
                     if matches(child.Name) then
@@ -485,6 +526,7 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
         end
     end
 
+    local guiOwned = false
     pcall(function()
         if player:FindFirstChild("PlayerGui") then
             for _, desc in ipairs(player.PlayerGui:GetDescendants()) do
@@ -495,15 +537,20 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
                         for _, sibling in ipairs(p:GetChildren()) do
                             if sibling:IsA("TextLabel") then fullTxt = fullTxt .. " " .. sibling.Text end
                         end
-                        if fullTxt:find("1/1") or fullTxt:find("x1") or fullTxt:find("1") or fullTxt:find("Grows") then
-                            _knownOwnedPlanters[cleanName] = true
-                            return true
+                        -- bo find("1") (khop moi chu so 1) va "x1" (khop nut Buy x1 trong shop)
+                        if fullTxt:find("1/1", 1, true) or fullTxt:find("Grows", 1, true) then
+                            guiOwned = true
+                            return
                         end
                     end
                 end
             end
         end
     end)
+    if guiOwned then
+        _knownOwnedPlanters[cleanName] = true
+        return true
+    end
 
     local function checkPlanterModel(model)
         if not (model and model:IsA("Model")) then return false end
@@ -565,7 +612,7 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
         workspace:FindFirstChild("Fields")
     }
 
-    for _, c in ipairs(containers) do
+    for _, c in ipairs(compact(containers, 4)) do
         if c then
             for _, m in ipairs(c:GetChildren()) do
                 if checkPlanterModel(m) then
@@ -676,42 +723,14 @@ local function isItemOwned(itemName, itemType, char, data)
         for k, v in pairs(data) do
             if type(v) == "string" or type(v) == "number" then
                 checkMatch(v)
-                checkMatch(k)
+                if truthyOwned(v) then checkMatch(k) end
             elseif type(v) == "table" then
                 for k2, v2 in pairs(v) do
-                    checkMatch(k2)
+                    if truthyOwned(v2) then checkMatch(k2) end
                     if type(v2) == "string" or type(v2) == "number" then checkMatch(v2) end
                 end
             end
         end
-    end
-
-    if curTool then
-        local c = tostring(curTool):gsub("[%s%-_']", ""):lower()
-        if c == cleanName or c == rawClean then return true end
-        local reqTier = TOOL_TIERS[cleanName] or TOOL_TIERS[rawClean]
-        if reqTier and TOOL_TIERS[c] and TOOL_TIERS[c] >= reqTier then return true end
-    end
-
-    if curBag then
-        local c = tostring(curBag):gsub("[%s%-_']", ""):lower()
-        if c == cleanName or c == rawClean then return true end
-        local reqTier = BAG_TIERS[cleanName] or BAG_TIERS[rawClean]
-        if reqTier and BAG_TIERS[c] and BAG_TIERS[c] >= reqTier then return true end
-    end
-
-    if curBoots then
-        local c = tostring(curBoots):gsub("[%s%-_']", ""):lower()
-        if c == cleanName or c == rawClean then return true end
-        local reqTier = BOOTS_TIERS[cleanName] or BOOTS_TIERS[rawClean]
-        if reqTier and BOOTS_TIERS[c] and BOOTS_TIERS[c] >= reqTier then return true end
-    end
-
-    if curBelt then
-        local c = tostring(curBelt):gsub("[%s%-_']", ""):lower()
-        if c == cleanName or c == rawClean then return true end
-        local reqTier = BELT_TIERS[cleanName] or BELT_TIERS[rawClean]
-        if reqTier and BELT_TIERS[c] and BELT_TIERS[c] >= reqTier then return true end
     end
 
     local SPECIAL_MASKS = {
@@ -719,34 +738,28 @@ local function isItemOwned(itemName, itemType, char, data)
         ["gummymask"] = true, ["demonmask"] = true, ["diamondmask"] = true, ["diamask"] = true
     }
 
-    if curHat then
-        local c = tostring(curHat):gsub("[%s%-_']", ""):lower()
+    -- Tier cao HON moi suy ra so huu tier thap. Cung tier (Tide Popper / Dark Scythe /
+    -- Gummyballer, Blue / Red Port-O-Hive...) thi phai trung chinh xac ten item.
+    local function slotOwned(cur, tierTbl, skipTier)
+        if not cur then return false end
+        local c = tostring(cur):gsub("[%s%-_']", ""):lower()
         if c == cleanName or c == rawClean then return true end
-        if not SPECIAL_MASKS[cleanName] and not SPECIAL_MASKS[rawClean] then
-            local reqTier = HAT_TIERS[cleanName] or HAT_TIERS[rawClean]
-            if reqTier and HAT_TIERS[c] and HAT_TIERS[c] >= reqTier then return true end
-        end
+        if canonKey(c) == cleanName then return true end
+        if skipTier then return false end
+        local reqTier = tierTbl[cleanName] or tierTbl[rawClean]
+        local curTier = tierTbl[c]
+        return (reqTier and curTier and curTier > reqTier) and true or false
     end
 
-    if curSprinkler then
-        local c = tostring(curSprinkler):gsub("[%s%-_']", ""):lower()
-        if c == cleanName or c == rawClean then return true end
-        local reqTier = SPRINKLER_TIERS[cleanName] or SPRINKLER_TIERS[rawClean]
-        if reqTier and SPRINKLER_TIERS[c] and SPRINKLER_TIERS[c] >= reqTier then return true end
-    end
-
-    if curBlueGuard then
-        local c = tostring(curBlueGuard):gsub("[%s%-_']", ""):lower()
-        if c == cleanName or c == rawClean then return true end
-        local reqTier = BLUE_GUARD_TIERS[cleanName] or BLUE_GUARD_TIERS[rawClean]
-        if reqTier and BLUE_GUARD_TIERS[c] and BLUE_GUARD_TIERS[c] >= reqTier then return true end
-    end
-
-    if curRedGuard then
-        local c = tostring(curRedGuard):gsub("[%s%-_']", ""):lower()
-        if c == cleanName or c == rawClean then return true end
-        local reqTier = RED_GUARD_TIERS[cleanName] or RED_GUARD_TIERS[rawClean]
-        if reqTier and RED_GUARD_TIERS[c] and RED_GUARD_TIERS[c] >= reqTier then return true end
+    if slotOwned(curTool, TOOL_TIERS)
+        or slotOwned(curBag, BAG_TIERS)
+        or slotOwned(curBoots, BOOTS_TIERS)
+        or slotOwned(curBelt, BELT_TIERS)
+        or slotOwned(curHat, HAT_TIERS, SPECIAL_MASKS[cleanName] or SPECIAL_MASKS[rawClean])
+        or slotOwned(curSprinkler, SPRINKLER_TIERS)
+        or slotOwned(curBlueGuard, BLUE_GUARD_TIERS)
+        or slotOwned(curRedGuard, RED_GUARD_TIERS) then
+        return true
     end
 
     if (cleanName == "glider" or rawClean == "glider") and curGlider then
@@ -754,13 +767,13 @@ local function isItemOwned(itemName, itemType, char, data)
     end
 
     local eqSources = { eq, data, data and data.Accessories, data and data.Equipment, data and data.Items, data and data.Inventory }
-    for _, src in ipairs(eqSources) do
+    for _, src in ipairs(compact(eqSources, 6)) do
         if type(src) == "table" then
-            if src[canonical] or src[itemName] or src[cleanName] or src[rawClean] then return true end
+            if truthyOwned(src[canonical]) or truthyOwned(src[itemName]) or truthyOwned(src[cleanName]) or truthyOwned(src[rawClean]) then return true end
             for k, val in pairs(src) do
                 local kClean = tostring(k):gsub("[%s%-_']", ""):lower()
                 local vClean = tostring(val):gsub("[%s%-_']", ""):lower()
-                if kClean == cleanName or kClean == rawClean or vClean == cleanName or vClean == rawClean then
+                if ((kClean == cleanName or kClean == rawClean) and truthyOwned(val)) or vClean == cleanName or vClean == rawClean then
                     return true
                 end
             end
@@ -785,6 +798,7 @@ local function getTargetField(material, beeCount)
 end
 
 local _cachedAtlasSettings = nil
+local _gcScanAt = { settings = 0, route = 0 }
 
 local function isAtlasSettingsTable(t)
     if type(t) ~= "table" then return false end
@@ -798,7 +812,7 @@ local function findAtlasSettings()
         return _cachedAtlasSettings
     end
 
-    local roots = { getgenv and getgenv(), _G, shared }
+    local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
     for _, root in ipairs(roots) do
         if type(root) == "table" then
             if isAtlasSettingsTable(root) then
@@ -838,7 +852,8 @@ local function findAtlasSettings()
         end
     end
 
-    if getgc then
+    if getgc and (tick() - _gcScanAt.settings > 60) then
+        _gcScanAt.settings = tick()
         local ok, gc = pcall(getgc, true)
         if not ok or type(gc) ~= "table" then ok, gc = pcall(getgc) end
         if ok and type(gc) == "table" then
@@ -943,14 +958,26 @@ local function resolveMissingMaterial(item, neededAmount, data, beeCount)
 
     local recipe = RECIPES[item]
     if recipe then
+        local firstUnfarmMat, firstUnfarmAmt = nil, 0
         for _, sub in ipairs(recipe) do
             local totalSubNeeded = deficit * sub.Amount
-            local missingMat, missingAmt, targetField = resolveMissingMaterial(sub.Item, totalSubNeeded, data, beeCount)
-            if targetField then return missingMat, missingAmt, targetField end
+            local missingMat, missingAmt, targetField, isUnfarm = resolveMissingMaterial(sub.Item, totalSubNeeded, data, beeCount)
+            if targetField then
+                return missingMat, missingAmt, targetField, false
+            elseif isUnfarm and not firstUnfarmMat then
+                firstUnfarmMat, firstUnfarmAmt = missingMat, missingAmt
+            end
+        end
+        if firstUnfarmMat then
+            return firstUnfarmMat, firstUnfarmAmt, nil, true
         end
     else
         local field = getTargetField(item, beeCount)
-        if field then return item, deficit, field end
+        if field then
+            return item, deficit, field, false
+        else
+            return item, deficit, nil, true
+        end
     end
     return nil
 end
@@ -1026,10 +1053,15 @@ local function extractPurchaseList(tbl, depth)
             end
         end
 
+        local keys = {}
         for k, v in pairs(t) do
             if type(k) ~= "number" and type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
-                scan(v, d + 1)
+                keys[#keys + 1] = k
             end
+        end
+        table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+        for _, k in ipairs(keys) do
+            scan(t[k], d + 1)
         end
     end
 
@@ -1053,7 +1085,7 @@ local function findAtlasRouteInMemory()
         end
     end
 
-    local roots = { getgenv and getgenv(), _G, shared }
+    local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
     for _, r in ipairs(roots) do
         if type(r) == "table" then
             if r.Atlas and type(r.Atlas) == "table" then
@@ -1070,7 +1102,8 @@ local function findAtlasRouteInMemory()
         end
     end
 
-    if getgc then
+    if getgc and (tick() - _gcScanAt.route > 60) then
+        _gcScanAt.route = tick()
         local ok, gc = pcall(getgc, true)
         if not ok or type(gc) ~= "table" then ok, gc = pcall(getgc) end
         if ok and type(gc) == "table" then
@@ -1099,6 +1132,9 @@ local function findAtlasRouteInMemory()
 
     return nil
 end
+
+local _lastRouteFile = "none"
+local _routeSourceName = "none"
 
 local function readAtlasFileRoute()
     if not (readfile and isfile) then return nil end
@@ -1168,6 +1204,7 @@ local function readAtlasFileRoute()
         if not visited[path] and isfile(path) then
             visited[path] = true
             local ok, content = pcall(readfile, path)
+            _lastRouteFile = path
             if ok and content and content ~= "" then
                 local cLow = content:lower()
                 if cLow:find('"purchase"') or cLow:find('"route"') or cLow:find('"toys"') or cLow:find('"farming.field1"') or cLow:find('"diamask"') then
@@ -1193,7 +1230,7 @@ local function readAtlasFileRoute()
 end
 
 local function getUserDefinedRoute()
-    local roots = { getgenv and getgenv(), _G, shared }
+    local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
     for _, r in ipairs(roots) do
         if type(r) == "table" then
             local cr = r.CustomRoute or r.UserRoute or r.AtlasCustomRoute
@@ -1235,7 +1272,19 @@ local function getAtlasRoute()
         _routeDefaultFields[k] = v
     end
 
-    local rawRoute = customUserRoute or findAtlasRouteInMemory() or readAtlasFileRoute()
+    local rawRoute, routeSrc
+    if customUserRoute then
+        rawRoute, routeSrc = customUserRoute, "custom"
+    else
+        rawRoute = findAtlasRouteInMemory()
+        if rawRoute then
+            routeSrc = "memory"
+        else
+            rawRoute = readAtlasFileRoute()
+            if rawRoute then routeSrc = "file:" .. tostring(_lastRouteFile) end
+        end
+    end
+    _routeSourceName = routeSrc or "none"
     local rawItemsList = rawRoute and extractPurchaseList(rawRoute, 0)
 
     if rawItemsList and type(rawItemsList) == "table" and #rawItemsList > 0 then
@@ -1263,6 +1312,17 @@ local function getAtlasRoute()
                 })
             end
         end
+        do
+            local dedup, seenN = {}, {}
+            for _, m in ipairs(dynamicRoute) do
+                local ck = tostring(m.Name):gsub("[%s%-_']", ""):lower()
+                if not seenN[ck] then
+                    seenN[ck] = true
+                    dedup[#dedup + 1] = m
+                end
+            end
+            dynamicRoute = dedup
+        end
         if #dynamicRoute > 0 then
             _routeFound = true
             _cachedParsedRoute = dynamicRoute
@@ -1273,7 +1333,7 @@ local function getAtlasRoute()
 
     _routeFound = false
     local allowFallback = false
-    local roots = { getgenv and getgenv(), _G, shared }
+    local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
     for _, r in ipairs(roots) do
         if type(r) == "table" and r.AllowDefaultRouteFallback == true then
             allowFallback = true
@@ -1292,28 +1352,33 @@ local function getAtlasRoute()
     return {}
 end
 
+local _targetSource = "none"
+
 local function getAtlasLiveTarget()
+    _targetSource = "none"
+
+    local function accept(raw, srcName)
+        if raw == nil then return nil end
+        local res = resolveItemName(raw)
+        if res and isKnownProgressionItem(res) then
+            _targetSource = srcName
+            return res
+        end
+        return nil
+    end
+
     local settings = findAtlasSettings()
     if settings then
-        if settings.toys and type(settings.toys) == "table" then
-            if settings.toys.target then
-                local res = resolveItemName(settings.toys.target)
-                if isKnownProgressionItem(res) then return res end
-            end
-            if settings.toys.current then
-                local res = resolveItemName(settings.toys.current)
-                if isKnownProgressionItem(res) then return res end
-            end
-            if settings.toys.current_target then
-                local res = resolveItemName(settings.toys.current_target)
-                if isKnownProgressionItem(res) then return res end
-            end
-            if settings.toys.current_purchase then
-                local res = resolveItemName(settings.toys.current_purchase)
-                if isKnownProgressionItem(res) then return res end
-            end
-            if settings.toys.route and type(settings.toys.route) == "table" then
-                local pList = extractPurchaseList(settings.toys.route, 0)
+        local t = settings.toys
+        if type(t) == "table" then
+            local r = accept(t.target, "settings.toys.target")
+                or accept(t.current, "settings.toys.current")
+                or accept(t.current_target, "settings.toys.current_target")
+                or accept(t.current_purchase, "settings.toys.current_purchase")
+            if r then return r end
+
+            if type(t.route) == "table" then
+                local pList = extractPurchaseList(t.route, 0)
                 if pList and #pList > 0 then
                     local char = player.Character
                     local data = getStatData()
@@ -1322,6 +1387,7 @@ local function getAtlasLiveTarget()
                         if pName then
                             local resolved = resolveItemName(pName)
                             if isKnownProgressionItem(resolved) and not isItemOwned(resolved, "Gear", char, data) then
+                                _targetSource = "settings.toys.route (first not owned)"
                                 return resolved
                             end
                         end
@@ -1329,91 +1395,86 @@ local function getAtlasLiveTarget()
                 end
             end
         end
-        if settings.target then
-            local res = resolveItemName(settings.target)
-            if isKnownProgressionItem(res) then return res end
-        end
+        local r = accept(settings.target, "settings.target")
+        if r then return r end
     end
 
-    local roots = { getgenv and getgenv(), _G, shared }
+    local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
+    local allowUI = true
     for _, r in ipairs(roots) do
         if type(r) == "table" then
-            if r.Atlas and type(r.Atlas) == "table" then
-                local targets = { r.Atlas.ProgressionTarget, r.Atlas.CurrentTarget, r.Atlas.Target, r.Atlas.CurrentPurchase }
+            if type(r.Atlas) == "table" then
+                local targets = compact({ r.Atlas.ProgressionTarget, r.Atlas.CurrentTarget, r.Atlas.Target, r.Atlas.CurrentPurchase }, 4)
                 for _, tgt in ipairs(targets) do
-                    if tgt then
-                        local res = resolveItemName(tgt)
-                        if isKnownProgressionItem(res) then return res end
-                    end
+                    local res = accept(tgt, "global Atlas.*Target")
+                    if res then return res end
                 end
             end
-            local targets = { r.ProgressionTarget, r.CurrentTarget, r.CurrentPurchase, r.Target }
+            local targets = compact({ r.ProgressionTarget, r.CurrentTarget, r.CurrentPurchase, r.Target }, 4)
             for _, tgt in ipairs(targets) do
-                if tgt then
-                    local res = resolveItemName(tgt)
-                    if isKnownProgressionItem(res) then return res end
-                end
+                local res = accept(tgt, "global *Target")
+                if res then return res end
             end
+            if r.AutoProgUIScan == false then allowUI = false end
         end
     end
 
-    local uiRoots = {}
-    pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
-    pcall(function() table.insert(uiRoots, CoreGui) end)
-    pcall(function() table.insert(uiRoots, player:FindFirstChild("PlayerGui")) end)
+    -- Quet UI: CHI nhan text co dang "Target: <ten>", "Next: <ten>"... (bat buoc co dau : hoac -)
+    -- va <ten> phai khop CHINH XAC mot item. Da bo: hard-code "diamask", khop chuoi con tren moi
+    -- TextLabel, va nhanh "candidate" (nguyen nhan chinh gay sai target).
+    if allowUI then
+        local uiRoots = {}
+        pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
+        pcall(function() table.insert(uiRoots, CoreGui) end)
+        pcall(function() table.insert(uiRoots, player:FindFirstChild("PlayerGui")) end)
 
-    local candidate = nil
-    for _, root in ipairs(uiRoots) do
-        if root then
-            for _, desc in ipairs(root:GetDescendants()) do
-                if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-                    local txt = desc.Text
-                    if txt and txt ~= "" and #txt < 120 and desc.Name ~= "AutoProg_HUD" and desc.Parent and desc.Parent.Name ~= "AutoProg_HUD" then
-                        local tLow = txt:lower()
-                        if tLow:find("diamask") then
-                            return "Diamond Mask"
-                        end
-
-                        local matched = txt:match("[Tt]arget%s*[:%-]?%s*([%w%s%-_']+)")
-                            or txt:match("[Cc]urrent%s*[:%-]?%s*([%w%s%-_']+)")
-                            or txt:match("[Pp]rog%w*%s*[:%-]?%s*([%w%s%-_']+)")
-                            or txt:match("[Aa]uto%s*[Pp]rog%w*%s*[:%-]?%s*([%w%s%-_']+)")
-                            or txt:match("[Bb]uying%s*[:%-]?%s*([%w%s%-_']+)")
-                            or txt:match("[Cc]rafting%s*[:%-]?%s*([%w%s%-_']+)")
-                            or txt:match("[Nn]ext%s*[:%-]?%s*([%w%s%-_']+)")
-                        if matched then
-                            local resolved = resolveItemName(matched)
-                            if isKnownProgressionItem(resolved) then
-                                return resolved
+        local patterns = {
+            "[Tt]arget%s*[:%-]%s*([%w%s%-_']+)",
+            "[Cc]urrent%s*[:%-]%s*([%w%s%-_']+)",
+            "[Bb]uying%s*[:%-]%s*([%w%s%-_']+)",
+            "[Cc]rafting%s*[:%-]%s*([%w%s%-_']+)",
+            "[Nn]ext%s*[:%-]%s*([%w%s%-_']+)",
+            "[Pp]rogression%s*[:%-]%s*([%w%s%-_']+)",
+        }
+        for _, root in ipairs(uiRoots) do
+            if root then
+                for _, desc in ipairs(root:GetDescendants()) do
+                    if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+                        local txt = desc.Text
+                        if txt and txt ~= "" and #txt < 120 and desc.Name ~= "AutoProg_HUD" and desc.Parent and desc.Parent.Name ~= "AutoProg_HUD" then
+                            for _, pat in ipairs(patterns) do
+                                local m = txt:match(pat)
+                                if m then
+                                    local res = resolveItemNameStrict(m)
+                                        or resolveItemNameStrict((m:gsub("[%s%d]+$", "")))
+                                    if res then
+                                        _targetSource = "ui:" .. desc:GetFullName():sub(-60) .. " = '" .. txt:sub(1, 50) .. "'"
+                                        return res
+                                    end
+                                end
                             end
-                        end
-
-                        local resolved = resolveItemName(txt)
-                        if isKnownProgressionItem(resolved) then
-                            local pName = desc.Parent and desc.Parent.Name:lower() or ""
-                            local dName = desc.Name:lower()
-                            if pName:find("prog") or pName:find("target") or pName:find("gear") or pName:find("hud") or pName:find("main") or
-                               dName:find("prog") or dName:find("target") or dName:find("gear") or dName:find("hud") or dName:find("main") or
-                               dName:find("status") or pName:find("status") then
-                                return resolved
-                            end
-                            if not candidate then candidate = resolved end
                         end
                     end
                 end
             end
         end
     end
-    if candidate then return candidate end
     return nil
 end
 
 local _activeTargetName = nil
+local _missedLive = 0
 
 local function evaluateRoute(data, beeCount)
     local char = player.Character
 
     local liveTarget = getAtlasLiveTarget()
+    if liveTarget then
+        _missedLive = 0
+    else
+        _missedLive = _missedLive + 1
+        if _missedLive >= 3 then _activeTargetName = nil end -- het han latch sau ~30s khong thay target
+    end
     if liveTarget then
         local canonicalLive = resolveItemName(liveTarget) or liveTarget
         if canonicalLive and isKnownProgressionItem(canonicalLive) then
@@ -1437,14 +1498,20 @@ local function evaluateRoute(data, beeCount)
 
             if matchedMilestone then
                 if matchedMilestone.Ingredients then
+                    local firstUnfarmMat, firstUnfarmAmt = nil, 0
                     for _, ing in ipairs(matchedMilestone.Ingredients) do
-                        local missingMat, missingAmt, targetField = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
+                        local missingMat, missingAmt, targetField, isUnfarm = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
                         if targetField then
-                            return matchedMilestone.Name, missingMat, missingAmt, targetField
+                            return matchedMilestone.Name, missingMat, missingAmt, targetField, false
+                        elseif isUnfarm and not firstUnfarmMat then
+                            firstUnfarmMat, firstUnfarmAmt = missingMat, missingAmt
                         end
                     end
+                    if firstUnfarmMat then
+                        return matchedMilestone.Name, firstUnfarmMat, firstUnfarmAmt, nil, true
+                    end
                 end
-                return matchedMilestone.Name, nil, 0, nil
+                return matchedMilestone.Name, nil, 0, nil, false
             end
         end
     end
@@ -1454,18 +1521,24 @@ local function evaluateRoute(data, beeCount)
         local owned = isItemOwned(milestone.Name, milestone.Type, char, data)
         if not owned and beeCount >= milestone.Bees then
             if milestone.Ingredients then
+                local firstUnfarmMat, firstUnfarmAmt = nil, 0
                 for _, ing in ipairs(milestone.Ingredients) do
-                    local missingMat, missingAmt, targetField = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
+                    local missingMat, missingAmt, targetField, isUnfarm = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
                     if targetField then
-                        return milestone.Name, missingMat, missingAmt, targetField
+                        return milestone.Name, missingMat, missingAmt, targetField, false
+                    elseif isUnfarm and not firstUnfarmMat then
+                        firstUnfarmMat, firstUnfarmAmt = missingMat, missingAmt
                     end
                 end
+                if firstUnfarmMat then
+                    return milestone.Name, firstUnfarmMat, firstUnfarmAmt, nil, true
+                end
             end
-            return milestone.Name, nil, 0, nil
+            return milestone.Name, nil, 0, nil, false
         end
     end
 
-    return nil, nil, 0, nil
+    return nil, nil, 0, nil, false
 end
 
 local guiParent
@@ -1530,9 +1603,15 @@ local function getAllTargetIngredients(targetItem, data)
     local lines = {}
     for _, ing in ipairs(matched.Ingredients) do
         local invCount = getItemAmount(ing.Item, data)
-        local status = (invCount >= ing.Amount) and "[OK]" or "[NEED]"
+        local isMissing = invCount < ing.Amount
+        local isUnfarm = false
+        if isMissing then
+            local _, _, tf, unf = resolveMissingMaterial(ing.Item, ing.Amount, data, 35)
+            if not tf and unf then isUnfarm = true end
+        end
+        local status = not isMissing and "[OK]" or (isUnfarm and "[NEED - MANUAL]" or "[NEED]")
         local line = string.format("- **%s**: %d/%d (%s)", ing.Item, invCount, ing.Amount, status)
-        if invCount < ing.Amount and RECIPES[ing.Item] then
+        if isMissing and RECIPES[ing.Item] then
             local def = ing.Amount - invCount
             local subParts = {}
             for _, sub in ipairs(RECIPES[ing.Item]) do
@@ -1552,9 +1631,10 @@ end
 local _lastWebhookSendTime = 0
 local _lastWebhookTarget = nil
 local _lastWebhookField = nil
+local _lastWebhookNeed = nil
 
-local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data)
-    local roots = { getgenv and getgenv(), _G, shared }
+local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable)
+    local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
     local webhookUrl = nil
     local interval = 60
 
@@ -1574,7 +1654,7 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data)
     if not webhookUrl or webhookUrl == "" then return end
 
     local now = tick()
-    local stateChanged = (targetStr ~= _lastWebhookTarget or fieldStr ~= _lastWebhookField)
+    local stateChanged = (targetStr ~= _lastWebhookTarget or fieldStr ~= _lastWebhookField or needStr ~= _lastWebhookNeed)
     if not stateChanged and (now - _lastWebhookSendTime < interval) then
         return
     end
@@ -1588,28 +1668,33 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data)
     _lastWebhookSendTime = now
     _lastWebhookTarget = targetStr
     _lastWebhookField = fieldStr
+    _lastWebhookNeed = needStr
 
     local needIngredients = getAllTargetIngredients(targetStr, data)
+    local noteText = isUnfarmable and string.format("\n⚠️ **Note:** Missing unfarmable item `%s` (cannot farm in fields).", tostring(needStr)) or ""
 
     local bodyText = string.format(
         "**Bees :** %d\n" ..
-        "**Current Target:** %s\n" ..
+        "**Current Target:** %s%s\n" ..
         "**Need:**\n%s\n" ..
         "**Field:** %s\n" ..
         "**Route:** %s",
         beeCount,
         targetStr,
+        noteText,
         needIngredients,
         fieldStr,
         routeStr
     )
+
+    local embedColor = isUnfarmable and 16744448 or 3447003
 
     local payloadV2 = {
         flags = 32768,
         components = {
             {
                 type = 17,
-                accent_color = 3447003,
+                accent_color = embedColor,
                 components = {
                     {
                         type = 10,
@@ -1656,7 +1741,7 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data)
                     {
                         title = "Ivyiz Auto Change Field Webhook v1.0",
                         description = bodyText,
-                        color = 3447003,
+                        color = embedColor,
                         footer = { text = string.format("Player: %s", player.Name) },
                         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
                     }
@@ -1686,7 +1771,14 @@ local function printDebugInfo()
     print("Bee Count:", beeCount)
     print("Atlas Live Target:", tostring(liveTarget))
     print("Active Latched Target:", tostring(_activeTargetName))
+    print("Atlas Settings Found:", tostring(findAtlasSettings() ~= nil))
+    print("Live Target Source:", tostring(_targetSource))
+    print("Route Source:", tostring(_routeSourceName))
     print("Route Source Items Count:", #activeRoute)
+    for i = 1, math.min(#activeRoute, 15) do
+        local m = activeRoute[i]
+        print(string.format("  route[%d] = %s (bees>=%s)", i, tostring(m.Name), tostring(m.Bees)))
+    end
     if data then
         print("Equipped/Stats:")
         print("  Collector:", tostring(data.Collector or data.Tool))
@@ -1705,10 +1797,11 @@ local function printDebugInfo()
     for _, itm in ipairs(checkList) do
         print("  " .. itm .. ":", isItemOwned(itm, "Gear", player.Character, data))
     end
-    local targetItem, neededMat, neededAmt, field = evaluateRoute(data, beeCount)
+    local targetItem, neededMat, neededAmt, field, isUnfarmable = evaluateRoute(data, beeCount)
     print("Evaluation Result:")
     print("  Target:", tostring(targetItem))
     print("  Need Mat:", tostring(neededMat), "(" .. tostring(neededAmt) .. ")")
+    print("  Unfarmable:", tostring(isUnfarmable))
     print("  Target Field:", tostring(field))
     print("========================================")
 end
@@ -1717,25 +1810,36 @@ if getgenv then getgenv().AutoProgDebug = printDebugInfo end
 _G.AutoProgDebug = printDebugInfo
 
 task.spawn(function()
-    printDebugInfo()
+    local okD, errD = pcall(printDebugInfo)
+    if not okD then warn("[Auto Prog] debug error: " .. tostring(errD)) end
     while true do
-        local data = getStatData()
-        local beeCount = getBeeCount(data)
-        local targetItem, neededMat, neededAmt, field = evaluateRoute(data, beeCount)
+        local okL, errL = pcall(function()
+            local data = getStatData()
+            local beeCount = getBeeCount(data)
+            local targetItem, neededMat, neededAmt, field, isUnfarmable = evaluateRoute(data, beeCount)
 
-        local targetStr = targetItem or "None"
-        local needStr = neededMat and string.format("%s (%s)", neededMat, tostring(neededAmt)) or (targetItem and "Honey" or "None")
-        local fieldStr = field or "Unchanged"
+            local targetStr = targetItem or "None"
+            local needStr
+            if neededMat then
+                needStr = string.format("%s (%s)%s", neededMat, tostring(neededAmt), isUnfarmable and " [Unfarmable]" or "")
+            else
+                needStr = (targetItem and "Honey" or "None")
+            end
+            local fieldStr = field or "Unchanged"
 
-        local routeStr = _routeFound and "Found" or "Not Found"
-        hudLabel.Text = string.format("[Auto Prog] Bees: %d | Target: %s | Need: %s | Field: %s | Route: %s", beeCount, targetStr, needStr, fieldStr, routeStr)
+            local routeStr = _routeFound and "Found" or "Not Found"
+            hudLabel.Text = string.format("[Auto Prog] Bees: %d | Target: %s | Need: %s | Field: %s | Route: %s", beeCount, targetStr, needStr, fieldStr, routeStr)
 
-        if field then
-            setAtlasField(field)
+            if field then
+                setAtlasField(field)
+            end
+
+            task.spawn(sendDiscordWebhook, beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable)
+        end)
+        if not okL then
+            warn("[Auto Prog] loop error: " .. tostring(errL))
+            hudLabel.Text = "[Auto Prog] Error: " .. tostring(errL):sub(1, 80)
         end
-
-        task.spawn(sendDiscordWebhook, beeCount, targetStr, fieldStr, routeStr, data)
-
         task.wait(10)
     end
 end)
