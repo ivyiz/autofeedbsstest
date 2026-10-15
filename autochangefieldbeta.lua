@@ -304,6 +304,18 @@ local function isKnownProgressionItem(name)
     return false
 end
 
+local function normalizeEquipSlot(val, tierTable)
+    if val == nil then return nil end
+    local c = tostring(val):gsub("[%s%-_']", ""):lower()
+    if tierTable[c] then return c end
+    local resolved = resolveItemName(val)
+    if resolved then
+        local rc = tostring(resolved):gsub("[%s%-_']", ""):lower()
+        if tierTable[rc] then return rc end
+    end
+    return nil
+end
+
 local function isItemOwned(itemName, itemType, char, data)
     if not itemName then return false end
     local canonical = resolveItemName(itemName) or itemName
@@ -330,6 +342,19 @@ local function isItemOwned(itemName, itemType, char, data)
     local curBlueGuard = (data and (data.BlueGuard or data.LeftGuard)) or eq.BlueGuard or eq.LeftGuard
     local curRedGuard = (data and (data.RedGuard or data.RightGuard)) or eq.RedGuard or eq.RightGuard
     local curGlider = (data and data.Glider) or eq.Glider
+
+    curTool = normalizeEquipSlot(curTool, TOOL_TIERS)
+    curBag = normalizeEquipSlot(curBag, BAG_TIERS)
+    curBoots = normalizeEquipSlot(curBoots, BOOTS_TIERS)
+    curBelt = normalizeEquipSlot(curBelt, BELT_TIERS)
+    curHat = normalizeEquipSlot(curHat, HAT_TIERS)
+    curSprinkler = normalizeEquipSlot(curSprinkler, SPRINKLER_TIERS)
+    curBlueGuard = normalizeEquipSlot(curBlueGuard, BLUE_GUARD_TIERS)
+    curRedGuard = normalizeEquipSlot(curRedGuard, RED_GUARD_TIERS)
+    if curGlider then
+        local gc = tostring(curGlider):gsub("[%s%-_']", ""):lower()
+        if gc ~= "glider" then curGlider = nil end
+    end
 
     local function checkMatch(val)
         if type(val) ~= "string" and type(val) ~= "number" then return end
@@ -617,12 +642,17 @@ local function setAtlasField(field)
     end
 end
 
-local _routeDefaultFields = {
+local _originalDefaultFields = {
     [0] = "Dandelion Field",
     [5] = "Bamboo Field",
     [10] = "Pineapple Patch",
     [15] = "Pine Tree Forest"
 }
+
+local _routeDefaultFields = {}
+for k, v in pairs(_originalDefaultFields) do
+    _routeDefaultFields[k] = v
+end
 
 local function getDefaultProgressionField(beeCount)
     local bestBees = -1
@@ -827,9 +857,24 @@ local function readAtlasFileRoute()
     }
 
     local filesToTry = {}
-    if getgenv and getgenv().AtlasConfigPath and isfile(getgenv().AtlasConfigPath) then
-        table.insert(filesToTry, getgenv().AtlasConfigPath)
+    local customPath = getgenv and (getgenv().AtlasConfigPath or getgenv().AtlasRouteFile or getgenv().AtlasPresetFile)
+    if customPath and isfile(customPath) then
+        table.insert(filesToTry, customPath)
     end
+
+    local settings = findAtlasSettings()
+    if settings then
+        local prof = settings.selected_profile or settings.profile or settings.preset or settings.selected_preset or settings.config_name
+        if type(prof) == "string" and prof ~= "" then
+            local pName = prof:lower():find("%.json$") and prof or (prof .. ".json")
+            table.insert(filesToTry, pName)
+            table.insert(filesToTry, "atlas1/" .. pName)
+            table.insert(filesToTry, "atlas1/routes/" .. pName)
+            table.insert(filesToTry, "Atlas/" .. pName)
+            table.insert(filesToTry, "Atlas/routes/" .. pName)
+        end
+    end
+
     for _, p in ipairs(knownPaths) do
         table.insert(filesToTry, p)
     end
@@ -877,15 +922,50 @@ local function readAtlasFileRoute()
     return nil
 end
 
+local function getUserDefinedRoute()
+    local roots = { getgenv and getgenv(), _G, shared }
+    for _, r in ipairs(roots) do
+        if type(r) == "table" then
+            local cr = r.CustomRoute or r.UserRoute or r.AtlasCustomRoute
+            if cr ~= nil then
+                if type(cr) == "string" then
+                    local s, decoded = pcall(function() return HttpService:JSONDecode(cr) end)
+                    if s and type(decoded) == "table" then
+                        return decoded
+                    end
+                elseif type(cr) == "table" then
+                    return cr
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local _cachedParsedRoute = nil
 local _lastRouteSourceTime = 0
+local _routeFound = false
+local _lastCustomRouteVal = nil
 
 local function getAtlasRoute()
+    local customUserRoute = getUserDefinedRoute()
+    if customUserRoute ~= _lastCustomRouteVal then
+        _lastCustomRouteVal = customUserRoute
+        _cachedParsedRoute = nil
+    end
+
     if _cachedParsedRoute and (tick() - _lastRouteSourceTime < 30) then
         return _cachedParsedRoute
     end
 
-    local rawRoute = findAtlasRouteInMemory() or readAtlasFileRoute()
+    for k in pairs(_routeDefaultFields) do
+        _routeDefaultFields[k] = nil
+    end
+    for k, v in pairs(_originalDefaultFields) do
+        _routeDefaultFields[k] = v
+    end
+
+    local rawRoute = customUserRoute or findAtlasRouteInMemory() or readAtlasFileRoute()
     local rawItemsList = rawRoute and extractPurchaseList(rawRoute, 0)
 
     if rawItemsList and type(rawItemsList) == "table" and #rawItemsList > 0 then
@@ -914,15 +994,32 @@ local function getAtlasRoute()
             end
         end
         if #dynamicRoute > 0 then
+            _routeFound = true
             _cachedParsedRoute = dynamicRoute
             _lastRouteSourceTime = tick()
             return dynamicRoute
         end
     end
 
-    _cachedParsedRoute = FullProgressionRoute
+    _routeFound = false
+    local allowFallback = false
+    local roots = { getgenv and getgenv(), _G, shared }
+    for _, r in ipairs(roots) do
+        if type(r) == "table" and r.AllowDefaultRouteFallback == true then
+            allowFallback = true
+            break
+        end
+    end
+
+    if allowFallback then
+        _cachedParsedRoute = FullProgressionRoute
+        _lastRouteSourceTime = tick()
+        return FullProgressionRoute
+    end
+
+    _cachedParsedRoute = {}
     _lastRouteSourceTime = tick()
-    return FullProgressionRoute
+    return {}
 end
 
 local function getAtlasLiveTarget()
@@ -1184,7 +1281,8 @@ task.spawn(function()
         local needStr = neededMat and string.format("%s (%s)", neededMat, tostring(neededAmt)) or "None"
         local fieldStr = field or "Idle"
 
-        hudLabel.Text = string.format("[Auto Prog] Bees: %d | Target: %s | Need: %s | Field: %s", beeCount, targetStr, needStr, fieldStr)
+        local routeStr = _routeFound and "Found" or "Not Found"
+        hudLabel.Text = string.format("[Auto Prog] Bees: %d | Target: %s | Need: %s | Field: %s | Route: %s", beeCount, targetStr, needStr, fieldStr, routeStr)
 
         if field then
             setAtlasField(field)
