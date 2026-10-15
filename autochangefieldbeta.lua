@@ -15,7 +15,7 @@ local RECIPES = {
 }
 
 local TOOL_TIERS = {
-    ["scooper"] = 1, ["rake"] = 2, ["clipper"] = 3, ["magnet"] = 4, ["vacuum"] = 5,
+    ["scooper"] = 1, ["rake"] = 2, ["clipper"] = 3, ["clippers"] = 3, ["magnet"] = 4, ["vacuum"] = 5,
     ["superscooper"] = 6, ["pulsar"] = 7, ["pulser"] = 7, ["electromagnet"] = 8, ["scissors"] = 9,
     ["honeydipper"] = 10, ["bubblewand"] = 11, ["scythe"] = 11, ["goldenrake"] = 12,
     ["porcelaindipper"] = 13, ["porcdipper"] = 13, ["pdipper"] = 13, ["petalwand"] = 14,
@@ -129,15 +129,58 @@ local FullProgressionRoute = {
     { Bees = 35, Name = "Petal Wand", Type = "Tool", Ingredients = { { Item = "Enzymes", Amount = 75 } } }
 }
 
+local _serverStatsCache = nil
+local _lastServerStatsFetch = 0
+
 local function getStatData()
+    local data = nil
+
+    pcall(function()
+        local cache = RS:FindFirstChild("ClientStatCache")
+        if cache and cache:IsA("ModuleScript") then
+            local mod = require(cache)
+            if type(mod) == "table" then
+                if type(mod.Get) == "function" then
+                    data = mod:Get() or mod.Get() or mod:Get(player)
+                elseif type(mod.Stats) == "table" then
+                    data = mod.Stats
+                elseif type(mod.Cache) == "table" then
+                    data = mod.Cache
+                end
+            end
+        end
+    end)
+
+    if not (data and (data.Collector or data.Bag or data.Boots or data.Equipped)) then
+        if not _serverStatsCache or (tick() - _lastServerStatsFetch > 25) then
+            local events = RS:FindFirstChild("Events")
+            if events and events:FindFirstChild("RetrievePlayerStats") then
+                local ok, res = pcall(function() return events.RetrievePlayerStats:InvokeServer() end)
+                if ok and type(res) == "table" then
+                    _serverStatsCache = res
+                    _lastServerStatsFetch = tick()
+                end
+            end
+        end
+        if _serverStatsCache then
+            if not data then
+                data = _serverStatsCache
+            else
+                for k, v in pairs(_serverStatsCache) do
+                    if data[k] == nil then data[k] = v end
+                end
+            end
+        end
+    end
+
     local clientStat = RS:FindFirstChild("ClientStatCache")
     if clientStat then
         local myStats = clientStat:FindFirstChild(player.Name)
         if myStats then
-            local data = {}
+            if not data then data = {} end
             for _, folder in ipairs(myStats:GetChildren()) do
                 if folder:IsA("Folder") or folder:IsA("Configuration") then
-                    data[folder.Name] = {}
+                    if not data[folder.Name] or type(data[folder.Name]) ~= "table" then data[folder.Name] = {} end
                     for _, val in ipairs(folder:GetChildren()) do
                         if val:IsA("ValueBase") then data[folder.Name][val.Name] = val.Value end
                     end
@@ -145,15 +188,10 @@ local function getStatData()
                     data[folder.Name] = folder.Value
                 end
             end
-            return data
         end
     end
-    local events = RS:FindFirstChild("Events")
-    if events and events:FindFirstChild("RetrievePlayerStats") then
-        local ok, res = pcall(function() return events.RetrievePlayerStats:InvokeServer() end)
-        if ok and type(res) == "table" then return res end
-    end
-    return nil
+
+    return data
 end
 
 local function getBeeCount(data)
@@ -233,6 +271,8 @@ local ITEM_ALIASES = {
     ["gummyballer"] = "Gummyballer",
     ["bubblewand"] = "Bubble Wand",
     ["scythe"] = "Scythe",
+    ["clipper"] = "Clippers",
+    ["clippers"] = "Clippers",
     ["vacuum"] = "Vacuum",
     ["magnet"] = "Magnet",
     ["electromagnet"] = "Electro-Magnet",
@@ -306,6 +346,10 @@ end
 
 local function normalizeEquipSlot(val, tierTable)
     if val == nil then return nil end
+    if type(val) == "table" then
+        val = val.Name or val.Item or val.Type or val.Id
+        if val == nil then return nil end
+    end
     local c = tostring(val):gsub("[%s%-_']", ""):lower()
     if tierTable[c] then return c end
     local resolved = resolveItemName(val)
@@ -359,23 +403,25 @@ local function isItemOwned(itemName, itemType, char, data)
     local function checkMatch(val)
         if type(val) ~= "string" and type(val) ~= "number" then return end
         local c = tostring(val):gsub("[%s%-_']", ""):lower()
-        if not curTool and TOOL_TIERS[c] then curTool = c end
-        if not curBag and BAG_TIERS[c] then curBag = c end
-        if not curBoots and BOOTS_TIERS[c] then curBoots = c end
-        if not curBelt and BELT_TIERS[c] then curBelt = c end
-        if not curHat and HAT_TIERS[c] then curHat = c end
-        if not curSprinkler and SPRINKLER_TIERS[c] then curSprinkler = c end
-        if not curBlueGuard and BLUE_GUARD_TIERS[c] then curBlueGuard = c end
-        if not curRedGuard and RED_GUARD_TIERS[c] then curRedGuard = c end
+        if TOOL_TIERS[c] and (not curTool or (TOOL_TIERS[curTool] and TOOL_TIERS[c] > TOOL_TIERS[curTool])) then curTool = c end
+        if BAG_TIERS[c] and (not curBag or (BAG_TIERS[curBag] and BAG_TIERS[c] > BAG_TIERS[curBag])) then curBag = c end
+        if BOOTS_TIERS[c] and (not curBoots or (BOOTS_TIERS[curBoots] and BOOTS_TIERS[c] > BOOTS_TIERS[curBoots])) then curBoots = c end
+        if BELT_TIERS[c] and (not curBelt or (BELT_TIERS[curBelt] and BELT_TIERS[c] > BELT_TIERS[curBelt])) then curBelt = c end
+        if HAT_TIERS[c] and (not curHat or (HAT_TIERS[curHat] and HAT_TIERS[c] > HAT_TIERS[curHat])) then curHat = c end
+        if SPRINKLER_TIERS[c] and (not curSprinkler or (SPRINKLER_TIERS[curSprinkler] and SPRINKLER_TIERS[c] > SPRINKLER_TIERS[curSprinkler])) then curSprinkler = c end
+        if BLUE_GUARD_TIERS[c] and (not curBlueGuard or (BLUE_GUARD_TIERS[curBlueGuard] and BLUE_GUARD_TIERS[c] > BLUE_GUARD_TIERS[curBlueGuard])) then curBlueGuard = c end
+        if RED_GUARD_TIERS[c] and (not curRedGuard or (RED_GUARD_TIERS[curRedGuard] and RED_GUARD_TIERS[c] > RED_GUARD_TIERS[curRedGuard])) then curRedGuard = c end
         if not curGlider and c == "glider" then curGlider = c end
     end
 
     if char then
         for _, child in ipairs(char:GetChildren()) do
             checkMatch(child.Name)
-            if child:IsA("Tool") and not curTool then
+            if child:IsA("Tool") then
                 local c = child.Name:gsub("[%s%-_']", ""):lower()
-                if TOOL_TIERS[c] then curTool = c end
+                if TOOL_TIERS[c] and (not curTool or (TOOL_TIERS[curTool] and TOOL_TIERS[c] > TOOL_TIERS[curTool])) then
+                    curTool = c
+                end
             end
         end
     end
@@ -383,9 +429,11 @@ local function isItemOwned(itemName, itemType, char, data)
     if player.Backpack then
         for _, child in ipairs(player.Backpack:GetChildren()) do
             checkMatch(child.Name)
-            if child:IsA("Tool") and not curTool then
+            if child:IsA("Tool") then
                 local c = child.Name:gsub("[%s%-_']", ""):lower()
-                if TOOL_TIERS[c] then curTool = c end
+                if TOOL_TIERS[c] and (not curTool or (TOOL_TIERS[curTool] and TOOL_TIERS[c] > TOOL_TIERS[curTool])) then
+                    curTool = c
+                end
             end
         end
     end
@@ -1174,8 +1222,7 @@ local function evaluateRoute(data, beeCount)
                         end
                     end
                 end
-                local defaultField = getDefaultProgressionField(beeCount)
-                return matchedMilestone.Name, nil, 0, defaultField
+                return matchedMilestone.Name, nil, 0, nil
             end
         end
     end
@@ -1192,13 +1239,11 @@ local function evaluateRoute(data, beeCount)
                     end
                 end
             end
-            local defaultField = getDefaultProgressionField(beeCount)
-            return milestone.Name, nil, 0, defaultField
+            return milestone.Name, nil, 0, nil
         end
     end
 
-    local fallbackField = getDefaultProgressionField(beeCount)
-    return nil, nil, 0, fallbackField
+    return nil, nil, 0, nil
 end
 
 local guiParent
@@ -1278,8 +1323,8 @@ task.spawn(function()
         local targetItem, neededMat, neededAmt, field = evaluateRoute(data, beeCount)
 
         local targetStr = targetItem or "None"
-        local needStr = neededMat and string.format("%s (%s)", neededMat, tostring(neededAmt)) or "None"
-        local fieldStr = field or "Idle"
+        local needStr = neededMat and string.format("%s (%s)", neededMat, tostring(neededAmt)) or (targetItem and "Honey" or "None")
+        local fieldStr = field or "Unchanged"
 
         local routeStr = _routeFound and "Found" or "Not Found"
         hudLabel.Text = string.format("[Auto Prog] Bees: %d | Target: %s | Need: %s | Field: %s | Route: %s", beeCount, targetStr, needStr, fieldStr, routeStr)
