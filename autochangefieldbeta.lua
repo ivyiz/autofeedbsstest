@@ -1500,7 +1500,12 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data)
 
     local needIngredients = getAllTargetIngredients(targetStr, data)
 
-    local embedDesc = string.format("**Bees :** %d\n**Current Target :** %s\n**Need :**\n%s\n**Field :** %s\n**Route :** %s",
+    local bodyText = string.format(
+        "**Bees :** %d\n" ..
+        "**Current Target:** %s\n" ..
+        "**Need:**\n%s\n" ..
+        "**Field:** %s\n" ..
+        "**Route:** %s",
         beeCount,
         targetStr,
         needIngredients,
@@ -1508,31 +1513,76 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data)
         routeStr
     )
 
-    local payload = {
-        username = "Ivyiz Auto Change Field",
-        embeds = {
+    local payloadV2 = {
+        flags = 32768,
+        components = {
             {
-                title = "Ivyiz Auto Change Field Webhook v1.0",
-                description = embedDesc,
-                color = 3447003,
-                footer = {
-                    text = string.format("Player: %s", player.Name)
-                },
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                type = 17,
+                accent_color = 3447003,
+                components = {
+                    {
+                        type = 10,
+                        content = "## 🐝 Ivyiz Auto Change Field Webhook v1.0"
+                    },
+                    {
+                        type = 14,
+                        divider = true,
+                        spacing = 1
+                    },
+                    {
+                        type = 10,
+                        content = bodyText
+                    },
+                    {
+                        type = 14,
+                        divider = false,
+                        spacing = 1
+                    },
+                    {
+                        type = 10,
+                        content = string.format("-# Player: %s • %s", player.Name, os.date("%X"))
+                    }
+                }
             }
         }
     }
 
-    local ok, encoded = pcall(function() return HttpService:JSONEncode(payload) end)
+    local ok, encoded = pcall(function() return HttpService:JSONEncode(payloadV2) end)
     if ok and encoded then
-        pcall(function()
-            httpRequest({
+        local reqOk, res = pcall(function()
+            return httpRequest({
                 Url = webhookUrl,
                 Method = "POST",
                 Headers = { ["Content-Type"] = "application/json" },
                 Body = encoded
             })
         end)
+
+        if not reqOk or (type(res) == "table" and res.StatusCode and res.StatusCode >= 400) then
+            local fallbackPayload = {
+                username = "Ivyiz Auto Change Field",
+                embeds = {
+                    {
+                        title = "Ivyiz Auto Change Field Webhook v1.0",
+                        description = bodyText,
+                        color = 3447003,
+                        footer = { text = string.format("Player: %s", player.Name) },
+                        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                    }
+                }
+            }
+            local s2, enc2 = pcall(function() return HttpService:JSONEncode(fallbackPayload) end)
+            if s2 and enc2 then
+                pcall(function()
+                    httpRequest({
+                        Url = webhookUrl,
+                        Method = "POST",
+                        Headers = { ["Content-Type"] = "application/json" },
+                        Body = enc2
+                    })
+                end)
+            end
+        end
     end
 end
 
