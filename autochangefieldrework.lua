@@ -906,6 +906,16 @@ local function bringIntoView(gui)
     end
 end
 
+local function isGuiVisibleOnScreen(gui)
+    if not gui or not gui:IsA("GuiObject") then return false end
+    local cur = gui
+    while cur and cur:IsA("GuiObject") do
+        if not cur.Visible then return false end
+        cur = cur.Parent
+    end
+    return gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0
+end
+
 local function clickElement(gui)
     if not gui or not gui:IsA("GuiObject") then return false end
     local fired = false
@@ -946,7 +956,7 @@ local function clickElement(gui)
             fired = true
         end
 
-        if clickable.AbsoluteSize.X > 0 and clickable.AbsoluteSize.Y > 0 then
+        if isGuiVisibleOnScreen(clickable) then
             local x = clickable.AbsolutePosition.X + clickable.AbsoluteSize.X / 2
             local y = clickable.AbsolutePosition.Y + clickable.AbsoluteSize.Y / 2
             if VIM then
@@ -970,6 +980,31 @@ local function clickElement(gui)
     return fired
 end
 
+local function isFarmingDropdownHeader(gui)
+    if not (gui:IsA("TextLabel") or gui:IsA("TextButton")) then return false end
+    if gui.Name == "AutoProg_HUD" then return false end
+    local txt = getGuiText(gui):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local low = txt:lower()
+
+    if not low:match("^field%s*:") then return false end
+    if low:match("^best") or low:match("^allowed") or low:match("^quest") or low:match("^sprout") then
+        return false
+    end
+
+    local p = gui.Parent
+    for _ = 1, 5 do
+        if not p then break end
+        for _, desc in ipairs(p:GetDescendants()) do
+            local dt = getGuiText(desc):lower():gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            if dt == "autofarm" or dt == "auto sprinkler" or dt == "auto dig" then
+                return true, txt
+            end
+        end
+        p = p.Parent
+    end
+    return false
+end
+
 local function setAtlasFieldViaUI(targetField)
     local uiRoots = {}
     pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
@@ -981,57 +1016,37 @@ local function setAtlasFieldViaUI(targetField)
     for _, root in ipairs(uiRoots) do
         if root then
             local descs = root:GetDescendants()
+            local farmingHeader = nil
+            local headerTxt = nil
 
-            for _, btn in ipairs(descs) do
-                if (btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("ImageButton")) and btn.Name ~= "AutoProg_HUD" then
-                    local rawTxt = getGuiText(btn):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
-                    if rawTxt:gsub("[%s%-_']", ""):lower() == targetClean then
-                        local isHeader = rawTxt:lower():find("^field%s*:") ~= nil
-                        if not isHeader then
-                            local clicked = clickElement(btn)
-                            if clicked then
-                                task.wait(0.06)
-                                return true, "ui_direct_option_click"
-                            end
-                        end
-                    end
-                end
-            end
-
-            local dropdownHeader = nil
             for _, d in ipairs(descs) do
-                if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Name ~= "AutoProg_HUD" then
-                    local cleanTxt = getGuiText(d):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
-                    local lowTxt = cleanTxt:lower()
-                    if lowTxt:find("field%s*:") or (lowTxt:find("field") and (lowTxt:find("pine") or lowTxt:find("forest") or lowTxt:find("patch") or lowTxt:find("flower") or lowTxt:find("bamboo") or lowTxt:find("clover") or lowTxt:find("strawberry"))) then
-                        dropdownHeader = d
-                        break
-                    end
+                local isFarming, txt = isFarmingDropdownHeader(d)
+                if isFarming then
+                    farmingHeader = d
+                    headerTxt = txt
+                    break
                 end
             end
 
-            if dropdownHeader then
-                local curTxt = getGuiText(dropdownHeader):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
-                if curTxt:gsub("[%s%-_']", ""):lower():find(targetClean) then
+            if farmingHeader then
+                local curVal = headerTxt:match("^[Ff]ield%s*:%s*(.+)")
+                if curVal and curVal:gsub("[%s%-_']", ""):lower() == targetClean then
                     return true, "ui_already_set"
                 end
 
-                local clickTarget = dropdownHeader:IsA("TextButton") and dropdownHeader or dropdownHeader.Parent
+                local container = farmingHeader:FindFirstAncestorWhichIsA("Frame") or farmingHeader.Parent.Parent or farmingHeader.Parent
+                local clickTarget = farmingHeader:IsA("TextButton") and farmingHeader or farmingHeader.Parent
                 clickElement(clickTarget)
-                task.wait(0.15)
+                task.wait(0.12)
 
-                for _, r in ipairs(uiRoots) do
-                    if r then
-                        for _, btn in ipairs(r:GetDescendants()) do
-                            if (btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("ImageButton")) and btn ~= dropdownHeader and btn.Name ~= "AutoProg_HUD" then
-                                local rawTxt = getGuiText(btn):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
-                                if rawTxt:gsub("[%s%-_']", ""):lower() == targetClean then
-                                    local clicked = clickElement(btn)
-                                    if clicked then
-                                        task.wait(0.06)
-                                        return true, "ui_opened_and_clicked"
-                                    end
-                                end
+                for _, btn in ipairs(container:GetDescendants()) do
+                    if (btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("ImageButton")) and btn ~= farmingHeader and btn.Name ~= "AutoProg_HUD" then
+                        local rawTxt = getGuiText(btn):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                        if rawTxt:gsub("[%s%-_']", ""):lower() == targetClean then
+                            local clicked = clickElement(btn)
+                            if clicked then
+                                task.wait(0.05)
+                                return true, "ui_opened_and_clicked"
                             end
                         end
                     end
