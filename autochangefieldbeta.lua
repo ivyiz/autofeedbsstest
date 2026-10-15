@@ -1439,8 +1439,8 @@ local function getAllTargetIngredients(targetItem, data)
     local lines = {}
     for _, ing in ipairs(matched.Ingredients) do
         local invCount = getItemAmount(ing.Item, data)
-        local statusIcon = (invCount >= ing.Amount) and "✅" or "⏳"
-        local line = string.format("%s **%s**: %d/%d", statusIcon, ing.Item, invCount, ing.Amount)
+        local status = (invCount >= ing.Amount) and "[OK]" or "[NEED]"
+        local line = string.format("- **%s**: %d/%d (%s)", ing.Item, invCount, ing.Amount, status)
         if invCount < ing.Amount and RECIPES[ing.Item] then
             local def = ing.Amount - invCount
             local subParts = {}
@@ -1522,7 +1522,7 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data)
                 components = {
                     {
                         type = 10,
-                        content = "## 🐝 Ivyiz Auto Change Field Webhook v1.0"
+                        content = "## Ivyiz Auto Change Field Webhook v1.0"
                     },
                     {
                         type = 14,
