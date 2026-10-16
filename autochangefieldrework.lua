@@ -2442,6 +2442,44 @@ end
 local _activeTargetName = nil
 local _missedLive = 0
 
+local function checkMilestoneIngredients(milestone, data, beeCount)
+    if not milestone.Ingredients or #milestone.Ingredients == 0 then
+        return nil, 0, nil, false, true
+    end
+
+    local firstFarmMat, firstFarmAmt, farmField = nil, 0, nil
+    local firstUnfarmMat, firstUnfarmAmt = nil, 0
+    local anyMissing = false
+
+    for _, ing in ipairs(milestone.Ingredients) do
+        local missingMat, missingAmt, targetField, isUnfarm = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
+        if missingAmt and missingAmt > 0 then
+            anyMissing = true
+            if targetField then
+                if not farmField then
+                    firstFarmMat = missingMat
+                    firstFarmAmt = missingAmt
+                    farmField = targetField
+                    break
+                end
+            elseif isUnfarm and not firstUnfarmMat then
+                firstUnfarmMat = missingMat
+                firstUnfarmAmt = missingAmt
+            end
+        end
+    end
+
+    if farmField then
+        return firstFarmMat, firstFarmAmt, farmField, false, false
+    elseif firstUnfarmMat then
+        return firstUnfarmMat, firstUnfarmAmt, nil, true, false
+    elseif not anyMissing then
+        return nil, 0, nil, false, true
+    else
+        return nil, 0, nil, false, false
+    end
+end
+
 local function evaluateRoute(data, beeCount)
     local char = player.Character
 
@@ -2450,7 +2488,7 @@ local function evaluateRoute(data, beeCount)
         _missedLive = 0
     else
         _missedLive = _missedLive + 1
-        if _missedLive >= 3 then _activeTargetName = nil end -- het han latch sau ~30s khong thay target
+        if _missedLive >= 3 then _activeTargetName = nil end
     end
     if liveTarget then
         local canonicalLive = resolveItemName(liveTarget) or liveTarget
@@ -2458,6 +2496,9 @@ local function evaluateRoute(data, beeCount)
             _activeTargetName = canonicalLive
         end
     end
+
+    local firstPendingUnfarm = nil
+    local firstReadyMilestone = nil
 
     if _activeTargetName then
         if isItemOwned(_activeTargetName, "Gear", char, data) then
@@ -2474,21 +2515,18 @@ local function evaluateRoute(data, beeCount)
             end
 
             if matchedMilestone and (not matchedMilestone.Bees or beeCount >= matchedMilestone.Bees) then
-                if matchedMilestone.Ingredients then
-                    local firstUnfarmMat, firstUnfarmAmt = nil, 0
-                    for _, ing in ipairs(matchedMilestone.Ingredients) do
-                        local missingMat, missingAmt, targetField, isUnfarm = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
-                        if targetField then
-                            return matchedMilestone.Name, missingMat, missingAmt, targetField, false
-                        elseif isUnfarm and not firstUnfarmMat then
-                            firstUnfarmMat, firstUnfarmAmt = missingMat, missingAmt
-                        end
-                    end
-                    if firstUnfarmMat then
-                        return matchedMilestone.Name, firstUnfarmMat, firstUnfarmAmt, nil, true
-                    end
+                local mat, amt, field, isUnfarm, isReady = checkMilestoneIngredients(matchedMilestone, data, beeCount)
+                if field then
+                    return matchedMilestone.Name, mat, amt, field, false
+                elseif isReady then
+                    firstReadyMilestone = matchedMilestone.Name
+                elseif isUnfarm then
+                    firstPendingUnfarm = {
+                        Target = matchedMilestone.Name,
+                        Mat = mat,
+                        Amt = amt
+                    }
                 end
-                return matchedMilestone.Name, nil, 0, nil, false
             end
         end
     end
@@ -2497,22 +2535,27 @@ local function evaluateRoute(data, beeCount)
     for _, milestone in ipairs(activeRoute) do
         local owned = isItemOwned(milestone.Name, milestone.Type, char, data)
         if not owned and beeCount >= milestone.Bees then
-            if milestone.Ingredients then
-                local firstUnfarmMat, firstUnfarmAmt = nil, 0
-                for _, ing in ipairs(milestone.Ingredients) do
-                    local missingMat, missingAmt, targetField, isUnfarm = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount)
-                    if targetField then
-                        return milestone.Name, missingMat, missingAmt, targetField, false
-                    elseif isUnfarm and not firstUnfarmMat then
-                        firstUnfarmMat, firstUnfarmAmt = missingMat, missingAmt
-                    end
-                end
-                if firstUnfarmMat then
-                    return milestone.Name, firstUnfarmMat, firstUnfarmAmt, nil, true
-                end
+            local mat, amt, field, isUnfarm, isReady = checkMilestoneIngredients(milestone, data, beeCount)
+            if field then
+                return milestone.Name, mat, amt, field, false
+            elseif isReady and not firstReadyMilestone then
+                firstReadyMilestone = milestone.Name
+            elseif isUnfarm and not firstPendingUnfarm then
+                firstPendingUnfarm = {
+                    Target = milestone.Name,
+                    Mat = mat,
+                    Amt = amt
+                }
             end
-            return milestone.Name, nil, 0, nil, false
         end
+    end
+
+    if firstReadyMilestone then
+        return firstReadyMilestone, nil, 0, nil, false
+    end
+
+    if firstPendingUnfarm then
+        return firstPendingUnfarm.Target, firstPendingUnfarm.Mat, firstPendingUnfarm.Amt, nil, true
     end
 
     return nil, nil, 0, nil, false
