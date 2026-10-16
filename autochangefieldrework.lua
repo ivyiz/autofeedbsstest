@@ -21,9 +21,60 @@ local RECIPES = {
     ["Oil"] = { { Item = "Sunflower Seed", Amount = 50 } },
     ["Enzymes"] = { { Item = "Pineapple", Amount = 50 } },
     ["Gumdrop"] = { { Item = "Strawberry", Amount = 3 }, { Item = "Blueberry", Amount = 3 }, { Item = "Pineapple", Amount = 3 } },
+    ["Gumdrops"] = { { Item = "Strawberry", Amount = 3 }, { Item = "Blueberry", Amount = 3 }, { Item = "Pineapple", Amount = 3 } },
     ["Glue"] = { { Item = "Gumdrop", Amount = 50 } },
-    ["Tropical Drink"] = { { Item = "Coconut", Amount = 10 }, { Item = "Enzymes", Amount = 2 }, { Item = "Oil", Amount = 2 } }
+    ["Tropical Drink"] = { { Item = "Enzymes", Amount = 2 }, { Item = "Oil", Amount = 2 }, { Item = "Coconut", Amount = 10 } },
+    ["Tropical Drinks"] = { { Item = "Enzymes", Amount = 2 }, { Item = "Oil", Amount = 2 }, { Item = "Coconut", Amount = 10 } }
 }
+
+local RAW_FIELD_ITEMS = {
+    ["Blueberry"] = true,
+    ["Strawberry"] = true,
+    ["Sunflower Seed"] = true,
+    ["Pineapple"] = true,
+    ["Coconut"] = true
+}
+
+local function getRecipe(itemName)
+    if not itemName then return nil end
+    if RECIPES[itemName] then return RECIPES[itemName] end
+    local clean = tostring(itemName):gsub("[%s%-_']", ""):lower()
+    for k, v in pairs(RECIPES) do
+        if k:gsub("[%s%-_']", ""):lower() == clean then
+            return v
+        end
+    end
+    if clean:sub(-1) == "s" then
+        local sing = clean:sub(1, -2)
+        for k, v in pairs(RECIPES) do
+            if k:gsub("[%s%-_']", ""):lower() == sing then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+local function isRawFieldItem(itemName)
+    if not itemName then return false end
+    if RAW_FIELD_ITEMS[itemName] then return true end
+    local clean = tostring(itemName):gsub("[%s%-_']", ""):lower()
+    for k, _ in pairs(RAW_FIELD_ITEMS) do
+        if k:gsub("[%s%-_']", ""):lower() == clean then
+            return true
+        end
+    end
+    if clean:sub(-1) == "s" then
+        local sing = clean:sub(1, -2)
+        for k, _ in pairs(RAW_FIELD_ITEMS) do
+            if k:gsub("[%s%-_']", ""):lower() == sing then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 
 local TOOL_TIERS = {
     ["scooper"] = 1, ["rake"] = 2, ["clipper"] = 3, ["clippers"] = 3, ["magnet"] = 4, ["vacuum"] = 5,
@@ -133,9 +184,9 @@ local FullProgressionRoute = {
     { Bees = 35, Name = "Pesticide Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 500 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 } } },
     { Bees = 35, Name = "Coconut Clogs", Type = "Boots", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 50 }, { Item = "Glue", Amount = 100 }, { Item = "Oil", Amount = 100 } } },
     { Bees = 35, Name = "The Supreme Saturator", Type = "Sprinkler" },
-    { Bees = 35, Name = "Tide Popper", Type = "Tool", Ingredients = { { Item = "Blue Extract", Amount = 1500 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Stinger", Amount = 50 }, { Item = "Swirled Wax", Amount = 75 }, { Item = "Super Smoothie", Amount = 3 } } },
-    { Bees = 35, Name = "Dark Scythe", Type = "Tool", Ingredients = { { Item = "Red Extract", Amount = 1500 }, { Item = "Super Smoothie", Amount = 3 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 100 }, { Item = "Stinger", Amount = 500 } } },
-    { Bees = 35, Name = "Gummyballer", Type = "Tool", Ingredients = { { Item = "Glue", Amount = 1500 }, { Item = "Gumdrop", Amount = 1500 }, { Item = "Super Smoothie", Amount = 5 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Swirled Wax", Amount = 50 } } },
+    { Bees = 35, Name = "Tide Popper", Type = "Tool", Ingredients = { { Item = "Blue Extract", Amount = 1500 }, { Item = "Stinger", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Swirled Wax", Amount = 75 }, { Item = "Super Smoothie", Amount = 50 } } },
+    { Bees = 35, Name = "Dark Scythe", Type = "Tool", Ingredients = { { Item = "Red Extract", Amount = 1500 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 100 }, { Item = "Stinger", Amount = 150 } } },
+    { Bees = 35, Name = "Gummyballer", Type = "Tool", Ingredients = { { Item = "Glue", Amount = 1500 }, { Item = "Gumdrop", Amount = 1500 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Swirled Wax", Amount = 50 } } },
     { Bees = 35, Name = "Hydroponic Planter", Type = "Planter", Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 }, { Item = "Caustic Wax", Amount = 5 } } },
     { Bees = 35, Name = "Heat-Treated Planter", Type = "Planter", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 }, { Item = "Caustic Wax", Amount = 5 } } },
     { Bees = 35, Name = "Petal Planter", Type = "Planter", Ingredients = { { Item = "Spirit Petal", Amount = 1 }, { Item = "Enzymes", Amount = 100 }, { Item = "Soft Wax", Amount = 100 }, { Item = "Hard Wax", Amount = 30 }, { Item = "Caustic Wax", Amount = 10 }, { Item = "Swirled Wax", Amount = 5 } } },
@@ -1096,6 +1147,77 @@ local function getFarmingSectionAndDropdown(root)
     return nil, nil, nil
 end
 
+local ATLAS_TAB_NAMES = {
+    "home", "farming", "combat", "quests", "planters", "toys", "rbc", "webhook", "config"
+}
+
+local function findAtlasTabButton(root, tabName)
+    if not root then return nil end
+    local clean = tabName:gsub("[%s%-_']", ""):lower()
+    for _, d in ipairs(root:GetDescendants()) do
+        if (d:IsA("TextButton") or d:IsA("ImageButton") or d:IsA("TextLabel")) and d.Name ~= "AutoProg_HUD" then
+            local txt = getGuiText(d):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+            if txt == clean then
+                local btn = (d:IsA("TextButton") or d:IsA("ImageButton")) and d
+                    or d:FindFirstAncestorWhichIsA("TextButton")
+                    or d:FindFirstAncestorWhichIsA("ImageButton")
+                if btn then
+                    return btn
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function getActiveAtlasTabButton(root)
+    if not root then return nil end
+    local bestBtn = nil
+    local bestScore = -1
+
+    for _, name in ipairs(ATLAS_TAB_NAMES) do
+        local btn = findAtlasTabButton(root, name)
+        if btn then
+            local score = 0
+            if btn.BackgroundTransparency and btn.BackgroundTransparency < 0.95 then
+                score = score + (1 - btn.BackgroundTransparency) * 5
+            end
+            if btn:IsA("ImageButton") and btn.ImageTransparency and btn.ImageTransparency < 0.95 then
+                score = score + (1 - btn.ImageTransparency) * 5
+            end
+            for _, ch in ipairs(btn:GetChildren()) do
+                if ch:IsA("GuiObject") and ch.BackgroundTransparency and ch.BackgroundTransparency < 0.95 then
+                    score = score + 3
+                end
+            end
+            if score > bestScore then
+                bestScore = score
+                bestBtn = btn
+            end
+        end
+    end
+    return bestBtn
+end
+
+local function findActiveAtlasTab(root)
+    if not root then return nil, nil end
+    for _, name in ipairs(ATLAS_TAB_NAMES) do
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Name ~= "AutoProg_HUD" then
+                local txt = getGuiText(d):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+                if txt == name and isGuiVisibleOnScreen(d) then
+                    local btn = findAtlasTabButton(root, name)
+                    if btn and d ~= btn and not d:IsDescendantOf(btn) then
+                        return name, btn
+                    end
+                end
+            end
+        end
+    end
+    local fallbackBtn = getActiveAtlasTabButton(root)
+    return nil, fallbackBtn
+end
+
 local function setAtlasFieldViaUI(targetField)
     local uiRoots = {}
     pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
@@ -1107,9 +1229,28 @@ local function setAtlasFieldViaUI(targetField)
     for _, root in ipairs(uiRoots) do
         if root then
             local section, farmingHeader, headerTxt = getFarmingSectionAndDropdown(root)
+            local isFarmingVisible = farmingHeader and isGuiVisibleOnScreen(farmingHeader)
+
+            local prevTabName, prevTabBtn = nil, nil
+            local switchedTab = false
+
+            if not isFarmingVisible then
+                prevTabName, prevTabBtn = findActiveAtlasTab(root)
+                local farmingTabBtn = findAtlasTabButton(root, "farming")
+                if farmingTabBtn then
+                    clickElement(farmingTabBtn)
+                    task.wait(0.1)
+                    switchedTab = true
+                    section, farmingHeader, headerTxt = getFarmingSectionAndDropdown(root)
+                end
+            end
+
             if section and farmingHeader then
-                local curVal = headerTxt:match("^[Ff]ield%s*:%s*(.+)")
+                local curVal = headerTxt and headerTxt:match("^[Ff]ield%s*:%s*(.+)")
                 if curVal and curVal:gsub("[%s%-_']", ""):lower() == targetClean then
+                    if switchedTab and prevTabBtn then
+                        clickElement(prevTabBtn)
+                    end
                     return true, "ui_already_set"
                 end
 
@@ -1121,18 +1262,37 @@ local function setAtlasFieldViaUI(targetField)
                 clickElement(clickTarget)
                 task.wait(0.12)
 
-                for _, btn in ipairs(section:GetDescendants()) do
-                    if (btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("ImageButton")) and btn ~= farmingHeader and btn ~= clickTarget and btn.Name ~= "AutoProg_HUD" then
-                        local rawTxt = getGuiText(btn):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
-                        if rawTxt:gsub("[%s%-_']", ""):lower() == targetClean then
-                            local clicked = clickElement(btn)
-                            if clicked then
-                                task.wait(0.05)
-                                return true, "ui_opened_and_clicked"
+                local searchContainers = { section, root }
+                local foundAndClicked = false
+
+                for _, container in ipairs(searchContainers) do
+                    if not foundAndClicked and container then
+                        for _, btn in ipairs(container:GetDescendants()) do
+                            if (btn:IsA("TextButton") or btn:IsA("TextLabel") or btn:IsA("ImageButton")) and btn ~= farmingHeader and btn ~= clickTarget and btn.Name ~= "AutoProg_HUD" then
+                                local rawTxt = getGuiText(btn):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                                if rawTxt:gsub("[%s%-_']", ""):lower() == targetClean then
+                                    local clicked = clickElement(btn)
+                                    if clicked then
+                                        foundAndClicked = true
+                                        task.wait(0.05)
+                                        break
+                                    end
+                                end
                             end
                         end
                     end
                 end
+
+                if switchedTab and prevTabBtn then
+                    task.wait(0.04)
+                    clickElement(prevTabBtn)
+                end
+
+                if foundAndClicked then
+                    return true, switchedTab and "ui_switched_and_clicked" or "ui_opened_and_clicked"
+                end
+            elseif switchedTab and prevTabBtn then
+                clickElement(prevTabBtn)
             end
         end
     end
@@ -1229,7 +1389,7 @@ local function resolveMissingMaterial(item, neededAmount, data, beeCount)
     local deficit = neededAmount - invCount
     if deficit <= 0 then return nil end
 
-    local recipe = RECIPES[item]
+    local recipe = getRecipe(item)
     if recipe then
         local firstUnfarmMat, firstUnfarmAmt = nil, 0
         for _, sub in ipairs(recipe) do
@@ -2235,6 +2395,32 @@ hudLabel.TextXAlignment = Enum.TextXAlignment.Right
 hudLabel.Text = "[Auto Prog] Initializing..."
 hudLabel.Parent = hudGui
 
+local function buildIngredientLines(itemName, totalAmount, depth, data, parentOk, lines)
+    local invCount = getItemAmount(itemName, data)
+    local recipe = getRecipe(itemName)
+    local isRaw = isRawFieldItem(itemName)
+    local isUnfarm = not recipe and not isRaw
+
+    local isOk = parentOk or (invCount >= totalAmount)
+    local status = isOk and "[OK]" or (isUnfarm and "[MANUAL]" or "[NEED]")
+
+    local prefix = depth == 0 and "- " or (string.rep("  ", depth) .. "-> ")
+    local line
+    if data then
+        line = string.format("%s%d %s: %d/%d %s", prefix, totalAmount, itemName, invCount, totalAmount, status)
+    else
+        line = string.format("%s%d %s", prefix, totalAmount, itemName)
+    end
+    table.insert(lines, line)
+
+    if recipe then
+        for _, sub in ipairs(recipe) do
+            local subTotal = totalAmount * sub.Amount
+            buildIngredientLines(sub.Item, subTotal, depth + 1, data, isOk, lines)
+        end
+    end
+end
+
 local function getAllTargetIngredients(targetItem, data)
     if not targetItem or targetItem == "None" then return "None" end
     local matched = nil
@@ -2266,28 +2452,7 @@ local function getAllTargetIngredients(targetItem, data)
 
     local lines = {}
     for _, ing in ipairs(matched.Ingredients) do
-        local invCount = getItemAmount(ing.Item, data)
-        local isMissing = invCount < ing.Amount
-        local isUnfarm = false
-        if isMissing then
-            local _, _, tf, unf = resolveMissingMaterial(ing.Item, ing.Amount, data, 35)
-            if not tf and unf then isUnfarm = true end
-        end
-        local status = not isMissing and "[OK]" or (isUnfarm and "[NEED - MANUAL]" or "[NEED]")
-        local line = string.format("- **%s**: %d/%d (%s)", ing.Item, invCount, ing.Amount, status)
-        if isMissing and RECIPES[ing.Item] then
-            local def = ing.Amount - invCount
-            local subParts = {}
-            for _, sub in ipairs(RECIPES[ing.Item]) do
-                local totalFruit = def * sub.Amount
-                local curFruit = getItemAmount(sub.Item, data)
-                table.insert(subParts, string.format("%d %s [have %d]", totalFruit, sub.Item, curFruit))
-            end
-            if #subParts > 0 then
-                line = line .. "\n   └ *Raw: " .. table.concat(subParts, ", ") .. "*"
-            end
-        end
-        table.insert(lines, line)
+        buildIngredientLines(ing.Item, ing.Amount, 0, data, false, lines)
     end
     return table.concat(lines, "\n")
 end
