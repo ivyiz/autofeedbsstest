@@ -185,7 +185,7 @@ local FullProgressionRoute = {
     { Bees = 35, Name = "Coconut Clogs", Type = "Boots", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 50 }, { Item = "Glue", Amount = 100 }, { Item = "Oil", Amount = 100 } } },
     { Bees = 35, Name = "The Supreme Saturator", Type = "Sprinkler" },
     { Bees = 35, Name = "Tide Popper", Type = "Tool", Ingredients = { { Item = "Blue Extract", Amount = 1500 }, { Item = "Stinger", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Swirled Wax", Amount = 75 }, { Item = "Super Smoothie", Amount = 50 } } },
-    { Bees = 35, Name = "Dark Scythe", Type = "Tool", Ingredients = { { Item = "Red Extract", Amount = 1500 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 100 }, { Item = "Stinger", Amount = 150 } } },
+    { Bees = 35, Name = "Dark Scythe", Type = "Tool", Ingredients = { { Item = "Red Extract", Amount = 1500 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 100 }, { Item = "Stinger", Amount = 200 } } },
     { Bees = 35, Name = "Gummyballer", Type = "Tool", Ingredients = { { Item = "Glue", Amount = 1500 }, { Item = "Gumdrop", Amount = 1500 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Swirled Wax", Amount = 50 } } },
     { Bees = 35, Name = "Hydroponic Planter", Type = "Planter", Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 }, { Item = "Caustic Wax", Amount = 5 } } },
     { Bees = 35, Name = "Heat-Treated Planter", Type = "Planter", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 }, { Item = "Caustic Wax", Amount = 5 } } },
@@ -2396,33 +2396,7 @@ hudLabel.TextXAlignment = Enum.TextXAlignment.Right
 hudLabel.Text = "[Auto Prog] Initializing..."
 hudLabel.Parent = hudGui
 
-local function buildIngredientLines(itemName, totalAmount, depth, data, parentOk, lines)
-    local invCount = getItemAmount(itemName, data)
-    local recipe = getRecipe(itemName)
-    local isRaw = isRawFieldItem(itemName)
-    local isUnfarm = not recipe and not isRaw
-
-    local isOk = parentOk or (invCount >= totalAmount)
-    local status = isOk and "[OK]" or (isUnfarm and "[MANUAL]" or "[NEED]")
-
-    local prefix = depth == 0 and "- " or (string.rep("  ", depth) .. "-> ")
-    local line
-    if data then
-        line = string.format("%s%d %s: %d/%d %s", prefix, totalAmount, itemName, invCount, totalAmount, status)
-    else
-        line = string.format("%s%d %s", prefix, totalAmount, itemName)
-    end
-    table.insert(lines, line)
-
-    if recipe then
-        for _, sub in ipairs(recipe) do
-            local subTotal = totalAmount * sub.Amount
-            buildIngredientLines(sub.Item, subTotal, depth + 1, data, isOk, lines)
-        end
-    end
-end
-
-local function getAllTargetIngredients(targetItem, data)
+local function getAllTargetIngredients(targetItem, data, beeCount)
     if not targetItem or targetItem == "None" then return "None" end
     local matched = nil
     local cTarget = targetItem:gsub("[%s%-_']", ""):lower()
@@ -2453,7 +2427,28 @@ local function getAllTargetIngredients(targetItem, data)
 
     local lines = {}
     for _, ing in ipairs(matched.Ingredients) do
-        buildIngredientLines(ing.Item, ing.Amount, 0, data, false, lines)
+        local invCount = getItemAmount(ing.Item, data)
+        local isMissing = invCount < ing.Amount
+        local isUnfarm = false
+        if isMissing then
+            local _, _, tf, unf = resolveMissingMaterial(ing.Item, ing.Amount, data, beeCount or 35)
+            if not tf and unf then isUnfarm = true end
+        end
+        local status = not isMissing and "[OK]" or (isUnfarm and "[NEED - MANUAL]" or "[NEED]")
+        local line = string.format("• **%s**: %d/%d (%s)", ing.Item, invCount, ing.Amount, status)
+        if isMissing and RECIPES[ing.Item] then
+            local def = ing.Amount - invCount
+            local subParts = {}
+            for _, sub in ipairs(RECIPES[ing.Item]) do
+                local totalFruit = def * sub.Amount
+                local curFruit = getItemAmount(sub.Item, data)
+                table.insert(subParts, string.format("%d %s [have %d]", totalFruit, sub.Item, curFruit))
+            end
+            if #subParts > 0 then
+                line = line .. "\n  └ *Raw: " .. table.concat(subParts, ", ") .. "*"
+            end
+        end
+        table.insert(lines, line)
     end
     return table.concat(lines, "\n")
 end
@@ -2461,12 +2456,12 @@ end
 local _lastWebhookSendTime = 0
 local _lastWebhookTarget = nil
 local _lastWebhookField = nil
-local _lastWebhookNeed = nil
+local _lastWebhookMat = nil
 
-local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable)
+local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable, neededMat)
     local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
     local webhookUrl = nil
-    local interval = 60
+    local interval = 600
 
     for _, r in ipairs(roots) do
         if type(r) == "table" then
@@ -2484,11 +2479,11 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data,
     if not webhookUrl or webhookUrl == "" then return end
 
     local now = tick()
-    local stateChanged = (targetStr ~= _lastWebhookTarget or fieldStr ~= _lastWebhookField or needStr ~= _lastWebhookNeed)
+    local stateChanged = (targetStr ~= _lastWebhookTarget or fieldStr ~= _lastWebhookField or neededMat ~= _lastWebhookMat)
     if not stateChanged and (now - _lastWebhookSendTime < interval) then
         return
     end
-    if stateChanged and (now - _lastWebhookSendTime < 10) then
+    if stateChanged and (now - _lastWebhookSendTime < 15) then
         return
     end
 
@@ -2498,9 +2493,9 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data,
     _lastWebhookSendTime = now
     _lastWebhookTarget = targetStr
     _lastWebhookField = fieldStr
-    _lastWebhookNeed = needStr
+    _lastWebhookMat = neededMat
 
-    local needIngredients = getAllTargetIngredients(targetStr, data)
+    local needIngredients = getAllTargetIngredients(targetStr, data, beeCount)
     local noteText = isUnfarmable and string.format("\n⚠️ **Note:** Missing unfarmable item `%s` (cannot farm in fields).", tostring(needStr)) or ""
 
     local bodyText = string.format(
@@ -2674,7 +2669,7 @@ task.spawn(function()
                 setAtlasField(field)
             end
 
-            task.spawn(sendDiscordWebhook, beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable)
+            task.spawn(sendDiscordWebhook, beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable, neededMat)
         end)
         if not okL then
             warn("[Auto Prog] loop error: " .. tostring(errL))
