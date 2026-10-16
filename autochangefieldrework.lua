@@ -324,7 +324,30 @@ local function gatherItemFolders(rootData)
     return list
 end
 
-local function scanGuiForItem(cItem, singItem, plurItem)
+local function buildItemVariants(item, cleanKey)
+    local cItem = item:gsub("[%s%-_']", ""):lower()
+    local variants = { [cItem] = true }
+    if cleanKey then variants[cleanKey:lower()] = true end
+    if cItem:sub(-1) == "s" then
+        variants[cItem:sub(1, -2)] = true
+    else
+        variants[cItem .. "s"] = true
+    end
+    if cItem:sub(-1) == "y" then
+        variants[cItem:sub(1, -2) .. "ies"] = true
+    elseif cItem:sub(-3) == "ies" then
+        variants[cItem:sub(1, -4) .. "y"] = true
+    end
+    if cItem:sub(-1) == "x" or cItem:sub(-2) == "sh" or cItem:sub(-2) == "ch" then
+        variants[cItem .. "es"] = true
+    elseif cItem:sub(-2) == "es" and not cItem:sub(-3):find("[aeiou]es") then
+        variants[cItem:sub(1, -3)] = true
+    end
+    variants[cItem .. "item"] = true
+    return variants, cItem
+end
+
+local function scanGuiForItem(variants)
     local count = nil
     pcall(function()
         local pg = player:FindFirstChild("PlayerGui")
@@ -332,7 +355,7 @@ local function scanGuiForItem(cItem, singItem, plurItem)
         for _, desc in ipairs(pg:GetDescendants()) do
             if (desc:IsA("Frame") or desc:IsA("ImageLabel") or desc:IsA("TextButton")) and desc.Visible then
                 local dName = desc.Name:gsub("[%s%-_']", ""):lower()
-                if dName == cItem or dName == singItem or dName == plurItem or dName == cItem .. "item" then
+                if variants[dName] then
                     for _, sub in ipairs(desc:GetDescendants()) do
                         if sub:IsA("TextLabel") and sub.Visible then
                             local num = tonumber(sub.Text:match("^[xX]?%s*(%d+)%s*$"))
@@ -364,9 +387,7 @@ local function getItemAmount(item, data)
         end
     end
 
-    local cItem = item:gsub("[%s%-_']", ""):lower()
-    local singItem = (cItem:sub(-1) == "s") and cItem:sub(1, -2) or cItem
-    local plurItem = cItem .. "s"
+    local variants, cItem = buildItemVariants(item, cleanKey)
 
     if getgenv then
         local g = getgenv()
@@ -374,7 +395,7 @@ local function getItemAmount(item, data)
             local n = extractItemAmount(g.OwnedItems[item] or g.OwnedItems[cleanKey] or g.OwnedItems[cItem])
             if n then return n end
         end
-        if (cItem == "glitter" or singItem == "glitter") and (g.SkipGlitter or g.HasGlitter) then
+        if (cItem == "glitter" or variants["glitter"]) and (g.SkipGlitter or g.HasGlitter) then
             return 999999
         end
         if g["Has" .. cleanKey] or g["Skip" .. cleanKey] then
@@ -395,7 +416,7 @@ local function getItemAmount(item, data)
                 for k, v in pairs(folder) do
                     if type(k) == "string" then
                         local ck = tostring(k):gsub("[%s%-_']", ""):lower()
-                        if ck == cItem or ck == singItem or ck == plurItem or ck == cItem .. "item" then
+                        if variants[ck] then
                             local num = extractItemAmount(v)
                             if num then return num end
                         end
@@ -420,7 +441,7 @@ local function getItemAmount(item, data)
                     for k, v in pairs(folder) do
                         if type(k) == "string" then
                             local ck = tostring(k):gsub("[%s%-_']", ""):lower()
-                            if ck == cItem or ck == singItem or ck == plurItem or ck == cItem .. "item" then
+                            if variants[ck] then
                                 local num = extractItemAmount(v)
                                 if num then return num end
                             end
@@ -431,7 +452,7 @@ local function getItemAmount(item, data)
         end
     end
 
-    local guiAmount = scanGuiForItem(cItem, singItem, plurItem)
+    local guiAmount = scanGuiForItem(variants)
     if guiAmount then return guiAmount end
 
     return 0
@@ -1508,8 +1529,12 @@ local function resolveMissingMaterial(item, neededAmount, data, beeCount)
 
     if getgenv then
         local g = getgenv()
+        local cleanKey = tostring(item):gsub("%s+", "")
         local cItem = tostring(item):gsub("[%s%-_']", ""):lower()
         if (cItem == "glitter" or cItem == "glitters") and (g.SkipGlitter or g.HasGlitter) then
+            return nil
+        end
+        if g["Skip" .. cleanKey] or g["Has" .. cleanKey] then
             return nil
         end
         if g.SkipUnfarmable and not getRecipe(item) and not getTargetField(item, beeCount) then
