@@ -477,6 +477,85 @@ local function normalizeEquipSlot(val, tierTable)
     return nil
 end
 
+local _cachedAtlasSettings = nil
+local _gcScanAt = { settings = 0, route = 0 }
+
+local function isAtlasSettingsTable(t)
+    if type(t) ~= "table" then return false end
+    if type(t.autofarm) == "table" and (t.autofarm.field1 ~= nil or t.autofarm.field ~= nil or t.autofarm.fields ~= nil) then
+        return true
+    end
+    if type(t.farming) == "table" and (t.farming.field1 ~= nil or t.farming.field ~= nil) then
+        return true
+    end
+    local ok, hasToys = pcall(function() return t.toys end)
+    local ok2, hasFarm = pcall(function() return t.autofarm or t.farming or (t.toys and t.toys.route) end)
+    return ok and ok2 and (type(hasFarm) == "table" or (type(hasToys) == "table" and t.toys.route ~= nil))
+end
+
+local function findAtlasSettings()
+    if _cachedAtlasSettings and isAtlasSettingsTable(_cachedAtlasSettings) then
+        return _cachedAtlasSettings
+    end
+
+    local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
+    for _, root in ipairs(roots) do
+        if type(root) == "table" then
+            if isAtlasSettingsTable(root) then
+                _cachedAtlasSettings = root
+                return root
+            end
+            if root.Atlas and type(root.Atlas) == "table" then
+                if isAtlasSettingsTable(root.Atlas.Settings) then
+                    _cachedAtlasSettings = root.Atlas.Settings
+                    return root.Atlas.Settings
+                end
+                if isAtlasSettingsTable(root.Atlas) then
+                    _cachedAtlasSettings = root.Atlas
+                    return root.Atlas
+                end
+            end
+            if isAtlasSettingsTable(root.Settings) then
+                _cachedAtlasSettings = root.Settings
+                return root.Settings
+            end
+            if isAtlasSettingsTable(root.Config) then
+                _cachedAtlasSettings = root.Config
+                return root.Config
+            end
+            for k, v in pairs(root) do
+                if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
+                    if isAtlasSettingsTable(v) then
+                        _cachedAtlasSettings = v
+                        return v
+                    end
+                    if isAtlasSettingsTable(v.Settings) then
+                        _cachedAtlasSettings = v.Settings
+                        return v.Settings
+                    end
+                end
+            end
+        end
+    end
+
+    local minInterval = _cachedAtlasSettings and 60 or 5
+    if getgc and (tick() - _gcScanAt.settings > minInterval) then
+        _gcScanAt.settings = tick()
+        local ok, gc = pcall(getgc, true)
+        if not ok or type(gc) ~= "table" then ok, gc = pcall(getgc) end
+        if ok and type(gc) == "table" then
+            for _, obj in ipairs(gc) do
+                if isAtlasSettingsTable(obj) then
+                    _cachedAtlasSettings = obj
+                    return obj
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
 local _knownOwnedPlanters = {}
 
 local function isPlanterOwned(cleanName, rawClean, canonical, data)
@@ -865,84 +944,6 @@ local function getTargetField(material, beeCount)
     end
 end
 
-local _cachedAtlasSettings = nil
-local _gcScanAt = { settings = 0, route = 0 }
-
-local function isAtlasSettingsTable(t)
-    if type(t) ~= "table" then return false end
-    if type(t.autofarm) == "table" and (t.autofarm.field1 ~= nil or t.autofarm.field ~= nil or t.autofarm.fields ~= nil) then
-        return true
-    end
-    if type(t.farming) == "table" and (t.farming.field1 ~= nil or t.farming.field ~= nil) then
-        return true
-    end
-    local ok, hasToys = pcall(function() return t.toys end)
-    local ok2, hasFarm = pcall(function() return t.autofarm or t.farming or (t.toys and t.toys.route) end)
-    return ok and ok2 and (type(hasFarm) == "table" or (type(hasToys) == "table" and t.toys.route ~= nil))
-end
-
-local function findAtlasSettings()
-    if _cachedAtlasSettings and isAtlasSettingsTable(_cachedAtlasSettings) then
-        return _cachedAtlasSettings
-    end
-
-    local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
-    for _, root in ipairs(roots) do
-        if type(root) == "table" then
-            if isAtlasSettingsTable(root) then
-                _cachedAtlasSettings = root
-                return root
-            end
-            if root.Atlas and type(root.Atlas) == "table" then
-                if isAtlasSettingsTable(root.Atlas.Settings) then
-                    _cachedAtlasSettings = root.Atlas.Settings
-                    return root.Atlas.Settings
-                end
-                if isAtlasSettingsTable(root.Atlas) then
-                    _cachedAtlasSettings = root.Atlas
-                    return root.Atlas
-                end
-            end
-            if isAtlasSettingsTable(root.Settings) then
-                _cachedAtlasSettings = root.Settings
-                return root.Settings
-            end
-            if isAtlasSettingsTable(root.Config) then
-                _cachedAtlasSettings = root.Config
-                return root.Config
-            end
-            for k, v in pairs(root) do
-                if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
-                    if isAtlasSettingsTable(v) then
-                        _cachedAtlasSettings = v
-                        return v
-                    end
-                    if isAtlasSettingsTable(v.Settings) then
-                        _cachedAtlasSettings = v.Settings
-                        return v.Settings
-                    end
-                end
-            end
-        end
-    end
-
-    local minInterval = _cachedAtlasSettings and 60 or 5
-    if getgc and (tick() - _gcScanAt.settings > minInterval) then
-        _gcScanAt.settings = tick()
-        local ok, gc = pcall(getgc, true)
-        if not ok or type(gc) ~= "table" then ok, gc = pcall(getgc) end
-        if ok and type(gc) == "table" then
-            for _, obj in ipairs(gc) do
-                if isAtlasSettingsTable(obj) then
-                    _cachedAtlasSettings = obj
-                    return obj
-                end
-            end
-        end
-    end
-
-    return nil
-end
 
 local VIM = nil
 pcall(function() VIM = game:GetService("VirtualInputManager") end)
