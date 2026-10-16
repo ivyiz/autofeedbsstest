@@ -280,8 +280,76 @@ local function getBeeCount(data)
     return count
 end
 
+local function extractItemAmount(val)
+    if type(val) == "number" then return val end
+    if type(val) == "string" then return tonumber(val) end
+    if typeof and typeof(val) == "Instance" then
+        if val:IsA("ValueBase") then return tonumber(val.Value) end
+        local v = val:FindFirstChild("Value")
+        if v and v:IsA("ValueBase") then return tonumber(v.Value) end
+    end
+    if type(val) == "table" then
+        return tonumber(val.Amount or val.amount or val.Value or val.value or val.Count or val.count or val.Quantity or val.quantity or val[1])
+    end
+    return nil
+end
+
+local function gatherItemFolders(rootData)
+    if type(rootData) ~= "table" then return {} end
+    local list = {}
+    local seen = {}
+    local function addFolder(t, depth)
+        if type(t) ~= "table" or (depth or 0) > 3 or seen[t] then return end
+        seen[t] = true
+        table.insert(list, t)
+        for k, v in pairs(t) do
+            local lk = tostring(k):lower()
+            if type(v) == "table" and not seen[v] and (depth or 0) < 2 then
+                if lk == "items" or lk == "eggs" or lk == "inventory" or lk == "supplies"
+                    or lk == "collectibles" or lk == "totals" or lk == "boosts" or lk == "buffs"
+                    or lk == "materials" or lk == "other" or lk == "resources" or lk == "crafting" then
+                    addFolder(v, (depth or 0) + 1)
+                end
+            end
+        end
+    end
+    addFolder(rootData.Eggs, 1)
+    addFolder(rootData.Inventory, 1)
+    addFolder(rootData.Items, 1)
+    addFolder(rootData.Supplies, 1)
+    addFolder(rootData.Materials, 1)
+    addFolder(rootData.Collectibles, 1)
+    addFolder(rootData.Totals, 1)
+    addFolder(rootData, 1)
+    return list
+end
+
+local function scanGuiForItem(cItem, singItem, plurItem)
+    local count = nil
+    pcall(function()
+        local pg = player:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, desc in ipairs(pg:GetDescendants()) do
+            if (desc:IsA("Frame") or desc:IsA("ImageLabel") or desc:IsA("TextButton")) and desc.Visible then
+                local dName = desc.Name:gsub("[%s%-_']", ""):lower()
+                if dName == cItem or dName == singItem or dName == plurItem or dName == cItem .. "item" then
+                    for _, sub in ipairs(desc:GetDescendants()) do
+                        if sub:IsA("TextLabel") and sub.Visible then
+                            local num = tonumber(sub.Text:match("^[xX]?%s*(%d+)%s*$"))
+                            if num and (not count or num > count) then
+                                count = num
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    return count
+end
+
 local function getItemAmount(item, data)
-    if not data or not item then return 0 end
+    if not item then return 0 end
     local cleanKey = item:gsub("%s+", "")
     local keys = { item, cleanKey }
 
@@ -297,23 +365,75 @@ local function getItemAmount(item, data)
     end
 
     local cItem = item:gsub("[%s%-_']", ""):lower()
-    local folders = compact({ data.Eggs, data.Inventory, data.Items, data.Totals, data }, 5)
-    for _, folder in ipairs(folders) do
-        if type(folder) == "table" then
-            for _, k in ipairs(keys) do
-                if folder[k] ~= nil then
-                    local num = tonumber(folder[k])
-                    if num then return num end
+    local singItem = (cItem:sub(-1) == "s") and cItem:sub(1, -2) or cItem
+    local plurItem = cItem .. "s"
+
+    if getgenv then
+        local g = getgenv()
+        if g.OwnedItems and type(g.OwnedItems) == "table" then
+            local n = extractItemAmount(g.OwnedItems[item] or g.OwnedItems[cleanKey] or g.OwnedItems[cItem])
+            if n then return n end
+        end
+        if (cItem == "glitter" or singItem == "glitter") and (g.SkipGlitter or g.HasGlitter) then
+            return 999999
+        end
+        if g["Has" .. cleanKey] or g["Skip" .. cleanKey] then
+            return 999999
+        end
+    end
+
+    if data then
+        local folders = gatherItemFolders(data)
+        for _, folder in ipairs(folders) do
+            if type(folder) == "table" then
+                for _, k in ipairs(keys) do
+                    if folder[k] ~= nil then
+                        local num = extractItemAmount(folder[k])
+                        if num then return num end
+                    end
                 end
-            end
-            for k, v in pairs(folder) do
-                if type(k) == "string" and tostring(k):gsub("[%s%-_']", ""):lower() == cItem then
-                    local num = tonumber(v)
-                    if num then return num end
+                for k, v in pairs(folder) do
+                    if type(k) == "string" then
+                        local ck = tostring(k):gsub("[%s%-_']", ""):lower()
+                        if ck == cItem or ck == singItem or ck == plurItem or ck == cItem .. "item" then
+                            local num = extractItemAmount(v)
+                            if num then return num end
+                        end
+                    end
                 end
             end
         end
     end
+
+    if getgenv then
+        local atlas = getgenv().Atlas
+        if type(atlas) == "table" then
+            local aFolders = gatherItemFolders(atlas.Stats or atlas.Inventory or atlas.Data or atlas.Items or atlas)
+            for _, folder in ipairs(aFolders) do
+                if type(folder) == "table" then
+                    for _, k in ipairs(keys) do
+                        if folder[k] ~= nil then
+                            local num = extractItemAmount(folder[k])
+                            if num then return num end
+                        end
+                    end
+                    for k, v in pairs(folder) do
+                        if type(k) == "string" then
+                            local ck = tostring(k):gsub("[%s%-_']", ""):lower()
+                            if ck == cItem or ck == singItem or ck == plurItem or ck == cItem .. "item" then
+                                local num = extractItemAmount(v)
+                                if num then return num end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local guiAmount = scanGuiForItem(cItem, singItem, plurItem)
+    if guiAmount then return guiAmount end
+
     return 0
 end
 
@@ -1377,6 +1497,17 @@ local function resolveMissingMaterial(item, neededAmount, data, beeCount)
     local deficit = neededAmount - invCount
     if deficit <= 0 then return nil end
 
+    if getgenv then
+        local g = getgenv()
+        local cItem = tostring(item):gsub("[%s%-_']", ""):lower()
+        if (cItem == "glitter" or cItem == "glitters") and (g.SkipGlitter or g.HasGlitter) then
+            return nil
+        end
+        if g.SkipUnfarmable and not getRecipe(item) and not getTargetField(item, beeCount) then
+            return nil
+        end
+    end
+
     local recipe = getRecipe(item)
     if recipe then
         local firstUnfarmMat, firstUnfarmAmt = nil, 0
@@ -2219,6 +2350,11 @@ local function printDebugInfo()
     local checkList = { "Hiking Boots", "Beekeeper's Boots", "Looker Guard", "Brave Guard", "Diamond Mask" }
     for _, itm in ipairs(checkList) do
         print("  " .. itm .. ":", isItemOwned(itm, "Gear", player.Character, data))
+    end
+    print("Material Counts:")
+    local matList = { "Glitter", "Oil", "Enzymes", "Glue", "Blue Extract", "Red Extract", "Stinger", "Star Jelly", "Moon Charm" }
+    for _, m in ipairs(matList) do
+        print("  " .. m .. ":", getItemAmount(m, data))
     end
     local targetItem, neededMat, neededAmt, field, isUnfarmable = evaluateRoute(data, beeCount)
     print("Evaluation Result:")
