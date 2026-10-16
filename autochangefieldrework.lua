@@ -538,7 +538,7 @@ local function findAtlasSettings()
         end
     end
 
-    local minInterval = _cachedAtlasSettings and 60 or 5
+    local minInterval = _cachedAtlasSettings and 60 or 30
     if getgc and (tick() - _gcScanAt.settings > minInterval) then
         _gcScanAt.settings = tick()
         local ok, gc = pcall(getgc, true)
@@ -640,7 +640,7 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
         for _, tbl in ipairs(compact(pTables, 11)) do
             if type(tbl) == "table" then
                 for k, v in pairs(tbl) do
-                    if matches(k) then
+                    if matches(k) and truthyOwned(v) then
                         _knownOwnedPlanters[cleanName] = true
                         return true
                     end
@@ -654,7 +654,7 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
                             return true
                         end
                         for k2, v2 in pairs(v) do
-                            if matches(k2) or (type(v2) == "string" and matches(v2)) then
+                            if (matches(k2) and truthyOwned(v2)) or (type(v2) == "string" and matches(v2)) then
                                 _knownOwnedPlanters[cleanName] = true
                                 return true
                             end
@@ -681,9 +681,10 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
     end
 
     pcall(function()
+        if not (getgenv and getgenv().AutoProgPlanterGuiScan == true) then return end
         if player:FindFirstChild("PlayerGui") then
             for _, desc in ipairs(player.PlayerGui:GetDescendants()) do
-                if desc:IsA("TextLabel") and matches(desc.Text) then
+                if desc:IsA("TextLabel") and desc.Visible and #desc.Text <= 40 and matches(desc.Text) and not desc:FindFirstAncestor("AutoProg_HUD") then
                     local isShop = false
                     local cur = desc
                     for _ = 1, 6 do
@@ -718,8 +719,9 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
             for _, desc in ipairs(c:GetDescendants()) do
                 if desc:IsA("TextLabel") then
                     local t = desc.Text:lower()
+                    local tc = (t:gsub("[%s%-_']", ""))
                     if (t:find(pName, 1, true) or t:find(pDisplay, 1, true) or t:find(pUserId, 1, true))
-                        and (t:find(rootPlanter, 1, true) or t:find("planter", 1, true)) then
+                        and tc:find(rootPlanter, 1, true) then
                         _knownOwnedPlanters[cleanName] = true
                         return true
                     end
@@ -728,9 +730,12 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
                     local isMine = false
                     local owner = desc:FindFirstChild("Owner") or desc:FindFirstChild("Player") or desc:FindFirstChild("User")
                     if owner then
-                        local ov = tostring(owner.Value):lower()
-                        if ov == pName or ov == pUserId or (owner:IsA("ObjectValue") and (owner.Value == player or (char and owner.Value == char))) then
-                            isMine = true
+                        local okV, rawV = pcall(function() return owner.Value end)
+                        if okV then
+                            local ov = tostring(rawV):lower()
+                            if ov == pName or ov == pUserId or rawV == player or (char and rawV == char) then
+                                isMine = true
+                            end
                         end
                     end
                     local attr = desc:GetAttribute("Owner") or desc:GetAttribute("OwnerId") or desc:GetAttribute("Player")
@@ -765,7 +770,7 @@ local function isPlanterOwned(cleanName, rawClean, canonical, data)
     local settings = findAtlasSettings()
     if settings then
         local pSettings = settings.planters or settings.Planters or (settings.toys and settings.toys.planters)
-        if type(pSettings) == "table" then
+        if type(pSettings) == "table" and getgenv and getgenv().AutoProgTrustAtlasPlanters == true then
             for k, v in pairs(pSettings) do
                 if matches(k) or (type(v) == "string" and matches(v)) then
                     _knownOwnedPlanters[cleanName] = true
@@ -949,105 +954,76 @@ local VIM = nil
 pcall(function() VIM = game:GetService("VirtualInputManager") end)
 local VU = nil
 pcall(function() VU = game:GetService("VirtualUser") end)
+local GuiService = nil
+pcall(function() GuiService = game:GetService("GuiService") end)
 
-local function getGuiText(gui)
-    if not gui then return "" end
-    if gui:IsA("TextLabel") or gui:IsA("TextButton") or gui:IsA("TextBox") then
-        local t = gui.Text
-        if type(t) == "string" and t ~= "" then return t end
+local function fireConnections(sig)
+    local n = 0
+    if not sig then return n end
+    local ok, conns = pcall(getconnections, sig)
+    if ok and type(conns) == "table" then
+        for _, c in ipairs(conns) do
+            if c.Fire then
+                c:Fire(); n = n + 1
+            elseif c.Function then
+                pcall(c.Function); n = n + 1
+            end
+        end
     end
-    local lbl = gui:FindFirstChildWhichIsA("TextLabel")
-    if lbl and type(lbl.Text) == "string" and lbl.Text ~= "" then
-        return lbl.Text
-    end
-    return tostring(gui.Name or "")
-end
-
-local function isGuiVisibleOnScreen(gui)
-    if not gui or not gui:IsA("GuiObject") then return false end
-    local cur = gui
-    while cur and cur:IsA("GuiObject") do
-        if not cur.Visible then return false end
-        cur = cur.Parent
-    end
-    return gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0
-end
-
-local function bringIntoView(gui)
-    if not gui or not gui:IsA("GuiObject") then return end
-    if not isGuiVisibleOnScreen(gui) then return end
-    local scroll = gui:FindFirstAncestorWhichIsA("ScrollingFrame")
-    if scroll and scroll.AbsoluteSize.Y > 0 then
-        pcall(function()
-            local relY = gui.AbsolutePosition.Y - scroll.AbsolutePosition.Y + scroll.CanvasPosition.Y
-            scroll.CanvasPosition = Vector2.new(0, math.max(0, relY - scroll.AbsoluteSize.Y / 2))
-            task.wait(0.04)
-        end)
-    end
+    return n
 end
 
 local function clickElement(gui)
     if not gui or not gui:IsA("GuiObject") then return false end
-    local fired = false
 
     local clickable = gui
-    if not (gui:IsA("TextButton") or gui:IsA("ImageButton")) then
-        clickable = gui:FindFirstAncestorWhichIsA("TextButton")
-            or gui:FindFirstAncestorWhichIsA("ImageButton")
-            or gui
+    if not gui:IsA("GuiButton") then
+        clickable = gui:FindFirstAncestorWhichIsA("GuiButton") or gui
     end
 
     bringIntoView(clickable)
 
-    pcall(function()
+    if clickable:IsA("GuiButton") then
         if getconnections then
-            if clickable:IsA("TextButton") or clickable:IsA("ImageButton") then
-                for _, c in ipairs(getconnections(clickable.MouseButton1Click)) do
-                    if c.Fire then c:Fire(); fired = true end
-                    if c.Function then pcall(c.Function); fired = true end
-                end
-                for _, c in ipairs(getconnections(clickable.Activated)) do
-                    if c.Fire then c:Fire(); fired = true end
-                    if c.Function then pcall(c.Function); fired = true end
-                end
+            for _, sigName in ipairs({ "MouseButton1Click", "Activated" }) do
+                local ok, cnt = pcall(function() return fireConnections(clickable[sigName]) end)
+                if ok and cnt and cnt > 0 then return true end
             end
-            for _, c in ipairs(getconnections(clickable.MouseButton1Down)) do
-                if c.Fire then c:Fire(); fired = true end
-                if c.Function then pcall(c.Function); fired = true end
-            end
+        elseif firesignal then
+            if pcall(firesignal, clickable.MouseButton1Click) then return true end
         end
+    end
 
-        if firesignal then
-            if clickable:IsA("TextButton") or clickable:IsA("ImageButton") then
-                pcall(function() firesignal(clickable.MouseButton1Click) end)
-                pcall(function() firesignal(clickable.Activated) end)
-            end
-            pcall(function() firesignal(clickable.MouseButton1Down) end)
-            fired = true
-        end
+    if not isGuiVisibleOnScreen(clickable) then return false end
 
-        if not fired and isGuiVisibleOnScreen(clickable) then
-            local x = clickable.AbsolutePosition.X + clickable.AbsoluteSize.X / 2
-            local y = clickable.AbsolutePosition.Y + clickable.AbsoluteSize.Y / 2
-            if VIM then
-                pcall(function()
-                    VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
-                    task.wait(0.03)
-                    VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
-                    fired = true
-                end)
-            end
-            if not fired and VU then
-                pcall(function()
-                    VU:Button1Down(Vector2.new(x, y))
-                    task.wait(0.02)
-                    VU:Button1Up(Vector2.new(x, y))
-                    fired = true
-                end)
-            end
-        end
-    end)
-    return fired
+    local size = clickable.AbsoluteSize
+    local pos = clickable.AbsolutePosition
+    local sg = clickable:FindFirstAncestorWhichIsA("ScreenGui")
+    local inset = Vector2.new(0, 0)
+    if GuiService and not (sg and sg.IgnoreGuiInset) then
+        local okI, v = pcall(function() return GuiService:GetGuiInset() end)
+        if okI and v then inset = v end
+    end
+    local x = pos.X + size.X / 2 + inset.X
+    local y = pos.Y + size.Y / 2 + inset.Y
+
+    if VIM then
+        local ok = pcall(function()
+            VIM:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            task.wait(0.03)
+            VIM:SendMouseButtonEvent(x, y, 0, false, game, 0)
+        end)
+        if ok then return true end
+    end
+    if VU then
+        local ok = pcall(function()
+            VU:Button1Down(Vector2.new(x, y))
+            task.wait(0.02)
+            VU:Button1Up(Vector2.new(x, y))
+        end)
+        if ok then return true end
+    end
+    return false
 end
 
 local function findFarmingSection(root)
@@ -1148,6 +1124,21 @@ local function getFarmingSectionAndDropdown(root)
     return nil, nil, nil
 end
 
+local _farmUICache = nil
+
+local function getFarmingSectionAndDropdownCached(root)
+    local c = _farmUICache
+    if c and c.header and c.section and c.header:IsDescendantOf(root) and c.section:IsDescendantOf(root) then
+        local txt = getGuiText(c.header):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if txt:lower():match("^field%s*:") then
+            return c.section, c.header, txt
+        end
+    end
+    local section, header, txt = getFarmingSectionAndDropdown(root)
+    if section and header then _farmUICache = { section = section, header = header } end
+    return section, header, txt
+end
+
 local ATLAS_TAB_NAMES = {
     "home", "farming", "combat", "quests", "planters", "toys", "rbc", "webhook", "config"
 }
@@ -1229,20 +1220,28 @@ local function setAtlasFieldViaUI(targetField)
 
     for _, root in ipairs(uiRoots) do
         if root then
-            local section, farmingHeader, headerTxt = getFarmingSectionAndDropdown(root)
+            local section, farmingHeader, headerTxt = getFarmingSectionAndDropdownCached(root)
+
+            if farmingHeader and headerTxt then
+                local cur = headerTxt:match("^[Ff]ield%s*:%s*(.+)")
+                if cur and (cur:gsub("[%s%-_']", "")):lower() == targetClean then
+                    return true, "ui_already_set"
+                end
+            end
+
             local isFarmingVisible = farmingHeader and isGuiVisibleOnScreen(farmingHeader)
 
             local prevTabName, prevTabBtn = nil, nil
             local switchedTab = false
 
             if not isFarmingVisible then
-                prevTabName, prevTabBtn = findActiveAtlasTab(root)
                 local farmingTabBtn = findAtlasTabButton(root, "farming")
                 if farmingTabBtn then
+                    prevTabName, prevTabBtn = findActiveAtlasTab(root)
                     clickElement(farmingTabBtn)
                     task.wait(0.1)
                     switchedTab = true
-                    section, farmingHeader, headerTxt = getFarmingSectionAndDropdown(root)
+                    section, farmingHeader, headerTxt = getFarmingSectionAndDropdownCached(root)
                 end
             end
 
@@ -1301,11 +1300,17 @@ local function setAtlasFieldViaUI(targetField)
 end
 
 local _lastAppliedField = nil
+local _lastFieldUISet = 0
 
 local function setAtlasField(field)
     if not field or field == "Idle" or field == "Unchanged" then return end
 
-    local okUI, methodUI = setAtlasFieldViaUI(field)
+    local shouldCallUI = (field ~= _lastAppliedField) or (tick() - _lastFieldUISet > 60)
+    if shouldCallUI then
+        _lastFieldUISet = tick()
+        _lastAppliedField = field
+        pcall(setAtlasFieldViaUI, field)
+    end
 
     local settings = findAtlasSettings()
     if settings then
@@ -1322,10 +1327,6 @@ local function setAtlasField(field)
             settings.farming.field1 = field
             settings.farming.field = field
         end
-        settings["farming.field1"] = field
-        settings["autofarm.field1"] = field
-        settings.Field = field
-        settings.field = field
     end
 
     if getgenv then
@@ -1352,11 +1353,6 @@ local function setAtlasField(field)
                 getgenv().Config.autofarm.field3 = field
             end
         end
-    end
-
-    if _lastAppliedField ~= field then
-        print(string.format("[Auto Prog] Switched farm field -> %s (%s)", field, okUI and methodUI or "ram_settings"))
-        _lastAppliedField = field
     end
 end
 
@@ -2321,7 +2317,7 @@ local function evaluateRoute(data, beeCount)
                 end
             end
 
-            if matchedMilestone then
+            if matchedMilestone and (not matchedMilestone.Bees or beeCount >= matchedMilestone.Bees) then
                 if matchedMilestone.Ingredients then
                     local firstUnfarmMat, firstUnfarmAmt = nil, 0
                     for _, ing in ipairs(matchedMilestone.Ingredients) do
@@ -2383,6 +2379,7 @@ hudGui.ResetOnSpawn = false
 hudGui.Parent = guiParent
 
 local hudLabel = Instance.new("TextLabel")
+hudLabel.Name = "AutoProg_HUD"
 hudLabel.AnchorPoint = Vector2.new(1, 1)
 hudLabel.Position = UDim2.new(1, -15, 1, -10)
 hudLabel.Size = UDim2.new(0, 600, 0, 20)
@@ -2550,9 +2547,10 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data,
 
     local ok, encoded = pcall(function() return HttpService:JSONEncode(payloadV2) end)
     if ok and encoded then
+        local v2Url = webhookUrl .. (webhookUrl:find("?", 1, true) and "&with_components=true" or "?with_components=true")
         local reqOk, res = pcall(function()
             return httpRequest({
-                Url = webhookUrl,
+                Url = v2Url,
                 Method = "POST",
                 Headers = { ["Content-Type"] = "application/json" },
                 Body = encoded
@@ -2644,10 +2642,16 @@ end
 if getgenv then getgenv().AutoProgDebug = printDebugInfo end
 _G.AutoProgDebug = printDebugInfo
 
+if getgenv then
+    getgenv()._AutoProgLoopToken = (getgenv()._AutoProgLoopToken or 0) + 1
+end
+local myLoopToken = getgenv and getgenv()._AutoProgLoopToken or 1
+
 task.spawn(function()
     local okD, errD = pcall(printDebugInfo)
     if not okD then warn("[Auto Prog] debug error: " .. tostring(errD)) end
     while true do
+        if getgenv and getgenv()._AutoProgLoopToken ~= myLoopToken then break end
         local okL, errL = pcall(function()
             local data = getStatData()
             local beeCount = getBeeCount(data)
