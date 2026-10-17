@@ -1105,13 +1105,51 @@ local function fireConnections(sig)
     if ok and type(conns) == "table" then
         for _, c in ipairs(conns) do
             if c.Fire then
-                c:Fire(); n = n + 1
+                local fok = pcall(function() c:Fire() end)
+                if fok then n = n + 1 end
             elseif c.Function then
-                pcall(c.Function); n = n + 1
+                local fok = pcall(c.Function)
+                if fok then n = n + 1 end
             end
         end
     end
     return n
+end
+
+local function getGuiText(gui)
+    if not gui then return "" end
+    if gui:IsA("TextLabel") or gui:IsA("TextButton") or gui:IsA("TextBox") then
+        local t = gui.Text
+        if type(t) == "string" and t ~= "" then return t end
+    end
+    local lbl = gui:FindFirstChildWhichIsA("TextLabel")
+    if lbl and type(lbl.Text) == "string" and lbl.Text ~= "" then
+        return lbl.Text
+    end
+    return tostring(gui.Name or "")
+end
+
+local function isGuiVisibleOnScreen(gui)
+    if not gui or not gui:IsA("GuiObject") then return false end
+    local cur = gui
+    while cur and cur:IsA("GuiObject") do
+        if not cur.Visible then return false end
+        cur = cur.Parent
+    end
+    return gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0
+end
+
+local function bringIntoView(gui)
+    if not gui or not gui:IsA("GuiObject") then return end
+    if not isGuiVisibleOnScreen(gui) then return end
+    local scroll = gui:FindFirstAncestorWhichIsA("ScrollingFrame")
+    if scroll and scroll.AbsoluteSize.Y > 0 then
+        pcall(function()
+            local relY = gui.AbsolutePosition.Y - scroll.AbsolutePosition.Y + scroll.CanvasPosition.Y
+            scroll.CanvasPosition = Vector2.new(0, math.max(0, relY - scroll.AbsoluteSize.Y / 2))
+            task.wait(0.04)
+        end)
+    end
 end
 
 local function clickElement(gui)
@@ -1125,13 +1163,21 @@ local function clickElement(gui)
     bringIntoView(clickable)
 
     if clickable:IsA("GuiButton") then
+        local fired = false
         if getconnections then
             for _, sigName in ipairs({ "MouseButton1Click", "Activated" }) do
                 local ok, cnt = pcall(function() return fireConnections(clickable[sigName]) end)
-                if ok and cnt and cnt > 0 then return true end
+                if ok and cnt and cnt > 0 then
+                    fired = true
+                end
             end
-        elseif firesignal then
-            if pcall(firesignal, clickable.MouseButton1Click) then return true end
+        end
+        if fired then return true end
+
+        if firesignal then
+            for _, sigName in ipairs({ "MouseButton1Click", "Activated" }) do
+                if pcall(firesignal, clickable[sigName]) then return true end
+            end
         end
     end
 
@@ -2090,7 +2136,7 @@ local function readAtlasFileRoute()
                 print(string.format("[Auto Prog] Preset Atlas dang dung: %s (qua %s)", presetPath, ptrPath))
             end
             if route then
-                if changed then print(string.format("[Auto Prog] Route @ %s (%d step)", tostring(rpath), n)) end
+                if changed then print(string.format("[Auto Prog] Route @ %s (%d step)", tostring(rpath), tonumber(n) or 0)) end
                 return route
             end
             if _warnedNoRoute ~= presetPath then
@@ -2135,7 +2181,7 @@ local function readAtlasFileRoute()
     _lastRouteFile = top.path
 
     if changed then
-        print(string.format("[Auto Prog] Config Atlas dang dung: %s (route @ %s, %d step)", top.path, tostring(top.routePath), top.routeN))
+        print(string.format("[Auto Prog] Config Atlas dang dung: %s (route @ %s, %d step)", tostring(top.path), tostring(top.routePath), tonumber(top.routeN) or 0))
         if ambiguous then
             warn("[Auto Prog] Nhieu config co route va khong phan biet duoc cai dang dung. Dat getgenv().AtlasConfigPath = \"duong/dan/file.json\" de chon tay.")
         end
@@ -2692,7 +2738,7 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data,
     _lastWebhookMat = neededMat
 
     local needIngredients = getAllTargetIngredients(targetStr, data, beeCount)
-    local noteText = isUnfarmable and string.format("\n⚠️ **Note:** Missing unfarmable item `%s` (cannot farm in fields).", tostring(needStr)) or ""
+    local noteText = isUnfarmable and string.format("\n⚠️ **Note:** Missing unfarmable item `%s` (cannot farm in fields).", tostring(needStr or targetStr or "Item")) or ""
 
     local bodyText = string.format(
         "**Bees :** %d\n" ..
@@ -2700,12 +2746,12 @@ local function sendDiscordWebhook(beeCount, targetStr, fieldStr, routeStr, data,
         "**Need:**\n%s\n" ..
         "**Field:** %s\n" ..
         "**Route:** %s",
-        beeCount,
-        targetStr,
-        noteText,
-        needIngredients,
-        fieldStr,
-        routeStr
+        tonumber(beeCount) or 0,
+        tostring(targetStr),
+        tostring(noteText),
+        tostring(needIngredients),
+        tostring(fieldStr),
+        tostring(routeStr)
     )
 
     local embedColor = isUnfarmable and 16744448 or 3447003
@@ -2804,12 +2850,12 @@ local function printDebugInfo()
     print("Config candidates with route:", #(_cfgState.candidates or {}), "| ambiguous:", tostring(_cfgState.ambiguous))
     for i, c in ipairs(_cfgState.candidates or {}) do
         if i > 5 then break end
-        print(string.format("  cand[%d] %s score=%.1f steps=%d", i, c.path, c.score, c.routeN))
+        print(string.format("  cand[%d] %s score=%.1f steps=%d", tonumber(i) or 0, tostring(c.path), tonumber(c.score) or 0, tonumber(c.routeN) or 0))
     end
     print("Route Source Items Count:", #activeRoute)
     for i = 1, math.min(#activeRoute, 15) do
         local m = activeRoute[i]
-        print(string.format("  route[%d] = %s (bees>=%s)", i, tostring(m.Name), tostring(m.Bees)))
+        print(string.format("  route[%d] = %s (bees>=%s)", tonumber(i) or 0, tostring(m.Name), tostring(m.Bees)))
     end
     if data then
         print("Equipped/Stats:")
@@ -2843,6 +2889,385 @@ local function printDebugInfo()
     print("========================================")
 end
 
+
+local STAGE1_CONFIG_RAW = [===[{"hive":{"beetypes":false,"bee":false,"mutas3":false,"stoprjgifted":false,"amount":50,"rjbeetypes":false,"feedtype":"Bitterberry","neonberry":false,"rjrarity":false},"misc":{"mobiletoggle":true,"console":false,"bqbuyconf":false,"followfieldblacklist":false,"anonymous":false,"follow":false,"rolldouble":false,"autorejoin2":false,"bqbuy":false,"bqdel2":false,"realpot":false,"farmmultiplefields":false,"dapperslots":5,"custompatterns":false,"bqdelconf":false},"combat":{"mondochicktime":15,"killmondochick":true,"crabmethod":"Walk","killkingbeetle":true,"killcrab":false,"babylove":false,"donatevials":false,"wlstingers":false,"killScorpion":false,"killtunnelbear":false,"craboil":false,"giftedvicious":false,"killWerewolf":false,"snail":false,"windymax":25,"viciousmin":1,"killMantis":false,"demonmask":false,"lootmondo":true,"killRhinoBeetle":false,"killSpider":false,"windymin":1,"killcommando":false,"viciousmax":6,"stingers":false,"starsaw":false,"killwindy":false,"commandomethod":"Walk","avoidmobs":true,"commandoshell":true,"killvicious":true,"killAphid":true,"commandohelp":false,"dmwhitelist":false,"mondopreptime":20,"mondoprep":false,"killLadybug":false,"wlstarsaw":false},"dispensers":{"coconut":false,"blueberry":false,"royaljelly":false,"treat":false,"strawberry":false,"robopass":false,"glue":true,"honey":false,"antpass":true},"autoquest":{"planters":false,"feedbees":true,"windshrine":true,"rileybee":false,"ragetokens":true,"gummybear":false,"buckobee":false,"treats":true,"enabled":true,"memorymatch":true,"onett":false,"beebear":false,"blackbear2":false,"pollen":true,"sciencebear":true,"puffshrooms":true,"oldtool":false,"goomethod":"Gumdrops","levelbees":true,"sharebeans":true,"pandabear":true,"bestwhitefield":"Sunflower Field","bestredfield":"Mushroom Field","toys":true,"claim2":{"Mother Bear":true,"Polar Bear":true,"Panda Bear":true,"Science Bear":true},"tools":true,"brownbear":false,"ants":true,"blackbear":false,"dapperbear":false,"dupedtokens":true,"mobs":true,"blooms":true,"rj":true,"honeybee":false,"allowedplanters":false,"craft":true,"goo":true,"xmas":false,"bestbluefield":"Blue Flower Field","stickbug":false,"motherbear":true,"spiritbear":false,"rjbl":false,"polarbear":true},"face":{"balloons":false,"blooms":false,"bubbles":false,"refresh":false,"shiftlock":false,"gballoons":false,"gbubbles":false,"fires":false,"sldirection":"South","center":false,"method":"Shift Lock"},"convert":{"standInPreciseAt":75,"convertHiveBalloon":true,"instantType":false,"convertHoneyAt":100,"coconutAt":85,"convertHoney":true,"resetWhenConverting":false,"convert6xBubbleBloat":false,"festivegift":false,"autoHoneyMask":false,"alwaysConvertBalloon":false,"timeToWait":15,"coconut":false,"waitBeforeConverting":false,"standInPrecise":true,"useEnzymesBalloon":false,"convertField":false,"convertHiveBalloonAt":5,"defaultMask":"Diamond Mask","instantToggle":false},"boosters":{"min":1,"wanted":1,"required":false,"enabled2":false,"allowed":false,"fieldsblacklist":false},"vars":{"walkspeedenabled":true,"movement":"Tween","cannon":false,"tweenspeed":6,"walkspeed":48,"jumpshortcuts":false,"walkspeed2":1.5,"walkdynamic":false},"sprouts":{"enabled":true,"plant":false,"plantday":false,"collect":true,"amount":false,"fieldsblacklist":false,"rarity3":false,"left":0,"plantnight":false},"stickbug":{"enabled":false,"loot":false,"totem":true,"maintain":false,"circle":true,"tickets":false,"spawn":false},"amulet":{"ant":false,"rbc3":false,"kb3":false,"rbc4":false,"ant4":false,"sb3":false,"kb2":false,"star3":false,"sb4":false,"sb":false,"snail4":false,"rbc":false,"sb2":false,"moon4":false,"kb4":false,"rbc2":false,"ant2":false,"snail":false,"ant3":false,"snail2":false,"star4":false,"kb":false,"snail3":false},"memorymatch":{"night":false,"basic":false,"mega":false,"extreme":false,"blacklist":false},"rbc":{"passcooldown":0,"rerollmin":10,"upgrades":false,"mask":false,"rerollquests":false,"redtool":"Dark Scythe","bluemask":"Diamond Mask","cogconvert":false,"cogupgrades":true,"rerollupgrades":false,"materialsenabled":false,"buypass":false,"whitemask":"Gummy Mask","trackmobs":false,"preset":"Blue","disableroundend":false,"maskround":5,"homepage":false,"stoproundend":false,"whitetool":"Gummyballer","highestcogmax":9,"maxround":15,"highestcog":false,"precise":false,"rerollbees":false,"bestwhitefield":"Sunflower Field","bestredfield":"Mushroom Field","bestbluefield":"Blue Flower Field","buydrives":{"Glitched":true,"Red":true,"Blue":true,"White":true},"rerollbeesmax":2,"tool":false,"goldcogmowers":true,"homepagemin":1,"precisemin":5,"enabled":false,"toolround":4,"upgradesenabled":false,"materials":false,"rerollupgmax":2,"goomethod":"Gumdrops","redmask":"Demon Mask","usedrives":{"Glitched":true,"Red":true,"Blue":true,"White":true},"bluetool":"Tide Popper"},"beesmas":[],"detected":[],"antilag":{"stations":true,"precise":true,"balloons":true,"flowers":false,"norender":false,"bssui":false,"dupedtokens":true,"tokens":true,"main":true,"textures":true,"bees":true,"decorations":true,"particles":true,"players":true},"toys":{"windshrine":false,"conversions":2,"stickerprinter":false,"stackselect":false,"enabled":true,"sproutsummoner":false,"meteor":false,"route":[{"Data":["38217","BeesBuzz123","BopMaster","Connoisseur","Crawlers","777","Nectar","Roof","Wax"],"Type":"Codes"},{"Bees":15,"Type":"Codes","Data":"ClubBean"},{"Bees":35,"Type":"Codes","Data":"ThreeBeeVee"},{"Data":["Dandelion Field","Bamboo Field","Pineapple Patch","Pine Tree Forest"],"Type":"Field"},{"Data":["Tabby","Festive","Gummy","Vicious","Puppy"],"Type":"Event Bee"},{"Type":"Purchase","Data":["Backpack","Magnet","Canister","Vacuum","Belt Pocket","Compressor","Super-Scooper","Helmet","Port-O-Hive","Electro-Magnet","Honey Dipper","Propeller Hat","Looker Guard","Brave Guard","Hiking Boots","Belt Bag","Bubble Wand","Basic Sprinkler","PlasticPlanter","Beekeeper's Mask","Beekeeper's Boots","Mondo Belt Bag","Blue Port-O-Hive","Silver Soakers","Elite Blue Guard","Elite Red Guard","CandyPlanter","Glider","Porcelain Dipper","Porcelain Port-O-Hive","Blue ClayPlanter","Red ClayPlanter","Bubble Mask","Cobalt Guard","Golden Gushers","TackyPlanter","Diamond Mask","Honeycomb Belt","Crimson Guard","Diamond Drenchers","Coconut Canister","PesticidePlanter","The Supreme Saturator","Gummy Boots","PetalPlanter"],"Craft":true}],"hiddenstickers":true,"discardselect":false,"stickerstacker":false,"intwhitelist":false,"wealthclock":false,"prog":true,"farmwinds":false,"shrineamount":1,"interrupt":true,"stackmethod":"Tickets","materials2":false,"printereggs":false,"discardstickers":false,"windsblacklist":false,"materials":false,"nectarcondenser":false,"honeystorm":false,"nectars":false,"progblender":true,"shrineitem":""},"ant":{"enabled":false,"antpass":false},"planters":{"manual":{"farmfield":false,"planter3":{"harvestatpercentage":true,"plant":false,"ignoresmoking":false,"lastfield":false,"field2":"None","field1":"Dandelion Field","harvest":false,"harvestat":100,"planter":"Plastic Planter","field4":"None","field3":"None","harvestaftertime":false,"timetoharvest":4},"planter2":{"harvestatpercentage":true,"plant":false,"ignoresmoking":false,"lastfield":false,"field2":"None","field1":"Dandelion Field","harvest":false,"harvestat":100,"planter":"Plastic Planter","field4":"None","field3":"None","harvestaftertime":false,"timetoharvest":4},"planter1":{"harvestatpercentage":true,"plant":false,"ignoresmoking":false,"lastfield":false,"field2":"None","field1":"Dandelion Field","harvest":false,"harvestat":100,"planter":"Plastic Planter","field4":"None","field3":"None","harvestaftertime":false,"timetoharvest":4}},"method":"Manual","cycles":{"cycle2":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"cycle4":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"cycle1":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"started":false,"lastcycle":false,"cycle3":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"cycle5":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2}},"rewards":{"enabled":false,"swirledwax":false,"causticwaxp":false,"smoothie":false,"causticwax":false,"swirledwaxp":false},"enabled":false,"nectar":{"satisfying":false,"ignoresmoking":false,"invigoratinglastfield":"","motivating":false,"motivatingp":2,"comfortingp":1,"invigorating":false,"comforting":false,"harvestat":100,"invigoratingmin2":16,"satisfyinglastfield":"","comfortinglastfield":"","harvestaftertime":true,"timetoharvest":2,"farmfield":false,"harvestatpercentage":false,"blacklistedfields":false,"ignorefielddeg":true,"satisfyingmin2":16,"preset":"Custom","motivatingmin2":16,"invigoratingp":5,"refreshing":false,"refreshinglastfield":"","satisfyingp":3,"refreshingmin2":16,"motivatinglastfield":"","refreshingp":4,"comfortingmin2":16,"allowedplanters":false}},"webhook":[],"autofarm":{"patternblacklist":false,"smileytime":4,"farmshowers":true,"badgebl":false,"farmfires":true,"farmbadges":false,"guidingfieldblacklist":false,"enabled":false,"autosprinkler":true,"farmcoconuts":true,"farmprecisemark":true,"farmblooms":true,"patternstart":"Center","scorchingscore":0,"farmfireflies":true,"badgep":"Lowest Pollen Needed","autopopstar":true,"badgesclaim":true,"farmprecise":true,"farmtriangulate":true,"autoscorchingstar":true,"farmdupedtokens":true,"pattern":"CornerXSnake","dupedtokens":false,"prioritytokens":false,"farmpetals":true,"farmfuzzbombs":true,"farmcombococonuts":true,"farmleaves":true,"farmbubbles":true,"autogummystar":true,"combofield":false,"ignorehoneytokens":false,"field3":"None","farmballoons2":false,"sprinklerpos":"Center","farmposition":false,"farmmarks":true,"farmpuppyball":true,"autoxflame":false,"field1":"Dandelion Field","field2":"None","farmmeteorshowers":true,"farmclouds":true,"fieldinterval":10,"trackprecise":false,"autoguidingstar":false,"comboamount":0,"farmposenabled":false,"patternenabled":false,"autodig":true,"precisemin":30},"puffshrooms":{"enabled":true,"rarity":"Common","max":15,"maintain":false,"highlvlpriority":false,"mintime":30,"blacklistedfields":false,"min":1,"priorityfields":false}}]===]
+
+local STAGE2_CONFIG_RAW = [===[{"hive":{"beetypes":false,"bee":false,"mutas3":false,"stoprjgifted":false,"amount":50,"rjbeetypes":false,"feedtype":"Bitterberry","neonberry":false,"rjrarity":false},"misc":{"mobiletoggle":true,"console":false,"bqbuyconf":false,"followfieldblacklist":false,"anonymous":false,"follow":false,"rolldouble":false,"autorejoin2":false,"bqbuy":false,"bqdel2":false,"realpot":false,"farmmultiplefields":false,"dapperslots":5,"custompatterns":false,"bqdelconf":false},"combat":{"mondochicktime":15,"killmondochick":true,"crabmethod":"Walk","killkingbeetle":true,"killcrab":false,"babylove":true,"donatevials":false,"wlstingers":false,"killScorpion":false,"killtunnelbear":true,"craboil":false,"giftedvicious":false,"killWerewolf":false,"snail":false,"windymax":25,"viciousmin":1,"killMantis":false,"demonmask":false,"lootmondo":true,"killRhinoBeetle":false,"killSpider":false,"windymin":1,"killcommando":false,"viciousmax":6,"stingers":false,"starsaw":false,"killwindy":false,"commandomethod":"Walk","avoidmobs":true,"commandoshell":true,"killvicious":true,"killAphid":true,"commandohelp":false,"dmwhitelist":false,"mondopreptime":20,"mondoprep":false,"killLadybug":false,"wlstarsaw":false},"dispensers":{"coconut":false,"blueberry":false,"royaljelly":false,"treat":false,"strawberry":false,"robopass":false,"glue":true,"honey":false,"antpass":true},"autoquest":{"planters":true,"feedbees":true,"windshrine":true,"rileybee":false,"ragetokens":true,"gummybear":false,"buckobee":false,"treats":true,"enabled":true,"memorymatch":true,"onett":true,"beebear":false,"blackbear2":false,"pollen":true,"sciencebear":true,"puffshrooms":true,"oldtool":false,"goomethod":"Gumdrops","levelbees":true,"sharebeans":true,"pandabear":true,"bestwhitefield":"Sunflower Field","bestredfield":"Mushroom Field","toys":true,"claim2":{"Mother Bear":true,"Polar Bear":true,"Panda Bear":true,"Science Bear":true},"tools":true,"brownbear":false,"ants":true,"blackbear":false,"dapperbear":false,"dupedtokens":true,"mobs":true,"blooms":true,"rj":true,"honeybee":false,"allowedplanters":{"Tacky Planter":true,"Candy Planter":true,"Blue Clay Planter":true,"Red Clay Planter":true,"Plastic Planter":true},"craft":true,"goo":true,"xmas":false,"bestbluefield":"Blue Flower Field","stickbug":false,"motherbear":true,"spiritbear":true,"rjbl":false,"polarbear":true},"face":{"balloons":false,"blooms":false,"bubbles":false,"refresh":false,"shiftlock":false,"gballoons":false,"gbubbles":false,"fires":false,"sldirection":"South","center":false,"method":"Shift Lock"},"convert":{"standInPreciseAt":75,"convertHiveBalloon":true,"instantType":false,"convertHoneyAt":100,"coconutAt":85,"convertHoney":true,"resetWhenConverting":false,"convert6xBubbleBloat":false,"festivegift":false,"autoHoneyMask":false,"alwaysConvertBalloon":false,"timeToWait":15,"coconut":false,"waitBeforeConverting":false,"standInPrecise":true,"useEnzymesBalloon":false,"convertField":false,"convertHiveBalloonAt":5,"defaultMask":"Diamond Mask","instantToggle":false},"boosters":{"min":1,"wanted":1,"required":false,"enabled2":false,"allowed":false,"fieldsblacklist":false},"vars":{"walkspeedenabled":true,"movement":"Tween","cannon":false,"tweenspeed":6,"walkspeed":48,"jumpshortcuts":false,"walkspeed2":1.5,"walkdynamic":false},"sprouts":{"enabled":true,"plant":false,"plantday":false,"collect":true,"amount":false,"fieldsblacklist":false,"rarity3":false,"left":0,"plantnight":false},"stickbug":{"enabled":false,"loot":false,"totem":true,"maintain":false,"circle":true,"tickets":false,"spawn":false},"amulet":{"ant":false,"rbc3":false,"kb3":"Bronze","rbc4":false,"ant4":false,"sb3":false,"kb2":false,"star3":false,"sb4":false,"sb":false,"snail4":false,"rbc":false,"sb2":false,"moon4":false,"kb4":{"P2":[],"P3":[],"P1":[]},"rbc2":false,"ant2":false,"snail":false,"ant3":false,"snail2":false,"star4":false,"kb":false,"snail3":false},"memorymatch":{"night":false,"basic":false,"mega":false,"extreme":false,"blacklist":false},"rbc":{"passcooldown":0,"rerollmin":10,"upgrades":false,"mask":false,"rerollquests":false,"redtool":"Dark Scythe","bluemask":"Diamond Mask","cogconvert":false,"cogupgrades":true,"rerollupgrades":false,"materialsenabled":false,"buypass":false,"whitemask":"Gummy Mask","trackmobs":false,"preset":"Blue","disableroundend":false,"maskround":5,"homepage":false,"stoproundend":false,"whitetool":"Gummyballer","highestcogmax":9,"maxround":15,"highestcog":false,"precise":false,"rerollbees":false,"bestwhitefield":"Sunflower Field","bestredfield":"Mushroom Field","bestbluefield":"Blue Flower Field","buydrives":{"Glitched":true,"Red":true,"Blue":true,"White":true},"rerollbeesmax":2,"tool":false,"goldcogmowers":true,"homepagemin":1,"precisemin":5,"enabled":false,"toolround":4,"upgradesenabled":false,"materials":false,"rerollupgmax":2,"goomethod":"Gumdrops","redmask":"Demon Mask","usedrives":{"Glitched":true,"Red":true,"Blue":true,"White":true},"bluetool":"Tide Popper"},"beesmas":[],"detected":[],"antilag":{"stations":true,"precise":true,"balloons":true,"flowers":false,"norender":false,"bssui":false,"dupedtokens":true,"tokens":true,"main":true,"textures":true,"bees":true,"decorations":true,"particles":true,"players":true},"toys":{"windshrine":false,"conversions":2,"stickerprinter":false,"stackselect":false,"enabled":true,"sproutsummoner":false,"meteor":false,"route":[{"Data":["38217","BeesBuzz123","BopMaster","Connoisseur","Crawlers","777","Nectar","Roof","Wax"],"Type":"Codes"},{"Bees":15,"Type":"Codes","Data":"ClubBean"},{"Bees":35,"Type":"Codes","Data":"ThreeBeeVee"},{"Data":["Dandelion Field","Bamboo Field","Pineapple Patch","Pine Tree Forest"],"Type":"Field"},{"Data":["Tabby","Festive","Gummy","Vicious","Puppy"],"Type":"Event Bee"},{"Type":"Purchase","Data":["Backpack","Magnet","Canister","Vacuum","Belt Pocket","Compressor","Super-Scooper","Helmet","Port-O-Hive","Electro-Magnet","Honey Dipper","Propeller Hat","Looker Guard","Brave Guard","Hiking Boots","Belt Bag","Bubble Wand","Basic Sprinkler","PlasticPlanter","Beekeeper's Mask","Beekeeper's Boots","Mondo Belt Bag","Blue Port-O-Hive","Silver Soakers","Elite Blue Guard","Elite Red Guard","CandyPlanter","Glider","Porcelain Dipper","Porcelain Port-O-Hive","Blue ClayPlanter","Red ClayPlanter","Bubble Mask","Cobalt Guard","Golden Gushers","TackyPlanter","Diamond Mask","Honeycomb Belt","Crimson Guard","Diamond Drenchers","Coconut Canister","PesticidePlanter","The Supreme Saturator","Gummy Boots","PetalPlanter"],"Craft":true}],"hiddenstickers":true,"discardselect":false,"stickerstacker":false,"intwhitelist":false,"wealthclock":false,"prog":true,"farmwinds":false,"shrineamount":1,"interrupt":true,"stackmethod":"Tickets","materials2":false,"printereggs":false,"discardstickers":false,"windsblacklist":false,"materials":false,"nectarcondenser":false,"honeystorm":false,"nectars":false,"progblender":true,"shrineitem":""},"ant":{"enabled":false,"antpass":false},"planters":{"manual":{"farmfield":false,"planter3":{"harvestatpercentage":true,"plant":false,"ignoresmoking":false,"lastfield":false,"field2":"None","field1":"Dandelion Field","harvest":false,"harvestat":100,"planter":"Plastic Planter","field4":"None","field3":"None","harvestaftertime":false,"timetoharvest":4},"planter2":{"harvestatpercentage":true,"plant":false,"ignoresmoking":false,"lastfield":false,"field2":"None","field1":"Dandelion Field","harvest":false,"harvestat":100,"planter":"Plastic Planter","field4":"None","field3":"None","harvestaftertime":false,"timetoharvest":4},"planter1":{"harvestatpercentage":true,"plant":false,"ignoresmoking":false,"lastfield":false,"field2":"None","field1":"Dandelion Field","harvest":false,"harvestat":100,"planter":"Plastic Planter","field4":"None","field3":"None","harvestaftertime":false,"timetoharvest":4}},"method":"Nectar","cycles":{"cycle2":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"cycle4":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"cycle1":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"started":false,"lastcycle":false,"cycle3":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"cycle5":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2}},"rewards":{"enabled":true,"swirledwax":true,"causticwaxp":false,"smoothie":false,"causticwax":false,"swirledwaxp":{"Tacky Planter":true,"Candy Planter":true,"Blue Clay Planter":true,"Red Clay Planter":true,"Plastic Planter":true}},"enabled":true,"nectar":{"satisfying":true,"ignoresmoking":false,"invigoratinglastfield":"","motivating":true,"motivatingp":2,"comfortingp":1,"invigorating":false,"comforting":true,"harvestat":100,"invigoratingmin2":10,"satisfyinglastfield":"","comfortinglastfield":"","harvestaftertime":true,"timetoharvest":2,"farmfield":false,"harvestatpercentage":false,"blacklistedfields":false,"ignorefielddeg":true,"satisfyingmin2":18,"preset":"Custom","motivatingmin2":18,"invigoratingp":5,"refreshing":true,"refreshinglastfield":"","satisfyingp":3,"refreshingmin2":15,"motivatinglastfield":"","refreshingp":4,"comfortingmin2":18,"allowedplanters":{"Tacky Planter":true,"Candy Planter":true,"Blue Clay Planter":true,"Red Clay Planter":true,"Plastic Planter":true}}},"webhook":[],"autofarm":{"patternblacklist":false,"smileytime":4,"farmshowers":true,"badgebl":false,"farmfires":true,"farmbadges":false,"guidingfieldblacklist":false,"enabled":false,"autosprinkler":true,"farmcoconuts":true,"farmprecisemark":true,"farmblooms":true,"patternstart":"Center","scorchingscore":0,"farmfireflies":true,"badgep":"Lowest Pollen Needed","autopopstar":true,"badgesclaim":true,"farmprecise":true,"farmtriangulate":true,"autoscorchingstar":true,"farmdupedtokens":true,"pattern":"CornerXSnake","dupedtokens":false,"prioritytokens":false,"farmpetals":true,"farmfuzzbombs":true,"farmcombococonuts":true,"farmleaves":true,"farmbubbles":true,"autogummystar":true,"combofield":false,"ignorehoneytokens":false,"field3":"None","farmballoons2":false,"sprinklerpos":"Center","farmposition":false,"farmmarks":true,"farmpuppyball":true,"autoxflame":false,"field1":"Dandelion Field","field2":"None","farmmeteorshowers":true,"farmclouds":true,"fieldinterval":10,"trackprecise":false,"autoguidingstar":false,"comboamount":0,"farmposenabled":false,"patternenabled":false,"autodig":true,"precisemin":30},"puffshrooms":{"enabled":true,"rarity":"Common","max":15,"maintain":false,"highlvlpriority":false,"mintime":30,"blacklistedfields":false,"min":1,"priorityfields":false}}]===]
+
+local STAGE3_CONFIG_RAW = [===[{"hive":{"beetypes":false,"bee":false,"mutas3":false,"stoprjgifted":false,"amount":50,"rjbeetypes":false,"feedtype":"Bitterberry","neonberry":false,"rjrarity":false},"misc":{"mobiletoggle":true,"console":false,"bqbuyconf":false,"followfieldblacklist":false,"anonymous":false,"follow":false,"rolldouble":false,"autorejoin2":false,"bqbuy":false,"bqdel2":false,"realpot":false,"farmmultiplefields":false,"dapperslots":5,"custompatterns":false,"bqdelconf":false},"combat":{"mondochicktime":15,"killmondochick":true,"crabmethod":"Tween","killkingbeetle":true,"killcrab":true,"babylove":true,"donatevials":false,"wlstingers":false,"killScorpion":false,"killtunnelbear":true,"craboil":false,"giftedvicious":false,"killWerewolf":false,"snail":false,"windymax":25,"viciousmin":1,"killMantis":false,"demonmask":false,"lootmondo":true,"killRhinoBeetle":false,"killSpider":false,"windymin":1,"killcommando":false,"viciousmax":6,"stingers":false,"starsaw":false,"killwindy":false,"commandomethod":"Walk","avoidmobs":true,"commandoshell":true,"killvicious":true,"killAphid":true,"commandohelp":false,"dmwhitelist":false,"mondopreptime":20,"mondoprep":false,"killLadybug":false,"wlstarsaw":false},"dispensers":{"coconut":false,"blueberry":false,"royaljelly":false,"treat":false,"strawberry":false,"robopass":false,"glue":true,"honey":false,"antpass":true},"autoquest":{"planters":true,"feedbees":true,"windshrine":true,"rileybee":false,"ragetokens":true,"gummybear":false,"buckobee":false,"treats":true,"enabled":true,"memorymatch":true,"onett":true,"beebear":false,"blackbear2":false,"pollen":true,"sciencebear":true,"puffshrooms":true,"oldtool":false,"goomethod":"Gumdrops","levelbees":true,"sharebeans":true,"pandabear":true,"bestwhitefield":"Sunflower Field","bestredfield":"Mushroom Field","toys":true,"claim2":{"Mother Bear":true,"Polar Bear":true,"Panda Bear":true,"Science Bear":true},"tools":true,"brownbear":false,"ants":true,"blackbear":false,"dapperbear":false,"dupedtokens":true,"mobs":true,"blooms":true,"rj":true,"honeybee":false,"allowedplanters":{"Tacky Planter":true,"Candy Planter":true,"Blue Clay Planter":true,"Red Clay Planter":true,"Plastic Planter":true},"craft":true,"goo":true,"xmas":false,"bestbluefield":"Blue Flower Field","stickbug":false,"motherbear":true,"spiritbear":true,"rjbl":false,"polarbear":true},"face":{"balloons":false,"blooms":false,"bubbles":false,"refresh":false,"shiftlock":false,"gballoons":false,"gbubbles":false,"fires":false,"sldirection":"South","center":false,"method":"Shift Lock"},"convert":{"standInPreciseAt":75,"convertHiveBalloon":true,"instantType":false,"convertHoneyAt":100,"coconutAt":85,"convertHoney":true,"resetWhenConverting":false,"convert6xBubbleBloat":false,"festivegift":false,"autoHoneyMask":false,"alwaysConvertBalloon":false,"timeToWait":15,"coconut":false,"waitBeforeConverting":false,"standInPrecise":true,"useEnzymesBalloon":false,"convertField":false,"convertHiveBalloonAt":5,"defaultMask":"Diamond Mask","instantToggle":false},"boosters":{"min":1,"wanted":1,"required":false,"enabled2":false,"allowed":false,"fieldsblacklist":false},"vars":{"walkspeedenabled":true,"movement":"Tween","cannon":false,"tweenspeed":6,"walkspeed":48,"jumpshortcuts":false,"walkspeed2":1.5,"walkdynamic":false},"sprouts":{"enabled":true,"plant":false,"plantday":false,"collect":true,"amount":false,"fieldsblacklist":false,"rarity3":false,"left":0,"plantnight":false},"stickbug":{"enabled":false,"loot":false,"totem":true,"maintain":false,"circle":true,"tickets":false,"spawn":false},"amulet":{"ant":false,"rbc3":false,"kb3":"Bronze","rbc4":false,"ant4":false,"sb3":false,"kb2":false,"star3":false,"sb4":false,"sb":false,"snail4":false,"rbc":false,"sb2":false,"moon4":false,"kb4":{"P2":[],"P3":[],"P1":[]},"rbc2":false,"ant2":false,"snail":false,"ant3":false,"snail2":false,"star4":false,"kb":false,"snail3":false},"memorymatch":{"night":false,"basic":false,"mega":false,"extreme":false,"blacklist":false},"rbc":{"passcooldown":0,"rerollmin":10,"upgrades":false,"mask":false,"rerollquests":false,"redtool":"Dark Scythe","bluemask":"Diamond Mask","cogconvert":false,"cogupgrades":true,"rerollupgrades":false,"materialsenabled":false,"buypass":false,"whitemask":"Gummy Mask","trackmobs":false,"preset":"Blue","disableroundend":false,"maskround":5,"homepage":false,"stoproundend":false,"whitetool":"Gummyballer","highestcogmax":9,"maxround":15,"highestcog":false,"precise":false,"rerollbees":false,"bestwhitefield":"Sunflower Field","bestredfield":"Mushroom Field","bestbluefield":"Blue Flower Field","buydrives":{"Glitched":true,"Red":true,"Blue":true,"White":true},"rerollbeesmax":2,"tool":false,"goldcogmowers":true,"homepagemin":1,"precisemin":5,"enabled":false,"toolround":4,"upgradesenabled":false,"materials":false,"rerollupgmax":2,"goomethod":"Gumdrops","redmask":"Demon Mask","usedrives":{"Glitched":true,"Red":true,"Blue":true,"White":true},"bluetool":"Tide Popper"},"beesmas":[],"detected":[],"antilag":{"stations":true,"precise":true,"balloons":true,"flowers":false,"norender":false,"bssui":false,"dupedtokens":true,"tokens":true,"main":true,"textures":true,"bees":true,"decorations":true,"particles":true,"players":true},"toys":{"windshrine":false,"conversions":2,"stickerprinter":false,"stackselect":false,"enabled":true,"sproutsummoner":false,"meteor":false,"route":[{"Data":["38217","BeesBuzz123","BopMaster","Connoisseur","Crawlers","777","Nectar","Roof","Wax"],"Type":"Codes"},{"Bees":15,"Type":"Codes","Data":"ClubBean"},{"Bees":35,"Type":"Codes","Data":"ThreeBeeVee"},{"Data":["Dandelion Field","Bamboo Field","Pineapple Patch","Pine Tree Forest"],"Type":"Field"},{"Data":["Tabby","Festive","Gummy","Vicious","Puppy"],"Type":"Event Bee"},{"Type":"Purchase","Data":["Backpack","Magnet","Canister","Vacuum","Belt Pocket","Compressor","Super-Scooper","Helmet","Port-O-Hive","Electro-Magnet","Honey Dipper","Propeller Hat","Looker Guard","Brave Guard","Hiking Boots","Belt Bag","Bubble Wand","Basic Sprinkler","PlasticPlanter","Beekeeper's Mask","Beekeeper's Boots","Mondo Belt Bag","Blue Port-O-Hive","Silver Soakers","Elite Blue Guard","Elite Red Guard","CandyPlanter","Glider","Porcelain Dipper","Porcelain Port-O-Hive","Blue ClayPlanter","Red ClayPlanter","Bubble Mask","Cobalt Guard","Golden Gushers","TackyPlanter","Diamond Mask","Honeycomb Belt","Crimson Guard","Diamond Drenchers","Coconut Canister","PesticidePlanter","The Supreme Saturator","Gummy Boots","PetalPlanter"],"Craft":true}],"hiddenstickers":true,"discardselect":false,"stickerstacker":false,"intwhitelist":false,"wealthclock":false,"prog":true,"farmwinds":false,"shrineamount":1,"interrupt":true,"stackmethod":"Tickets","materials2":false,"printereggs":false,"discardstickers":false,"windsblacklist":false,"materials":false,"nectarcondenser":false,"honeystorm":false,"nectars":false,"progblender":true,"shrineitem":""},"ant":{"enabled":false,"antpass":false},"planters":{"manual":{"farmfield":false,"planter3":{"harvestatpercentage":true,"plant":false,"ignoresmoking":false,"lastfield":false,"field2":"None","field1":"Dandelion Field","harvest":false,"harvestat":100,"planter":"Plastic Planter","field4":"None","field3":"None","harvestaftertime":false,"timetoharvest":4},"planter2":{"harvestatpercentage":true,"plant":false,"ignoresmoking":false,"lastfield":false,"field2":"None","field1":"Dandelion Field","harvest":false,"harvestat":100,"planter":"Plastic Planter","field4":"None","field3":"None","harvestaftertime":false,"timetoharvest":4},"planter1":{"harvestatpercentage":true,"plant":false,"ignoresmoking":false,"lastfield":false,"field2":"None","field1":"Dandelion Field","harvest":false,"harvestat":100,"planter":"Plastic Planter","field4":"None","field3":"None","harvestaftertime":false,"timetoharvest":4}},"method":"Nectar","cycles":{"cycle2":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"cycle4":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"cycle1":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"started":false,"lastcycle":false,"cycle3":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2},"cycle5":{"planter2":{"planter":"None","field":"Dandelion Field"},"planter1":{"planter":"None","field":"Dandelion Field"},"harvestat":100,"ignoresmoking":false,"harvestatpercentage":true,"planter3":{"planter":"None","field":"Dandelion Field"},"harvestaftertime":false,"timetoharvest":2}},"rewards":{"enabled":true,"swirledwax":true,"causticwaxp":false,"smoothie":false,"causticwax":false,"swirledwaxp":{"Tacky Planter":true,"Candy Planter":true,"Blue Clay Planter":true,"Red Clay Planter":true,"Plastic Planter":true}},"enabled":true,"nectar":{"satisfying":true,"ignoresmoking":false,"invigoratinglastfield":"","motivating":true,"motivatingp":2,"comfortingp":1,"invigorating":false,"comforting":true,"harvestat":100,"invigoratingmin2":10,"satisfyinglastfield":"","comfortinglastfield":"","harvestaftertime":true,"timetoharvest":2,"farmfield":false,"harvestatpercentage":false,"blacklistedfields":false,"ignorefielddeg":true,"satisfyingmin2":18,"preset":"Custom","motivatingmin2":18,"invigoratingp":5,"refreshing":true,"refreshinglastfield":"","satisfyingp":3,"refreshingmin2":15,"motivatinglastfield":"","refreshingp":4,"comfortingmin2":18,"allowedplanters":{"Tacky Planter":true,"Candy Planter":true,"Blue Clay Planter":true,"Red Clay Planter":true,"Plastic Planter":true}}},"webhook":[],"autofarm":{"patternblacklist":false,"smileytime":4,"farmshowers":true,"badgebl":false,"farmfires":true,"farmbadges":false,"guidingfieldblacklist":false,"enabled":false,"autosprinkler":true,"farmcoconuts":true,"farmprecisemark":true,"farmblooms":true,"patternstart":"Center","scorchingscore":0,"farmfireflies":true,"badgep":"Lowest Pollen Needed","autopopstar":true,"badgesclaim":true,"farmprecise":true,"farmtriangulate":true,"autoscorchingstar":true,"farmdupedtokens":true,"pattern":"CornerXSnake","dupedtokens":false,"prioritytokens":false,"farmpetals":true,"farmfuzzbombs":true,"farmcombococonuts":true,"farmleaves":true,"farmbubbles":true,"autogummystar":true,"combofield":false,"ignorehoneytokens":false,"field3":"None","farmballoons2":false,"sprinklerpos":"Center","farmposition":false,"farmmarks":true,"farmpuppyball":true,"autoxflame":false,"field1":"Dandelion Field","field2":"None","farmmeteorshowers":true,"farmclouds":true,"fieldinterval":10,"trackprecise":false,"autoguidingstar":false,"comboamount":0,"farmposenabled":false,"patternenabled":false,"autodig":true,"precisemin":30},"puffshrooms":{"enabled":true,"rarity":"Common","max":15,"maintain":false,"highlvlpriority":false,"mintime":30,"blacklistedfields":false,"min":1,"priorityfields":false}}]===]
+
+local AUTO_CONFIG_STAGES = {
+    {
+        Stage = 1,
+        Name = "Stage 1 (King Beetle)",
+        FileName = "Stage1_KingBeetle.json",
+        Raw = STAGE1_CONFIG_RAW,
+        MinBees = 20,
+        MinLevel = 7,
+    },
+    {
+        Stage = 2,
+        Name = "Stage 2 (Tunnel Bear)",
+        FileName = "Stage2_TunnelBear.json",
+        Raw = STAGE2_CONFIG_RAW,
+        MinBees = 28,
+        MinLevel = 9,
+    },
+    {
+        Stage = 3,
+        Name = "Stage 3 (Coconut Crab)",
+        FileName = "Stage3_CoconutCrab.json",
+        Raw = STAGE3_CONFIG_RAW,
+        MinBees = 35,
+        MinLevel = 10,
+    }
+}
+
+local _currentActiveStage = nil
+local _lastStageSwitchTime = 0
+local _stageCandidateIndex = nil
+local _stageCandidateTime = 0
+
+local function getHiveStats(data)
+    local beeCount = 0
+    local minLevel = 25
+    local foundAny = false
+
+    if data and type(data.Honeycomb) == "table" then
+        for col = 1, 5 do
+            local colTable = data.Honeycomb["x" .. col]
+            if type(colTable) == "table" then
+                for row = 1, 10 do
+                    local bee = colTable["y" .. row]
+                    if type(bee) == "table" and bee.Type and bee.Type ~= "" and bee.Type ~= "Empty" then
+                        beeCount = beeCount + 1
+                        local lvl = tonumber(bee.Lvl) or 1
+                        if lvl < minLevel then minLevel = lvl end
+                        foundAny = true
+                    end
+                end
+            end
+        end
+    end
+
+    if not foundAny or beeCount == 0 then
+        local honeycombs = workspace:FindFirstChild("Honeycombs")
+        local hVal = player:FindFirstChild("Honeycomb") and player.Honeycomb.Value
+        local hive = (typeof(hVal) == "Instance" and hVal) or (honeycombs and honeycombs:FindFirstChild(tostring(hVal)))
+        if not hive and honeycombs then
+            for _, h in ipairs(honeycombs:GetChildren()) do
+                local o = h:FindFirstChild("Owner")
+                if o and (o.Value == player or o.Value == player.Name or tostring(o.Value) == player.Name or (player.Character and o.Value == player.Character)) then
+                    hive = h
+                    break
+                end
+            end
+        end
+        if hive and hive:FindFirstChild("Cells") then
+            local pCount = 0
+            local pMin = 25
+            local pFound = false
+            for _, cell in ipairs(hive.Cells:GetChildren()) do
+                local ct = cell:FindFirstChild("CellType") or cell:FindFirstChild("Type")
+                if ct and ct.Value ~= "" and ct.Value ~= "Empty" then
+                    pCount = pCount + 1
+                    local lVal = cell:FindFirstChild("CellLevel") or cell:FindFirstChild("Level") or cell:FindFirstChild("Lvl")
+                    local lvl = lVal and tonumber(lVal.Value) or 1
+                    if lvl < pMin then pMin = lvl end
+                    pFound = true
+                end
+            end
+            if pFound and pCount > 0 then
+                beeCount = pCount
+                minLevel = pMin
+                foundAny = true
+            end
+        end
+    end
+
+    if not foundAny then
+        minLevel = 1
+        beeCount = getBeeCount(data)
+    end
+
+    return beeCount, minLevel
+end
+
+local function evaluateStage(beeCount, minLevel)
+    for i = #AUTO_CONFIG_STAGES, 1, -1 do
+        local s = AUTO_CONFIG_STAGES[i]
+        if beeCount >= s.MinBees and minLevel >= s.MinLevel then
+            return s.Stage, s
+        end
+    end
+    return nil, nil
+end
+
+local function ensureStageConfigsExist()
+    if not writefile then return end
+    local roots = discoverAtlasRoots()
+    local targetDir = roots[1] or "atlas"
+    if makefolder and not fsIsFolder(targetDir) then
+        pcall(makefolder, targetDir)
+    end
+    for _, s in ipairs(AUTO_CONFIG_STAGES) do
+        local path = targetDir .. "/" .. s.FileName
+        if not fsIsFile(path) then
+            pcall(writefile, path, s.Raw)
+        end
+        if not fsIsFile(s.FileName) then
+            pcall(writefile, s.FileName, s.Raw)
+        end
+    end
+end
+
+local function applyAtlasPreset(stageInfo)
+    if not stageInfo then return false end
+    local fileName = stageInfo.FileName
+    local raw = stageInfo.Raw
+
+    if writefile then
+        local roots = discoverAtlasRoots()
+        for _, r in ipairs(roots) do
+            pcall(writefile, r .. "/" .. fileName, raw)
+        end
+        pcall(writefile, fileName, raw)
+        pcall(writefile, "atlas/" .. fileName, raw)
+
+        local activePresets = {}
+        local seenPresets = {}
+        local function addPreset(fn)
+            if not fn or fn == "" then return end
+            fn = fn:gsub('^"', ''):gsub('"$', ''):gsub("^%s+", ""):gsub("%s+$", "")
+            if not fn:lower():match("%.json$") then fn = fn .. ".json" end
+            if not seenPresets[fn] then
+                seenPresets[fn] = true
+                table.insert(activePresets, fn)
+            end
+        end
+
+        if _cfgState and _cfgState.path and type(_cfgState.path) == "string" then
+            local pName = _cfgState.path:match("([^/\\]+%.json)$")
+            if pName then addPreset(pName) end
+        end
+
+        local ptrFiles = findPointerFiles()
+        for _, pf in ipairs(ptrFiles) do
+            if fsIsFile(pf) and readfile then
+                local ok, content = pcall(readfile, pf)
+                if ok and content and #content > 0 then
+                    addPreset(content)
+                end
+            end
+        end
+
+        local userPtr = {
+            "atlas-" .. player.Name .. ".json",
+            "atlas-" .. tostring(player.UserId) .. ".json"
+        }
+        for _, pf in ipairs(userPtr) do
+            if fsIsFile(pf) and readfile then
+                local ok, content = pcall(readfile, pf)
+                if ok and content and #content > 0 then
+                    addPreset(content)
+                end
+            end
+        end
+
+        for _, pName in ipairs(activePresets) do
+            for _, r in ipairs(roots) do
+                pcall(writefile, r .. "/" .. pName, raw)
+            end
+            pcall(writefile, pName, raw)
+            pcall(writefile, "atlas/" .. pName, raw)
+        end
+
+        for _, pf in ipairs(ptrFiles) do
+            pcall(writefile, pf, '"' .. fileName .. '"')
+        end
+        for _, pf in ipairs(userPtr) do
+            pcall(writefile, pf, '"' .. fileName .. '"')
+        end
+    end
+
+    local decoded = decodeConfig(raw)
+    if decoded then
+        local function deepMerge(dst, src)
+            if type(dst) ~= "table" or type(src) ~= "table" then return end
+            for k, v in pairs(src) do
+                if type(v) == "table" and type(dst[k]) == "table" then
+                    deepMerge(dst[k], v)
+                else
+                    dst[k] = v
+                end
+            end
+        end
+
+        local cur = findAtlasSettings()
+        if cur then deepMerge(cur, decoded) end
+        if getgenv then
+            if getgenv().Atlas and type(getgenv().Atlas) == "table" and getgenv().Atlas.Settings then
+                deepMerge(getgenv().Atlas.Settings, decoded)
+            end
+            if getgenv().Config and type(getgenv().Config) == "table" then
+                deepMerge(getgenv().Config, decoded)
+            end
+        end
+    end
+
+    if getgenv and getgenv().Atlas and type(getgenv().Atlas.LoadConfig) == "function" then
+        pcall(getgenv().Atlas.LoadConfig, fileName)
+    end
+
+    local uiRoots = {}
+    pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
+    pcall(function() table.insert(uiRoots, CoreGui) end)
+    pcall(function() table.insert(uiRoots, player:FindFirstChild("PlayerGui")) end)
+
+    for _, root in ipairs(uiRoots) do
+        if root then
+            local prevTabName, prevTabBtn = findActiveAtlasTab(root)
+            local configBtn = findAtlasTabButton(root, "config")
+            if configBtn then
+                clickElement(configBtn)
+                task.wait(0.15)
+
+                local importBox = nil
+                local loadBtn = nil
+                local importBtn = nil
+
+                for _, d in ipairs(root:GetDescendants()) do
+                    if d:IsA("TextBox") and isGuiVisibleOnScreen(d) then
+                        local ph = tostring(d.PlaceholderText or ""):lower()
+                        local nm = tostring(d.Name or ""):lower()
+                        if ph:find("import") or ph:find("paste") or ph:find("json") or nm:find("import") then
+                            importBox = d
+                        end
+                    end
+                    if (d:IsA("TextButton") or d:IsA("ImageButton")) and isGuiVisibleOnScreen(d) and d ~= configBtn and d ~= prevTabBtn then
+                        local txt = getGuiText(d):gsub("<[^>]+>", ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+                        if txt == "load config" or txt == "load" then
+                            loadBtn = d
+                        elseif txt == "import config" or txt == "import" then
+                            importBtn = d
+                        end
+                    end
+                end
+
+                if importBox then
+                    pcall(function()
+                        importBox.Text = raw
+                        if importBox.FocusLost then importBox:FocusLost(true) end
+                    end)
+                    task.wait(0.05)
+                end
+
+                if importBtn then
+                    clickElement(importBtn)
+                    task.wait(0.1)
+                elseif loadBtn then
+                    clickElement(loadBtn)
+                    task.wait(0.1)
+                end
+
+                if prevTabBtn then
+                    task.wait(0.05)
+                    clickElement(prevTabBtn)
+                end
+                break
+            end
+        end
+    end
+
+    print(string.format("[Auto Config] Chuyen thanh cong sang %s (%s)", stageInfo.Name, fileName))
+    return true
+end
+
+local function sendStageWebhook(oldStage, newStageInfo, beeCount, minLvl)
+    local roots = compact({ getgenv and getgenv(), _G, shared }, 3)
+    local webhookUrl = nil
+    for _, r in ipairs(roots) do
+        if type(r) == "table" then
+            if r.DiscordWebhookUrl and type(r.DiscordWebhookUrl) == "string" and r.DiscordWebhookUrl ~= "" then
+                webhookUrl = r.DiscordWebhookUrl
+            elseif r.WebhookUrl and type(r.WebhookUrl) == "string" and r.WebhookUrl ~= "" then
+                webhookUrl = r.WebhookUrl
+            end
+        end
+    end
+    if not webhookUrl or webhookUrl == "" then return end
+
+    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if not httpRequest then return end
+
+    local payload = {
+        embeds = {
+            {
+                title = "🚀 Auto Change Config - Thăng cấp Giai đoạn!",
+                description = string.format(
+                    "**Giai đoạn mới:** %s\n**File Config:** `%s`\n**Số ong:** %d\n**Min Level:** %d",
+                    tostring(newStageInfo.Name), tostring(newStageInfo.FileName), tonumber(beeCount) or 0, tonumber(minLvl) or 0
+                ),
+                color = 65280,
+                footer = { text = string.format("Player: %s", player.Name) },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }
+        }
+    }
+    local ok, enc = pcall(function() return HttpService:JSONEncode(payload) end)
+    if ok and enc then
+        pcall(function()
+            httpRequest({
+                Url = webhookUrl,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = enc
+            })
+        end)
+    end
+end
+
+local function checkAutoConfigStage(data, beeCount, minLvl)
+    if getgenv and getgenv().AutoChangeConfigEnabled == false then return end
+
+    local targetStageIdx, targetStage = evaluateStage(beeCount, minLvl)
+    if not targetStageIdx then return end
+
+    if _currentActiveStage == nil then
+        _currentActiveStage = targetStageIdx
+        ensureStageConfigsExist()
+        applyAtlasPreset(targetStage)
+        return
+    end
+
+    if targetStageIdx ~= _currentActiveStage then
+        if _stageCandidateIndex ~= targetStageIdx then
+            _stageCandidateIndex = targetStageIdx
+            _stageCandidateTime = tick()
+            return
+        end
+
+        local debounceSec = (getgenv and tonumber(getgenv().AutoChangeConfigDebounce)) or 15
+        if tick() - _stageCandidateTime < debounceSec then
+            return
+        end
+
+        if tick() - _lastStageSwitchTime < 45 then
+            return
+        end
+
+        local oldStage = _currentActiveStage
+        _currentActiveStage = targetStageIdx
+        _lastStageSwitchTime = tick()
+        _stageCandidateIndex = nil
+
+        applyAtlasPreset(targetStage)
+        task.spawn(sendStageWebhook, oldStage, targetStage, beeCount, minLvl)
+    else
+        _stageCandidateIndex = nil
+    end
+end
+
 if getgenv then getgenv().AutoProgDebug = printDebugInfo end
 _G.AutoProgDebug = printDebugInfo
 
@@ -2858,7 +3283,7 @@ task.spawn(function()
         if getgenv and getgenv()._AutoProgLoopToken ~= myLoopToken then break end
         local okL, errL = pcall(function()
             local data = getStatData()
-            local beeCount = getBeeCount(data)
+            local beeCount, minBeeLvl = getHiveStats(data)
             local targetItem, neededMat, neededAmt, field, isUnfarmable = evaluateRoute(data, beeCount)
 
             local targetStr = targetItem or "None"
@@ -2871,7 +3296,11 @@ task.spawn(function()
             local fieldStr = field or "Unchanged"
 
             local routeStr = _routeFound and "Found" or "Not Found"
-            hudLabel.Text = string.format("[Auto Prog] Bees: %d | Target: %s | Need: %s | Field: %s | Route: %s", beeCount, targetStr, needStr, fieldStr, routeStr)
+            local curStageObj = _currentActiveStage and AUTO_CONFIG_STAGES[_currentActiveStage]
+            local stageStr = curStageObj and curStageObj.Name or "Auto Prog"
+            hudLabel.Text = string.format("[%s] Bees: %d | MinLv: %d | Target: %s | Need: %s | Field: %s", tostring(stageStr), tonumber(beeCount) or 0, tonumber(minBeeLvl) or 0, tostring(targetStr), tostring(needStr), tostring(fieldStr))
+
+            checkAutoConfigStage(data, beeCount, minBeeLvl)
 
             if field then
                 setAtlasField(field)
@@ -2886,3 +3315,4 @@ task.spawn(function()
         task.wait(10)
     end
 end)
+
