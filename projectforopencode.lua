@@ -68,6 +68,61 @@ local function cleanExecutorText(value, maxLen)
     return text
 end
 
+local function envTable()
+    if not getgenv then return nil end
+    local ok, env = pcall(getgenv)
+    if ok and type(env) == "table" then return env end
+    return nil
+end
+
+-- Some executors expose getgenv() as a proxy; read through both rawget and a
+-- normal index so a metatable-based environment is still detected.
+local function readMarker(env, key)
+    local ok, value = pcall(rawget, env, key)
+    if not ok then return nil end
+    if value ~= nil then return value end
+    ok, value = pcall(function() return env[key] end)
+    if not ok then return nil end
+    return value
+end
+
+local function hasMarker(env, keys)
+    if type(env) ~= "table" then return false end
+    for _, key in ipairs(keys) do
+        local value = readMarker(env, key)
+        if value ~= nil and value ~= false then return true end
+    end
+    return false
+end
+
+-- Arceus X keys differ per build ("Arceus", "ArceusX", "arceus_loader"...).
+-- Scan case-insensitively so a version bump cannot silently turn Arceus back
+-- into "Fluxus" (Arceus is a Fluxus fork and keeps its globals).
+local function hasArceusMarker(env)
+    if hasMarker(env, {
+        "Arceus", "ArceusX", "arceus", "arceusx", "is_arceus",
+        "ArceusXLoaded", "ArceusX_Version", "ArceusX_Loaded",
+    }) then
+        return true
+    end
+    if type(env) ~= "table" then return false end
+    local ok, keys = pcall(function()
+        local list = {}
+        for key in pairs(env) do
+            list[#list + 1] = key
+        end
+        return list
+    end)
+    if not ok or type(keys) ~= "table" then return false end
+    for _, key in ipairs(keys) do
+        if type(key) == "string" and key:lower():find("arceus", 1, true) then
+            local value = readMarker(env, key)
+            if value ~= nil and value ~= false then return true end
+        end
+    end
+    return false
+end
+
 local function detectExecutor()
     if EXECUTOR_NAME then
         return EXECUTOR_NAME, EXECUTOR_VERSION
@@ -75,44 +130,53 @@ local function detectExecutor()
 
     -- Cho phep override thu cong neu executor khong expose ten:
     -- getgenv().IvyisExecutorNameOverride = "Madium"
-    if getgenv then
-        local g = getgenv()
-        if type(g) == "table" then
-            local override = rawget(g, "IvyisExecutorNameOverride")
-            if type(override) == "string" and override ~= "" then
-                EXECUTOR_NAME = cleanExecutorText(override, 48)
-                EXECUTOR_VERSION = nil
-                return EXECUTOR_NAME, nil
-            end
+    local startEnv = envTable()
+    if startEnv then
+        local override = readMarker(startEnv, "IvyisExecutorNameOverride")
+        if type(override) == "string" and override ~= "" then
+            EXECUTOR_NAME = cleanExecutorText(override, 48)
+            EXECUTOR_VERSION = nil
+            return EXECUTOR_NAME, nil
         end
     end
 
     local name, version = nil, nil
 
-    -- Cheap globals first: khong goi function, khong yield.
-    if getgenv then
-        local g = getgenv()
-        if type(g) == "table" then
-            local direct = rawget(g, "ExecutorName") or rawget(g, "Executor") or rawget(g, "executor")
+    -- Cheap globals first: no function calls, no yields.
+    --
+    -- Order matters. Arceus X, Delta, Hydrogen, Codex... are Fluxus forks on
+    -- Android and keep Fluxus compatibility globals, so checking "fluxus" first
+    -- labelled every fork as Fluxus (e.g. Arceus X shown as "Fluxus").
+    -- Fork-specific markers are therefore checked before the base executor.
+    local env = envTable()
+    if env then
+        if hasMarker(env, { "MadiumSignal", "MadiumConnection" }) then
+            name = "Madium"
+        end
+        if not name and hasArceusMarker(env) then
+            name = "Arceus X"
+        end
+        if not name then
+            local direct = readMarker(env, "ExecutorName")
+                or readMarker(env, "Executor")
+                or readMarker(env, "executor")
             if type(direct) == "string" and direct ~= "" then
                 name = direct
             end
-            if not name and (rawget(g, "MadiumSignal") ~= nil or rawget(g, "MadiumConnection") ~= nil) then
-                name = "Madium"
-            end
-            if not name and rawget(g, "KRNL_LOADED") ~= nil then name = "Krnl" end
-            if not name and rawget(g, "syn") ~= nil then name = "Synapse X" end
-            if not name and (rawget(g, "Fluxus") ~= nil or rawget(g, "fluxus") ~= nil or rawget(g, "is_fluxus_closure") ~= nil) then name = "Fluxus" end
-            if not name and (rawget(g, "delta") ~= nil or rawget(g, "Delta") ~= nil) then name = "Delta" end
-            if not name and (rawget(g, "Arceus") ~= nil or rawget(g, "ArceusX") ~= nil) then name = "Arceus X" end
-            if not name and rawget(g, "Hydrogen") ~= nil then name = "Hydrogen" end
-            if not name and rawget(g, "Codex") ~= nil then name = "Codex" end
-            if not name and rawget(g, "Cryptic") ~= nil then name = "Cryptic" end
-            if not name and rawget(g, "Vega") ~= nil then name = "Vega" end
-            if not name and rawget(g, "Karma") ~= nil then name = "Karma" end
-            if not name and rawget(g, "wave") ~= nil then name = "Wave" end
-            if not name and rawget(g, "Solara") ~= nil then name = "Solara" end
         end
+        if not name and hasMarker(env, { "delta", "Delta", "DeltaX" }) then name = "Delta" end
+        if not name and hasMarker(env, { "hydrogen", "Hydrogen" }) then name = "Hydrogen" end
+        if not name and hasMarker(env, { "codex", "Codex" }) then name = "Codex" end
+        if not name and hasMarker(env, { "cryptic", "Cryptic" }) then name = "Cryptic" end
+        if not name and hasMarker(env, { "vega", "Vega", "VegaX" }) then name = "Vega X" end
+        if not name and hasMarker(env, { "karma", "Karma" }) then name = "Karma" end
+        if not name and hasMarker(env, { "wave", "Wave" }) then name = "Wave" end
+        if not name and hasMarker(env, { "solara", "Solara" }) then name = "Solara" end
+        if not name and hasMarker(env, { "xeno", "Xeno" }) then name = "Xeno" end
+        -- Base executors last: their globals are inherited by the forks above.
+        if not name and hasMarker(env, { "KRNL_LOADED" }) then name = "Krnl" end
+        if not name and hasMarker(env, { "syn", "Synapse" }) then name = "Synapse X" end
+        if not name and hasMarker(env, { "Fluxus", "fluxus", "is_fluxus_closure", "FLUXUS_LOADED" }) then name = "Fluxus" end
     end
     if not name and (type(MadiumSignal) ~= "nil" or type(MadiumConnection) ~= "nil") then
         name = "Madium"
@@ -7244,6 +7308,55 @@ SettingsTab:Button({
         if not bridge then return end
         bridge.disconnect()
         WindUI:Notify({ Title = "Discord", Content = "Disconnected", Duration = 3 })
+    end
+})
+
+SettingsTab:Section({ Title = "Executor" })
+
+local detectedExecutorName = tostring(select(1, detectExecutor()) or "Unknown")
+
+getgenv().IvyisExecutorLabel = SettingsTab:Paragraph({
+    Title = "Detected executor",
+    Desc = detectedExecutorName
+})
+
+-- Mobile forks often keep the base executor's globals (Arceus X is built on
+-- Fluxus), so detection can still be wrong on a new build. This field lets the
+-- player correct the name that appears in Discord /status without editing code.
+SettingsTab:Input({
+    Title = "Executor name override",
+    Value = tostring((getgenv and getgenv().IvyisExecutorNameOverride) or ""),
+    Placeholder = "Auto: " .. detectedExecutorName,
+    Callback = function(v)
+        local text = tostring(v or "")
+        text = text:gsub("^%s+", ""):gsub("%s+$", "")
+        if text == "" then
+            if getgenv then getgenv().IvyisExecutorNameOverride = nil end
+            EXECUTOR_NAME = nil
+            EXECUTOR_VERSION = nil
+            detectExecutor()
+        else
+            if getgenv then getgenv().IvyisExecutorNameOverride = text end
+            EXECUTOR_NAME = cleanExecutorText(text, 48)
+            EXECUTOR_VERSION = nil
+        end
+        if getgenv then
+            getgenv().IvyisExecutorName = EXECUTOR_NAME
+            getgenv().IvyisExecutorVersion = EXECUTOR_VERSION
+        end
+        local label = getgenv and getgenv().IvyisExecutorLabel
+        if label then
+            pcall(function() label:SetDesc(tostring(getExecutorLabel(true))) end)
+        end
+        local bridge = getgenv and getgenv().IvyisDiscordBridge
+        if bridge and bridge.sendState then
+            task.spawn(function() pcall(bridge.sendState) end)
+        end
+        WindUI:Notify({
+            Title = "Executor",
+            Content = "Name set to " .. tostring(EXECUTOR_NAME or "Unknown"),
+            Duration = 3,
+        })
     end
 })
 
