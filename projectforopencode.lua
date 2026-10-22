@@ -7259,9 +7259,16 @@ getgenv().IvyisDiscordStatusLabel = SettingsTab:Paragraph({
 
 getgenv().IvyisDiscordCodeInput = ""
 
+-- Show the current panel address even if getgenv still holds the old default
+-- from a previous execution (the bridge migrates it on start).
+local initialBridgeUrl = tostring((getgenv and getgenv().IvyisBridgeUrl) or "")
+if initialBridgeUrl == "" or initialBridgeUrl == "http://78.154.103.24:14873" then
+    initialBridgeUrl = "http://78.154.103.8:16573"
+end
+
 SettingsTab:Input({
     Title = "Bridge URL",
-    Value = (getgenv and getgenv().IvyisBridgeUrl) or "http://78.154.103.24:14873",
+    Value = initialBridgeUrl,
     Placeholder = "https://your-tunnel.trycloudflare.com",
     Callback = function(v)
         local bridge = getgenv().IvyisDiscordBridge
@@ -7800,7 +7807,14 @@ pcall(function()
 end)
 
 getgenv().IvyisDiscordBridge = (function()
-    local bridgeUrl = tostring((getgenv and getgenv().IvyisBridgeUrl) or "http://78.154.103.24:14873")
+    local DEFAULT_BRIDGE_URL = "http://78.154.103.8:16573"
+    -- Panel hosts rotate. Saved sessions keep the URL they were linked with, so
+    -- old defaults are rewritten on load instead of leaving the client pointed
+    -- at a host that no longer exists.
+    local LEGACY_BRIDGE_URLS = {
+        ["http://78.154.103.24:14873"] = true,
+    }
+    local bridgeUrl = tostring((getgenv and getgenv().IvyisBridgeUrl) or DEFAULT_BRIDGE_URL)
     local sessionToken = nil
     local linkedDiscordId = nil
     local statusSink = nil
@@ -7871,6 +7885,12 @@ getgenv().IvyisDiscordBridge = (function()
         return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
     end
 
+    local function normalizeBridgeUrl(value)
+        local url = trim(value):gsub("/+$", "")
+        if LEGACY_BRIDGE_URLS[url] then return DEFAULT_BRIDGE_URL end
+        return url
+    end
+
     local function sessionPath()
         local safe = tostring(player.Name or "player"):gsub("[^%w_%-]", "_")
         return "AutoFeedBSS/discord_session_" .. safe .. ".json"
@@ -7906,9 +7926,16 @@ getgenv().IvyisDiscordBridge = (function()
         if not ok or not content then return end
         local decodedOk, decoded = pcall(function() return HttpService:JSONDecode(content) end)
         if not decodedOk or type(decoded) ~= "table" then return end
-        if type(decoded.url) == "string" and decoded.url ~= "" then bridgeUrl = decoded.url end
+        local urlChanged = false
+        if type(decoded.url) == "string" and decoded.url ~= "" then
+            local rawUrl = trim(decoded.url):gsub("/+$", "")
+            local restored = normalizeBridgeUrl(rawUrl)
+            urlChanged = restored ~= rawUrl
+            bridgeUrl = restored
+        end
         if type(decoded.token) == "string" and decoded.token ~= "" then sessionToken = decoded.token end
         if decoded.discordId then linkedDiscordId = tostring(decoded.discordId) end
+        if urlChanged then saveSession() end
     end
 
     local function clearSession()
@@ -8612,7 +8639,7 @@ getgenv().IvyisDiscordBridge = (function()
     end
 
     local function setUrl(value)
-        bridgeUrl = trim(value):gsub("/+$", "")
+        bridgeUrl = normalizeBridgeUrl(value)
         if getgenv then pcall(function() getgenv().IvyisBridgeUrl = bridgeUrl end) end
         if sessionToken and sessionToken ~= "" then
             saveSession()
@@ -8627,7 +8654,7 @@ getgenv().IvyisDiscordBridge = (function()
             local g = getgenv()
             if type(g) == "table" then
                 if type(g.IvyisBridgeUrl) == "string" and g.IvyisBridgeUrl ~= "" then
-                    bridgeUrl = trim(g.IvyisBridgeUrl):gsub("/+$", "")
+                    bridgeUrl = normalizeBridgeUrl(g.IvyisBridgeUrl)
                 end
             end
         end
