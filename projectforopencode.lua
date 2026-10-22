@@ -7948,7 +7948,26 @@ getgenv().IvyisDiscordBridge = (function()
             opts.Body = encoded
         end
 
-        local ok, res = pcall(httpRequest, opts)
+        -- Executor request functions can hang forever on a half-open socket
+        -- (phone sleeps, Wi-Fi drops). Run the call in its own thread so one
+        -- stuck request cannot freeze the heartbeat/poll loops and make
+        -- /status report a false "offline".
+        local timeout = 20
+        if method == "GET" and path:find("/poll", 1, true) then
+            timeout = 30 -- the server long-polls for up to 25s
+        end
+        local finished = false
+        local ok, res = false, nil
+        task.spawn(function()
+            ok, res = pcall(httpRequest, opts)
+            finished = true
+        end)
+        local waited = 0
+        while not finished and waited < timeout do
+            task.wait(0.1)
+            waited = waited + 0.1
+        end
+        if not finished then return nil, "timeout" end
         if not ok then return nil, tostring(res) end
         local code = type(res) == "table" and (tonumber(res.StatusCode) or 0) or 0
         if code == 401 or code == 403 then return nil, "unauthorized", code end
@@ -8039,22 +8058,51 @@ getgenv().IvyisDiscordBridge = (function()
         }
     end
 
+    local stateFailures = 0
+    local unauthorizedHits = 0
+
     local function sendState()
         if not sessionToken or sessionToken == "" then return false end
-        local state = buildState()
-        local res, err = request("POST", "/api/v1/state", state, sessionToken)
-        if not res then
-            if err == "unauthorized" then
-                connectedOnce = false
-                clearSession()
-                setStatus("Discord session expired. Run /link again.")
+        -- A broken hive/stat reader used to throw here, the heartbeat swallowed
+        -- the error, and the bridge went "offline" forever while the game was
+        -- still running. Report it instead of failing silently.
+        local builtOk, state = pcall(buildState)
+        if not builtOk or type(state) ~= "table" then
+            stateFailures = stateFailures + 1
+            if stateFailures == 3 then
+                warn("[DiscordBridge] buildState failed: " .. tostring(state))
+                setStatus("State error: " .. tostring(state))
             end
             return false
         end
-        if not connectedOnce then
-            connectedOnce = true
+        local res, err = request("POST", "/api/v1/state", state, sessionToken)
+        if not res then
+            if err == "unauthorized" then
+                -- A single 401 can be a transient server hiccup (restart, busy
+                -- DB). Only wipe the saved session once it repeats.
+                unauthorizedHits = unauthorizedHits + 1
+                if unauthorizedHits >= 2 then
+                    connectedOnce = false
+                    clearSession()
+                    setStatus("Discord session expired. Run /link again.")
+                else
+                    setStatus("Session rejected, retrying...")
+                end
+                return false
+            end
+            stateFailures = stateFailures + 1
+            if stateFailures == 3 then
+                warn("[DiscordBridge] state failed: " .. tostring(err or "network"))
+                setStatus("Bridge unreachable: " .. tostring(err or "network"))
+            end
+            return false
+        end
+        if stateFailures > 0 or not connectedOnce then
             setStatus("Connected")
         end
+        stateFailures = 0
+        unauthorizedHits = 0
+        connectedOnce = true
         if type(res.rollFlags) == "table" then
             pcall(applyRollFlags, res.rollFlags, false)
         end
@@ -8445,8 +8493,10 @@ getgenv().IvyisDiscordBridge = (function()
         local res, err = request("GET", "/api/v1/poll?timeout=20", nil, sessionToken)
         if not res then
             if err == "unauthorized" then
-                clearSession()
-                setStatus("Discord session expired. Run /link again.")
+                -- Do not wipe the session from here: sendState() confirms a 401
+                -- twice before clearing, so a transient server error cannot
+                -- permanently unlink a healthy client.
+                setStatus("Session rejected, retrying...")
             end
             return
         end
@@ -8659,6 +8709,22 @@ pcall(function()
     if bridge then bridge.start() end
 end)
 pcall(function() Progression.setHudVisible(true) end)
+
+-- Push a fresh state as soon as the player comes back to the game, so /status
+-- leaves "Idle" immediately instead of waiting for the next heartbeat tick.
+if UserInputService then
+    local okFocus, focusConnection = pcall(function()
+        return UserInputService.WindowFocused:Connect(function()
+            local bridge = getgenv().IvyisDiscordBridge
+            if bridge and bridge.sendState then
+                task.spawn(function() pcall(bridge.sendState) end)
+            end
+        end)
+    end)
+    if okFocus and focusConnection then
+        table.insert(scriptConnections, focusConnection)
+    end
+end
 
 WindUI:Notify({ Title = "Ivyis's Tool", Content = "Ready", Duration = 3 })
 
