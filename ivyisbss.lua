@@ -410,7 +410,17 @@ local buyRJAmount = 10000
 --                  by itself while rolling that rarity.
 --   rev          = revision of the stored choice; echoed back in every state
 --                  post so the server can tell stale reads from fresh ones.
-local forcedRollFlags = { untilGifted = false, syncSettings = true, rev = 0 }
+--   stopOnMythic = select bee page only: hand the roll back as soon as a mythic
+--                  shows up so it is not rolled away by accident.
+--   keepMythics  = map of mythic bee ids that may stop that roll. Empty means
+--                  any mythic stops it; otherwise the others are rolled past.
+local forcedRollFlags = {
+    untilGifted = false,
+    syncSettings = true,
+    stopOnMythic = false,
+    keepMythics = {},
+    rev = 0,
+}
 local configNameInput = "MyHiveBuild"
 local importJsonInput = ""
 local selectedSavedConfig = "None"
@@ -5652,6 +5662,14 @@ end
 
 local originalRollSettings = nil
 
+-- Web ("select bee" page) roll state, shared with the batch loop further down.
+-- "Stop on mythic" keeps Bee Swarm's own Until mythic switch on while the roll
+-- runs, so the batch halts on the mythic instead of rolling straight past it.
+-- The switch is ours in that case, so the restore below always hands the
+-- player's own value back - even when "sync settings" is off.
+local webRollRunning = false
+local webMythicSwitchOwned = false
+
 captureRollSettings = function()
     if originalRollSettings then return end
     local data = getStatData()
@@ -5675,13 +5693,15 @@ restoreRollSettings = function()
     if not saved then return end
     -- With sync off the roll never touched Until mythic/legendary, so restoring
     -- those keys would only overwrite a change the player made in the meantime.
+    -- A web "stop on mythic" roll is the exception: that switch was ours.
     local sync = forcedRollFlags.syncSettings ~= false
     local giftedKey = giftedRollKey()
     for key, value in pairs(saved) do
-        if key == giftedKey or sync then
+        if key == giftedKey or sync or (webMythicSwitchOwned and key == "RollToMythic") then
             pcall(setGameSetting, key, value)
         end
     end
+    webMythicSwitchOwned = false
     -- A finished roll puts the player's own switches back, but the web's
     -- "Until gifted" must survive that restore.
     if forcedRollFlags.untilGifted then
@@ -7714,6 +7734,17 @@ task.spawn(function()
                         setGameSetting("RollToMythic", wantMythic)
                         setGameSetting("RollToLegendary", wantLegendary)
                     end
+                    -- Select bee page "stop on mythic": the game's own switch has
+                    -- to stay on for that whole roll, otherwise the next batch
+                    -- rolls past the mythic before the bridge can look at the
+                    -- slot. It must hold even with sync settings off - the player
+                    -- asked for it from the web - and the restore hands their own
+                    -- value back afterwards.
+                    if webRollRunning and forcedRollFlags.stopOnMythic == true then
+                        wantMythic = true
+                        webMythicSwitchOwned = true
+                        setGameSetting("RollToMythic", true)
+                    end
                     -- The gifted switch is per-bee, so it follows the target even
                     -- when "sync settings" is off (sync only governs the rarity
                     -- switches: Until mythic / Until legendary).
@@ -7881,6 +7912,19 @@ getgenv().IvyisDiscordBridge = (function()
         local wasGifted = forcedRollFlags.untilGifted == true
         forcedRollFlags.untilGifted = flags.untilGifted == true
         forcedRollFlags.syncSettings = flags.syncSettings ~= false
+        forcedRollFlags.stopOnMythic = flags.stopOnMythic == true
+        -- The keep list is a list of mythic bee ids; anything else the web (or a
+        -- hand edited payload) sends is dropped here so the roll loop can trust
+        -- the map without checking rarities again.
+        forcedRollFlags.keepMythics = {}
+        if type(flags.keepMythics) == "table" then
+            for _, value in ipairs(flags.keepMythics) do
+                local item = beeMapById and beeMapById[tostring(value or "")]
+                if item and item.rarity == "Mythic" then
+                    forcedRollFlags.keepMythics[item.id] = true
+                end
+            end
+        end
         forcedRollFlags.rev = tonumber(flags.rev) or 0
 
         -- The sync switch is the same setting as the script's own "Copy roll
@@ -7891,10 +7935,17 @@ getgenv().IvyisDiscordBridge = (function()
         end)
         rollFlagsSynced = true
 
+        local keepIds = {}
+        for id in pairs(forcedRollFlags.keepMythics) do
+            table.insert(keepIds, id)
+        end
+        table.sort(keepIds)
         local signature = string.format(
-            "%s|%s",
+            "%s|%s|%s|%s",
             tostring(forcedRollFlags.untilGifted),
-            tostring(forcedRollFlags.syncSettings)
+            tostring(forcedRollFlags.syncSettings),
+            tostring(forcedRollFlags.stopOnMythic),
+            table.concat(keepIds, ",")
         )
         if not force and signature == lastRollFlagsSignature then
             return forcedRollFlags
@@ -8206,6 +8257,7 @@ getgenv().IvyisDiscordBridge = (function()
         local job = remoteRollJob
         if not job or not job.active then return end
         job.active = false
+        webRollRunning = false
         job.reason = tostring(reason or "finished")
         job.detail = detail and tostring(detail) or ""
         job.finishedAt = os.time()
@@ -8380,6 +8432,7 @@ getgenv().IvyisDiscordBridge = (function()
         if feedRunning then pcall(stopAutoFeed, true) end
         pcall(pauseAtlas, true)
         rollRunning = true
+        webRollRunning = true
         if rollToggle then
             pcall(function() rollToggle:Set(true) end)
         end
@@ -8401,6 +8454,14 @@ getgenv().IvyisDiscordBridge = (function()
             slots = eligibleCount,
             slot = wantedSlot,
         }
+    end
+
+    -- Mythic bees are the only ones the web "stop on mythic" toggle watches, and
+    -- Bee Swarm reports them by id, so one lookup is enough.
+    local function mythicBeeName(beeType)
+        local bee = beeMapById and beeMapById[tostring(beeType or "")]
+        if bee and bee.rarity == "Mythic" then return bee end
+        return nil
     end
 
     local function checkRemoteRoll()
@@ -8446,6 +8507,50 @@ getgenv().IvyisDiscordBridge = (function()
         if targetSlot then
             finishRemoteRoll("target_gifted", string.format("%s in %s", job.targetName, targetSlot))
             return
+        end
+
+        -- Select bee page "stop on mythic". The batch loop holds the game's Until
+        -- mythic switch on, so the mythic stays in the slot long enough to be
+        -- seen here. No keep list means any mythic stops the roll; with a list,
+        -- only those bees do and the other mythics are rolled past.
+        if forcedRollFlags.stopOnMythic == true then
+            local keep = forcedRollFlags.keepMythics
+            local keepAny = not (type(keep) == "table" and next(keep) ~= nil)
+            local mythicBee = nil
+            local mythicSlot = nil
+            if job.slot then
+                local col, row = tostring(job.slot):match("^C(%d+),(%d+)$")
+                col = tonumber(col)
+                row = tonumber(row)
+                local cell = col and row and grid[row] and grid[row][col]
+                local bee = cell and cell.beeType and cell.beeType ~= "Empty"
+                    and mythicBeeName(cell.beeType) or nil
+                if bee and (keepAny or keep[cell.beeType]) then
+                    mythicBee = bee
+                    mythicSlot = job.slot
+                end
+            else
+                for r = 1, 10 do
+                    for c = 1, 5 do
+                        local cell = grid[r] and grid[r][c]
+                        local bee = cell and cell.beeType and cell.beeType ~= "Empty"
+                            and mythicBeeName(cell.beeType) or nil
+                        if bee and (keepAny or keep[cell.beeType]) then
+                            mythicBee = bee
+                            mythicSlot = string.format("C%d,%d", c, r)
+                            break
+                        end
+                    end
+                    if mythicBee then break end
+                end
+            end
+            if mythicBee then
+                finishRemoteRoll(
+                    "mythic_found",
+                    string.format("%s in %s", mythicBee.name, tostring(mythicSlot))
+                )
+                return
+            end
         end
 
         if not job.ignoreNewGifted then
@@ -8660,6 +8765,7 @@ getgenv().IvyisDiscordBridge = (function()
         local job = remoteRollJob
         if job and job.active then
             job.active = false
+            webRollRunning = false
             job.reason = "script_reloaded"
             job.detail = "cleanup"
             job.finishedAt = os.time()
