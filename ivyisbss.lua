@@ -20,6 +20,224 @@ end
 
 local player = Players.LocalPlayer
 
+-- ===== Executor detection (safe, lazy) =====
+-- Mot so executor implement getexecutorname()/identifyexecutor() kieu yield.
+-- Vi vay probe duoc chay trong thread rieng + timeout, khong block script.
+local EXECUTOR_NAME = nil
+local EXECUTOR_VERSION = nil
+local EXECUTOR_PLATFORM = nil
+
+local function getPlatformLabel()
+    if EXECUTOR_PLATFORM then return EXECUTOR_PLATFORM end
+    local platform = "Unknown"
+    if UserInputService then
+        pcall(function()
+            local rawPlatform = tostring(UserInputService:GetPlatform() or "")
+            if rawPlatform:find("Android", 1, true) then
+                platform = "Android"
+            elseif rawPlatform:find("IOS", 1, true) or rawPlatform:find("iOS", 1, true) then
+                platform = "iOS"
+            elseif rawPlatform:find("Windows", 1, true) then
+                platform = "Windows"
+            elseif rawPlatform:find("OSX", 1, true) or rawPlatform:find("Mac", 1, true) then
+                platform = "macOS"
+            elseif rawPlatform:find("ChromeOS", 1, true) then
+                platform = "ChromeOS"
+            end
+        end)
+        if platform == "Unknown" and UserInputService.TouchEnabled then
+            platform = "Mobile"
+        end
+    end
+    EXECUTOR_PLATFORM = platform
+    if getgenv then
+        pcall(function()
+            getgenv().IvyisExecutorPlatform = platform
+        end)
+    end
+    return platform
+end
+
+local function cleanExecutorText(value, maxLen)
+    local text = tostring(value or "")
+    text = text:gsub("[\r\n\t]", " "):gsub("%s+", " ")
+    text = text:gsub("^%s+", ""):gsub("%s+$", "")
+    if maxLen and #text > maxLen then
+        text = text:sub(1, maxLen)
+    end
+    return text
+end
+
+local function envTable()
+    if not getgenv then return nil end
+    local ok, env = pcall(getgenv)
+    if ok and type(env) == "table" then return env end
+    return nil
+end
+
+-- Some executors expose getgenv() as a proxy; read through both rawget and a
+-- normal index so a metatable-based environment is still detected.
+local function readMarker(env, key)
+    local ok, value = pcall(rawget, env, key)
+    if not ok then return nil end
+    if value ~= nil then return value end
+    ok, value = pcall(function() return env[key] end)
+    if not ok then return nil end
+    return value
+end
+
+local function hasMarker(env, keys)
+    if type(env) ~= "table" then return false end
+    for _, key in ipairs(keys) do
+        local value = readMarker(env, key)
+        if value ~= nil and value ~= false then return true end
+    end
+    return false
+end
+
+-- Arceus X keys differ per build ("Arceus", "ArceusX", "arceus_loader"...).
+-- Scan case-insensitively so a version bump cannot silently turn Arceus back
+-- into "Fluxus" (Arceus is a Fluxus fork and keeps its globals).
+local function hasArceusMarker(env)
+    if hasMarker(env, {
+        "Arceus", "ArceusX", "arceus", "arceusx", "is_arceus",
+        "ArceusXLoaded", "ArceusX_Version", "ArceusX_Loaded",
+    }) then
+        return true
+    end
+    if type(env) ~= "table" then return false end
+    local ok, keys = pcall(function()
+        local list = {}
+        for key in pairs(env) do
+            list[#list + 1] = key
+        end
+        return list
+    end)
+    if not ok or type(keys) ~= "table" then return false end
+    for _, key in ipairs(keys) do
+        if type(key) == "string" and key:lower():find("arceus", 1, true) then
+            local value = readMarker(env, key)
+            if value ~= nil and value ~= false then return true end
+        end
+    end
+    return false
+end
+
+local function detectExecutor()
+    if EXECUTOR_NAME then
+        return EXECUTOR_NAME, EXECUTOR_VERSION
+    end
+
+    -- Cho phep override thu cong neu executor khong expose ten:
+    -- getgenv().IvyisExecutorNameOverride = "Madium"
+    local startEnv = envTable()
+    if startEnv then
+        local override = readMarker(startEnv, "IvyisExecutorNameOverride")
+        if type(override) == "string" and override ~= "" then
+            EXECUTOR_NAME = cleanExecutorText(override, 48)
+            EXECUTOR_VERSION = nil
+            return EXECUTOR_NAME, nil
+        end
+    end
+
+    local name, version = nil, nil
+
+    -- Cheap globals first: no function calls, no yields.
+    --
+    -- Order matters. Arceus X, Delta, Hydrogen, Codex... are Fluxus forks on
+    -- Android and keep Fluxus compatibility globals, so checking "fluxus" first
+    -- labelled every fork as Fluxus (e.g. Arceus X shown as "Fluxus").
+    -- Fork-specific markers are therefore checked before the base executor.
+    local env = envTable()
+    if env then
+        if hasMarker(env, { "MadiumSignal", "MadiumConnection" }) then
+            name = "Madium"
+        end
+        if not name and hasArceusMarker(env) then
+            name = "Arceus X"
+        end
+        if not name then
+            local direct = readMarker(env, "ExecutorName")
+                or readMarker(env, "Executor")
+                or readMarker(env, "executor")
+            if type(direct) == "string" and direct ~= "" then
+                name = direct
+            end
+        end
+        if not name and hasMarker(env, { "delta", "Delta", "DeltaX" }) then name = "Delta" end
+        if not name and hasMarker(env, { "hydrogen", "Hydrogen" }) then name = "Hydrogen" end
+        if not name and hasMarker(env, { "codex", "Codex" }) then name = "Codex" end
+        if not name and hasMarker(env, { "cryptic", "Cryptic" }) then name = "Cryptic" end
+        if not name and hasMarker(env, { "vega", "Vega", "VegaX" }) then name = "Vega X" end
+        if not name and hasMarker(env, { "karma", "Karma" }) then name = "Karma" end
+        if not name and hasMarker(env, { "wave", "Wave" }) then name = "Wave" end
+        if not name and hasMarker(env, { "solara", "Solara" }) then name = "Solara" end
+        if not name and hasMarker(env, { "xeno", "Xeno" }) then name = "Xeno" end
+        -- Base executors last: their globals are inherited by the forks above.
+        if not name and hasMarker(env, { "KRNL_LOADED" }) then name = "Krnl" end
+        if not name and hasMarker(env, { "syn", "Synapse" }) then name = "Synapse X" end
+        if not name and hasMarker(env, { "Fluxus", "fluxus", "is_fluxus_closure", "FLUXUS_LOADED" }) then name = "Fluxus" end
+    end
+    if not name and (type(MadiumSignal) ~= "nil" or type(MadiumConnection) ~= "nil") then
+        name = "Madium"
+    end
+
+    -- Fallback chuan UNC. Chay async de executor nao yield cung khong treo webhook.
+    local function probe(fn)
+        if type(fn) ~= "function" then return end
+        local done = false
+        task.spawn(function()
+            local ok, a, b = pcall(fn)
+            if ok and type(a) == "string" and a ~= "" and a:lower() ~= "unknown" then
+                name = a
+                if type(b) == "string" or type(b) == "number" then
+                    version = tostring(b)
+                end
+            end
+            done = true
+        end)
+        local waited = 0
+        while not done and waited < 0.75 do
+            task.wait(0.05)
+            waited = waited + 0.05
+        end
+    end
+
+    if not name and type(identifyexecutor) == "function" then
+        pcall(probe, identifyexecutor)
+    end
+    if not name and type(getexecutorname) == "function" then
+        pcall(probe, getexecutorname)
+    end
+
+    EXECUTOR_NAME = cleanExecutorText(name or "Unknown", 48)
+    if EXECUTOR_NAME == "" then EXECUTOR_NAME = "Unknown" end
+    EXECUTOR_VERSION = version and cleanExecutorText(version, 24) or nil
+    if EXECUTOR_VERSION == "" then EXECUTOR_VERSION = nil end
+    EXECUTOR_PLATFORM = getPlatformLabel()
+
+    if getgenv then
+        pcall(function()
+            getgenv().IvyisExecutorName = EXECUTOR_NAME
+            getgenv().IvyisExecutorVersion = EXECUTOR_VERSION
+            getgenv().IvyisExecutorPlatform = EXECUTOR_PLATFORM
+        end)
+    end
+    return EXECUTOR_NAME, EXECUTOR_VERSION
+end
+
+local function getExecutorLabel(includeVersion)
+    local name, version = detectExecutor()
+    if includeVersion and version and version ~= "" then
+        return string.format("%s (%s)", name, version)
+    end
+    return name
+end
+
+local function getWebhookTitle()
+    return "Webhook From Ivyis's Tool - " .. getExecutorLabel(false)
+end
+
 if getgenv and getgenv()._AutoFeedCleanup then
     pcall(getgenv()._AutoFeedCleanup)
     getgenv()._AutoFeedCleanup = nil
@@ -32,10 +250,26 @@ local function trackConn(c)
     return c
 end
 
+-- Only remove GUIs that belong to this script. A ScreenGui named "WindUI" is
+-- shared by other scripts too, so check the window title before deleting it.
+local function isOurWindUI(child)
+    if not child or child.Name ~= "WindUI" then return false end
+    local ok, ours = pcall(function()
+        for _, d in ipairs(child:GetDescendants()) do
+            if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text == "Ivyis's Tool" then
+                return true
+            end
+        end
+        return false
+    end)
+    return ok and ours
+end
+
 local function destroyOldGuis(parent)
     if not parent then return end
     for _, child in ipairs(parent:GetChildren()) do
-        if child.Name:find("AutoFeed") or child.Name:find("AutoTreat") or child.Name:find("WindUI") or child.Name:find("AutoProg") then
+        local name = tostring(child.Name or "")
+        if name:find("AutoFeed") or name:find("AutoTreat") or name:find("AutoProg") or isOurWindUI(child) then
             pcall(function() child:Destroy() end)
         end
     end
@@ -119,9 +353,12 @@ local autoPauseAtlas = true
 local activeTween = nil
 local feedToggle = nil
 local rollToggle = nil
+local autoSyncToggle = nil
 local pauseAtlas
 local stopAutoFeed
 local stopAutoRoll
+local restoreRollSettings
+local captureRollSettings
 
 function stopAutoFeed(keepAtlas)
     feedRunning = false
@@ -149,6 +386,10 @@ function stopAutoRoll(keepAtlas)
     if rollToggle then
         pcall(function() rollToggle:Set(false) end)
     end
+    -- Put the game's own roll settings back where they were before auto-roll.
+    if restoreRollSettings then
+        pcall(restoreRollSettings)
+    end
 end
 local HIVE_CONFIGS_DIR = "AutoFeedBSS/HiveConfigs"
 local currentBuildMode = "Composition"
@@ -163,6 +404,13 @@ local autoSyncSettings = true
 local autoBuyRJ = true
 local minRJThreshold = 1000
 local buyRJAmount = 10000
+-- The two "roll until" controls from the web pages (/selectbee and /buildhive):
+--   untilGifted  = Bee Swarm's "Until gifted" must stay on for this account.
+--   syncSettings = the script may turn on "Until mythic" / "Until legendary"
+--                  by itself while rolling that rarity.
+--   rev          = revision of the stored choice; echoed back in every state
+--                  post so the server can tell stale reads from fresh ones.
+local forcedRollFlags = { untilGifted = false, syncSettings = true, rev = 0 }
 local configNameInput = "MyHiveBuild"
 local importJsonInput = ""
 local selectedSavedConfig = "None"
@@ -288,34 +536,39 @@ local function getCumulativeBond(lvl)
 end
 
 
-local ICON_B64 = "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"
-local iconAsset = nil
-local function loadIcon()
-    if iconAsset then return iconAsset end
-    local filename = "ivyis_bg.png"
-    if getcustomasset and isfile and isfile(filename) then
-        local ok, asset = pcall(getcustomasset, filename)
-        if ok and asset then
-            iconAsset = asset
-            return asset
+local B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64_LOOKUP = {}
+for i = 1, #B64_ALPHABET do B64_LOOKUP[B64_ALPHABET:byte(i)] = i - 1 end
+
+local function decodeBase64(text)
+    if crypt and crypt.base64decode then
+        local ok, res = pcall(crypt.base64decode, text)
+        if ok and res then return res end
+    end
+    if base64_decode then
+        local ok, res = pcall(base64_decode, text)
+        if ok and res then return res end
+    end
+    local synCrypt = syn and syn.crypt and syn.crypt.base64 and syn.crypt.base64.decode
+    if synCrypt then
+        local ok, res = pcall(synCrypt, text)
+        if ok and res then return res end
+    end
+    local out, buffer, bits = {}, 0, 0
+    for i = 1, #text do
+        local v = B64_LOOKUP[text:byte(i)]
+        if v then
+            buffer = buffer * 64 + v
+            bits = bits + 6
+            if bits >= 8 then
+                bits = bits - 8
+                local divisor = 2 ^ bits
+                out[#out + 1] = string.char(math.floor(buffer / divisor) % 256)
+                buffer = buffer % divisor
+            end
         end
     end
-    filename = "ivyis_icon.png"
-    if isfile and writefile and (not isfile(filename)) then
-        if crypt and crypt.base64decode then
-            pcall(function() writefile(filename, crypt.base64decode(ICON_B64)) end)
-        elseif base64_decode then
-            pcall(function() writefile(filename, base64_decode(ICON_B64)) end)
-        end
-    end
-    if getcustomasset and isfile and isfile(filename) then
-        local ok, asset = pcall(getcustomasset, filename)
-        if ok and asset then
-            iconAsset = asset
-            return asset
-        end
-    end
-    return "rbxassetid://4503856569"
+    return table.concat(out)
 end
 
 local ROUTE_ICON_B64 = {
@@ -391,35 +644,7 @@ local ROUTE_ICON_B64 = {
     vacuum = "iVBORw0KGgoAAAANSUhEUgAAADgAAAA4CAMAAACfWMssAAAAkFBMVEVrZ2NcUDofIyaRk54hIydnZ2odKC1SRTldVVFEOi+WmVMUHydlIR5hYBpRRDpRU1ubpi3Q1UV8fYQ0PERJPDH///85O0Q7PUcAAP8Uamw8Qkmqqqo9QEmhoV25xCz//380Qys/RU97hip/goiqVVWAfYWMjpn//wDCyDEAAABkVUYXIy1TUleJi5NVTUlUV2HSl79BAAAAMHRSTlP1+Bb8WBHrnaJh/5kWDF9d///u/5ABYIsBE/8DXgT/Av+x//8D/74B/wD9/P3++/6xQms4AAACKklEQVR42p3WiXKjMAwGYMsYcxdyN7132z1wjHj/t1sZOzRDsrFB05mm0/nyG1kGWLuw2P1/x4/L4DPRZYl8wLMhT6PfcbubD+OIql6QWEcdVTwXPlJi1627egk0ck4ir6oqpoq6aB3vXp9f39s/M68xSmftY5Y8JGmSMIIstZWFwAqUKewMVLa2IZAjKa00wY7RlyD9EQZdSkddPSdm86BNtHAXCoGZRMtQPUzOyb1EFo1QqSoMaspQZjd+KVCgNYOyrcKXSonUG40ACsu2DF7q0Bu3UuAzunoJk0BIVwgW0hzQj0qCZlWY5jgIiOYaAyG72v8wmA27qMx9Qzk43f87ECfwKxSCheoMywC4tRNH7vM7kXth2SYjXDuIgVCDNofDQHc6yoDmVJQIgANktIsa0EycH8YEEbSDwwAoCLnLxS2M12gSlb4xODe7ykWWZcl2gP8bnCtIvdsjsh+HvUgNFHR3pfC0fb8PY3omaqq+7zUzo3qoXwQV9yYeWa9tYc8Y600h3c1fPHCvz85QtL/JstQDDz2OzoSNn+vpE30ChUaW5znT32G2as8ACCnZarXKL1c6dEr44ElC07zBZvNkXG7TUaPwDDk/kYQG5IlKbnKX3m8CoBEnV/DW/G2eKFyGwbHgZ9PA8FXcsx0TSOLDrto3OZyLQp6uq2iP/tNBWMgrGPQIcNEXUARDt62FlLd743tfHY51URTzX3T5cdkbssUL4eLE2/UPbtnJbqND0+4AAAAASUVORK5CYII=",
 }
 
-local B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-local B64_LOOKUP = {}
-for i = 1, #B64_ALPHABET do B64_LOOKUP[B64_ALPHABET:byte(i)] = i - 1 end
-
-local function decodeBase64(text)
-    if crypt and crypt.base64decode then
-        local ok, res = pcall(crypt.base64decode, text)
-        if ok and res then return res end
-    end
-    if base64_decode then
-        local ok, res = pcall(base64_decode, text)
-        if ok and res then return res end
-    end
-    local out, buffer, bits = {}, 0, 0
-    for i = 1, #text do
-        local v = B64_LOOKUP[text:byte(i)]
-        if v then
-            buffer = buffer * 64 + v
-            bits = bits + 6
-            if bits >= 8 then
-                bits = bits - 8
-                local divisor = 2 ^ bits
-                out[#out + 1] = string.char(math.floor(buffer / divisor) % 256)
-                buffer = buffer % divisor
-            end
-        end
-    end
-    return table.concat(out)
-end
+-- decodeBase64 defined above
 
 local ICON_DIR = "AutoFeedBSS/icons"
 local routeIconCache = {}
@@ -454,9 +679,14 @@ local Progression = (function()
     local autoHuntViciousEnabled = true
     local showProgressionHud = false
     local progTargetLabel = nil
-    local routeMapGui = nil
-    local routeMapFrame = nil
-    local routeList = nil
+    local gearListRoot = nil
+    local gearListGrid = nil
+    local gearProgressLabel = nil
+    local gearProgressText = nil
+    local gearProgressFill = nil
+    local gearHideOwned = false
+    local gearListMounted = false
+    local openGearListFn = nil
     local routePills = {}
 
 -- bo nil ra khoi list (ipairs dung lai o nil dau tien)
@@ -469,16 +699,24 @@ local function dropNils(t, n)
     return out
 end
 
+-- Cong thuc Blender (cap nhat theo game 2026). Thu tu item quyet dinh field uu tien
+-- khi thieu: dat nguyen lieu farm duoc len truoc de findMissingMaterial chon dung field.
 local RECIPES = {
-    ["Blue Extract"] = { { Item = "Blueberry", Amount = 50 } },
-    ["Red Extract"] = { { Item = "Strawberry", Amount = 50 } },
-    ["Oil"] = { { Item = "Sunflower Seed", Amount = 50 } },
-    ["Enzymes"] = { { Item = "Pineapple", Amount = 50 } },
+    ["Blue Extract"] = { { Item = "Blueberry", Amount = 50 }, { Item = "Royal Jelly", Amount = 10 } },
+    ["Red Extract"] = { { Item = "Strawberry", Amount = 50 }, { Item = "Royal Jelly", Amount = 10 } },
+    ["Oil"] = { { Item = "Sunflower Seed", Amount = 50 }, { Item = "Royal Jelly", Amount = 10 } },
+    ["Enzymes"] = { { Item = "Pineapple", Amount = 50 }, { Item = "Royal Jelly", Amount = 10 } },
     ["Gumdrop"] = { { Item = "Strawberry", Amount = 3 }, { Item = "Blueberry", Amount = 3 }, { Item = "Pineapple", Amount = 3 } },
     ["Gumdrops"] = { { Item = "Strawberry", Amount = 3 }, { Item = "Blueberry", Amount = 3 }, { Item = "Pineapple", Amount = 3 } },
-    ["Glue"] = { { Item = "Gumdrop", Amount = 50 } },
-    ["Tropical Drink"] = { { Item = "Enzymes", Amount = 2 }, { Item = "Oil", Amount = 2 }, { Item = "Coconut", Amount = 10 } },
-    ["Tropical Drinks"] = { { Item = "Enzymes", Amount = 2 }, { Item = "Oil", Amount = 2 }, { Item = "Coconut", Amount = 10 } }
+    ["Glue"] = { { Item = "Gumdrop", Amount = 50 }, { Item = "Royal Jelly", Amount = 10 } },
+    ["Tropical Drink"] = { { Item = "Coconut", Amount = 10 }, { Item = "Enzymes", Amount = 2 }, { Item = "Oil", Amount = 2 } },
+    ["Tropical Drinks"] = { { Item = "Coconut", Amount = 10 }, { Item = "Enzymes", Amount = 2 }, { Item = "Oil", Amount = 2 } },
+    ["Soft Wax"] = { { Item = "Oil", Amount = 1 }, { Item = "Enzymes", Amount = 1 }, { Item = "Honeysuckle", Amount = 5 }, { Item = "Royal Jelly", Amount = 10 } },
+    ["Hard Wax"] = { { Item = "Soft Wax", Amount = 3 }, { Item = "Enzymes", Amount = 3 }, { Item = "Bitterberry", Amount = 33 }, { Item = "Royal Jelly", Amount = 33 } },
+    ["Purple Potion"] = { { Item = "Red Extract", Amount = 3 }, { Item = "Blue Extract", Amount = 3 }, { Item = "Glue", Amount = 3 }, { Item = "Neonberry", Amount = 3 } },
+    ["Swirled Wax"] = { { Item = "Hard Wax", Amount = 3 }, { Item = "Soft Wax", Amount = 9 }, { Item = "Purple Potion", Amount = 6 }, { Item = "Royal Jelly", Amount = 3333 } },
+    ["Caustic Wax"] = { { Item = "Hard Wax", Amount = 5 }, { Item = "Enzymes", Amount = 5 }, { Item = "Neonberry", Amount = 25 }, { Item = "Royal Jelly", Amount = 5252 } },
+    ["Super Smoothie"] = { { Item = "Purple Potion", Amount = 3 }, { Item = "Tropical Drink", Amount = 6 }, { Item = "Neonberry", Amount = 3 }, { Item = "Star Jelly", Amount = 3 } }
 }
 
 local function getRecipe(itemName)
@@ -554,73 +792,75 @@ local RED_GUARD_TIERS = {
     ["crimsonguard"] = 4
 }
 
+-- Route + cost nguyen lieu cap nhat theo game (placeVersion 1993 / wiki 09-2026).
+-- Honey = tien honey bat buoc khi mua; Ingredients = nguyen lieu chinh (crafted/rare truoc, raw sau).
 local DEFAULT_ROUTE = {
-    { Bees = 0, Name = "Backpack", Type = "Bag" },
-    { Bees = 0, Name = "Magnet", Type = "Tool" },
-    { Bees = 0, Name = "Canister", Type = "Bag" },
-    { Bees = 0, Name = "Vacuum", Type = "Tool" },
-    { Bees = 3, Name = "Belt Pocket", Type = "Belt" },
-    { Bees = 3, Name = "Basic Boots", Type = "Boots" },
-    { Bees = 5, Name = "Compressor", Type = "Bag" },
-    { Bees = 5, Name = "Super-Scooper", Type = "Tool" },
-    { Bees = 5, Name = "Helmet", Type = "Hat" },
-    { Bees = 10, Name = "Port-O-Hive", Type = "Bag" },
-    { Bees = 10, Name = "Mega-Jug", Type = "Bag" },
-    { Bees = 10, Name = "Electro-Magnet", Type = "Tool" },
-    { Bees = 10, Name = "Honey Dipper", Type = "Tool" },
-    { Bees = 10, Name = "Propeller Hat", Type = "Hat" },
-    { Bees = 10, Name = "Looker Guard", Type = "Guard" },
-    { Bees = 10, Name = "Brave Guard", Type = "Guard" },
-    { Bees = 10, Name = "Hiking Boots", Type = "Boots" },
-    { Bees = 12, Name = "Pulsar", Type = "Tool" },
-    { Bees = 12, Name = "Belt Bag", Type = "Belt" },
-    { Bees = 15, Name = "Scissors", Type = "Tool" },
-    { Bees = 15, Name = "Elite Barrel", Type = "Bag" },
-    { Bees = 20, Name = "Bubble Wand", Type = "Tool", Ingredients = { { Item = "Blueberry", Amount = 50 } } },
-    { Bees = 20, Name = "Basic Sprinkler", Type = "Sprinkler" },
-    { Bees = 0, Name = "Plastic Planter", Type = "Planter" },
-    { Bees = 20, Name = "Beekeeper's Mask", Type = "Hat" },
-    { Bees = 20, Name = "Beekeeper's Boots", Type = "Boots" },
-    { Bees = 25, Name = "Mondo Belt Bag", Type = "Belt", Ingredients = { { Item = "Sunflower Seed", Amount = 50 }, { Item = "Pineapple", Amount = 50 } } },
-    { Bees = 20, Name = "Blue Port-O-Hive", Type = "Bag", Ingredients = { { Item = "Blueberry", Amount = 100 } } },
-    { Bees = 20, Name = "Silver Soakers", Type = "Sprinkler" },
-    { Bees = 20, Name = "Elite Blue Guard", Type = "Guard", Ingredients = { { Item = "Blueberry", Amount = 50 } } },
-    { Bees = 20, Name = "Elite Red Guard", Type = "Guard", Ingredients = { { Item = "Strawberry", Amount = 50 } } },
-    { Bees = 25, Name = "Bucko Guard", Type = "Guard", Ingredients = { { Item = "Blueberry", Amount = 100 }, { Item = "Blue Extract", Amount = 5 }, { Item = "Stinger", Amount = 15 } } },
-    { Bees = 25, Name = "Riley Guard", Type = "Guard", Ingredients = { { Item = "Strawberry", Amount = 100 }, { Item = "Red Extract", Amount = 5 }, { Item = "Stinger", Amount = 15 } } },
-    { Bees = 0, Name = "Candy Planter", Type = "Planter", Ingredients = { { Item = "Gumdrop", Amount = 100 } } },
-    { Bees = 25, Name = "Glider", Type = "Glider" },
-    { Bees = 25, Name = "Golden Rake", Type = "Tool" },
-    { Bees = 25, Name = "Porcelain Dipper", Type = "Tool" },
-    { Bees = 25, Name = "Porcelain Port-O-Hive", Type = "Bag" },
-    { Bees = 0, Name = "Blue Clay Planter", Type = "Planter", Ingredients = { { Item = "Blueberry", Amount = 50 }, { Item = "Soft Wax", Amount = 10 } } },
-    { Bees = 0, Name = "Red Clay Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 50 }, { Item = "Soft Wax", Amount = 10 } } },
-    { Bees = 20, Name = "Bubble Mask", Type = "Hat", Ingredients = { { Item = "Blueberry", Amount = 250 }, { Item = "Blue Extract", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Glitter", Amount = 25 } } },
-    { Bees = 20, Name = "Honey Mask", Type = "Hat", Ingredients = { { Item = "Oil", Amount = 50 }, { Item = "Enzymes", Amount = 25 }, { Item = "Golden Egg", Amount = 5 }, { Item = "Treat", Amount = 9999 } } },
-    { Bees = 20, Name = "Fire Mask", Type = "Hat", Ingredients = { { Item = "Strawberry", Amount = 250 }, { Item = "Red Extract", Amount = 50 }, { Item = "Enzymes", Amount = 25 }, { Item = "Glitter", Amount = 25 } } },
-    { Bees = 20, Name = "Cobalt Guard", Type = "Guard", Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Stinger", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
-    { Bees = 20, Name = "Crimson Guard", Type = "Guard", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Stinger", Amount = 100 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Enzymes", Amount = 25 } } },
-    { Bees = 25, Name = "Golden Gushers", Type = "Sprinkler" },
-    { Bees = 35, Name = "Tacky Planter", Type = "Planter", Ingredients = { { Item = "Sunflower Seed", Amount = 500 }, { Item = "Soft Wax", Amount = 25 }, { Item = "Hard Wax", Amount = 5 } } },
-    { Bees = 20, Name = "Diamond Mask", Type = "Hat", Ingredients = { { Item = "Diamond Egg", Amount = 5 }, { Item = "Blue Extract", Amount = 250 }, { Item = "Oil", Amount = 150 }, { Item = "Glitter", Amount = 100 } } },
-    { Bees = 20, Name = "Demon Mask", Type = "Hat", Ingredients = { { Item = "Red Extract", Amount = 250 }, { Item = "Stinger", Amount = 500 }, { Item = "Enzymes", Amount = 150 }, { Item = "Glitter", Amount = 100 } } },
-    { Bees = 20, Name = "Gummy Mask", Type = "Hat", Ingredients = { { Item = "Glue", Amount = 250 }, { Item = "Glitter", Amount = 100 }, { Item = "Oil", Amount = 100 }, { Item = "Enzymes", Amount = 100 } } },
-    { Bees = 35, Name = "Diamond Drenchers", Type = "Sprinkler" },
-    { Bees = 35, Name = "Coconut Canister", Type = "Bag", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } },
-    { Bees = 35, Name = "Pesticide Planter", Type = "Planter", Ingredients = { { Item = "Strawberry", Amount = 500 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 } } },
-    { Bees = 35, Name = "Coconut Clogs", Type = "Boots", Ingredients = { { Item = "Coconut", Amount = 150 }, { Item = "Tropical Drink", Amount = 50 }, { Item = "Glue", Amount = 100 }, { Item = "Oil", Amount = 100 } } },
-    { Bees = 35, Name = "The Supreme Saturator", Type = "Sprinkler" },
-    { Bees = 50, Name = "Tide Popper", Type = "Tool", Ingredients = { { Item = "Blue Extract", Amount = 1500 }, { Item = "Stinger", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Swirled Wax", Amount = 75 }, { Item = "Super Smoothie", Amount = 50 } } },
-    { Bees = 50, Name = "Dark Scythe", Type = "Tool", Ingredients = { { Item = "Red Extract", Amount = 1500 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 100 }, { Item = "Stinger", Amount = 200 } } },
-    { Bees = 50, Name = "Gummyballer", Type = "Tool", Ingredients = { { Item = "Glue", Amount = 1500 }, { Item = "Gumdrop", Amount = 1500 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Swirled Wax", Amount = 50 } } },
-    { Bees = 50, Name = "Hydroponic Planter", Type = "Planter", Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 }, { Item = "Caustic Wax", Amount = 5 } } },
-    { Bees = 50, Name = "Heat-Treated Planter", Type = "Planter", Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Soft Wax", Amount = 50 }, { Item = "Hard Wax", Amount = 15 }, { Item = "Caustic Wax", Amount = 5 } } },
-    { Bees = 50, Name = "Petal Planter", Type = "Planter", Ingredients = { { Item = "Spirit Petal", Amount = 1 }, { Item = "Enzymes", Amount = 100 }, { Item = "Soft Wax", Amount = 100 }, { Item = "Hard Wax", Amount = 30 }, { Item = "Caustic Wax", Amount = 10 }, { Item = "Swirled Wax", Amount = 5 } } },
-    { Bees = 35, Name = "Gummy Boots", Type = "Boots", Ingredients = { { Item = "Glue", Amount = 500 }, { Item = "Glitter", Amount = 300 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 } } },
-    { Bees = 50, Name = "Coconut Belt", Type = "Belt", Ingredients = { { Item = "Coconut", Amount = 500 }, { Item = "Tropical Drink", Amount = 250 }, { Item = "Glue", Amount = 150 }, { Item = "Enzymes", Amount = 150 }, { Item = "Super Smoothie", Amount = 25 } } },
-    { Bees = 50, Name = "Plenty Planter", Type = "Planter" },
-    { Bees = 35, Name = "Petal Belt", Type = "Belt", Ingredients = { { Item = "Spirit Petal", Amount = 1 }, { Item = "Star Jelly", Amount = 25 }, { Item = "Glitter", Amount = 50 }, { Item = "Glue", Amount = 25 }, { Item = "Enzymes", Amount = 75 } } },
-    { Bees = 35, Name = "Petal Wand", Type = "Tool", Ingredients = { { Item = "Spirit Petal", Amount = 1 }, { Item = "Star Jelly", Amount = 10 }, { Item = "Glitter", Amount = 25 }, { Item = "Enzymes", Amount = 75 } } }
+    { Bees = 0, Name = "Backpack", Type = "Bag", Honey = 5500 },
+    { Bees = 0, Name = "Magnet", Type = "Tool", Honey = 5500 },
+    { Bees = 0, Name = "Canister", Type = "Bag", Honey = 22000 },
+    { Bees = 0, Name = "Vacuum", Type = "Tool", Honey = 14000 },
+    { Bees = 3, Name = "Belt Pocket", Type = "Belt", Honey = 14000, Ingredients = { { Item = "Sunflower Seed", Amount = 10 } } },
+    { Bees = 3, Name = "Basic Boots", Type = "Boots", Honey = 4400, Ingredients = { { Item = "Sunflower Seed", Amount = 3 }, { Item = "Blueberry", Amount = 3 } } },
+    { Bees = 5, Name = "Compressor", Type = "Bag", Honey = 160000 },
+    { Bees = 5, Name = "Super-Scooper", Type = "Tool", Honey = 40000 },
+    { Bees = 5, Name = "Helmet", Type = "Hat", Honey = 30000, Ingredients = { { Item = "Moon Charm", Amount = 1 }, { Item = "Pineapple", Amount = 5 } } },
+    { Bees = 10, Name = "Port-O-Hive", Type = "Bag", Honey = 1250000 },
+    { Bees = 10, Name = "Mega-Jug", Type = "Bag", Honey = 50000 },
+    { Bees = 10, Name = "Electro-Magnet", Type = "Tool", Honey = 300000 },
+    { Bees = 10, Name = "Honey Dipper", Type = "Tool", Honey = 1500000 },
+    { Bees = 10, Name = "Propeller Hat", Type = "Hat", Honey = 2500000, Ingredients = { { Item = "Gumdrop", Amount = 25 }, { Item = "Moon Charm", Amount = 5 }, { Item = "Pineapple", Amount = 100 } } },
+    { Bees = 10, Name = "Looker Guard", Type = "Guard", Honey = 300000, Ingredients = { { Item = "Sunflower Seed", Amount = 25 } } },
+    { Bees = 10, Name = "Brave Guard", Type = "Guard", Honey = 300000, Ingredients = { { Item = "Stinger", Amount = 3 } } },
+    { Bees = 10, Name = "Hiking Boots", Type = "Boots", Honey = 2200000, Ingredients = { { Item = "Blueberry", Amount = 50 }, { Item = "Strawberry", Amount = 50 } } },
+    { Bees = 12, Name = "Pulsar", Type = "Tool", Honey = 125000 },
+    { Bees = 12, Name = "Belt Bag", Type = "Belt", Honey = 440000, Ingredients = { { Item = "Stinger", Amount = 3 }, { Item = "Pineapple", Amount = 50 }, { Item = "Sunflower Seed", Amount = 50 } } },
+    { Bees = 15, Name = "Scissors", Type = "Tool", Honey = 850000 },
+    { Bees = 15, Name = "Elite Barrel", Type = "Bag", Honey = 650000 },
+    { Bees = 20, Name = "Bubble Wand", Type = "Tool", Honey = 3500000 },
+    { Bees = 20, Name = "Basic Sprinkler", Type = "Sprinkler", Honey = 1111111 },
+    { Bees = 0, Name = "Plastic Planter", Type = "Planter", Honey = 750000, Ingredients = { { Item = "Soft Wax", Amount = 1 }, { Item = "Magic Bean", Amount = 3 } } },
+    { Bees = 20, Name = "Beekeeper's Mask", Type = "Hat", Honey = 20000000, Ingredients = { { Item = "Glue", Amount = 3 }, { Item = "Enzymes", Amount = 5 }, { Item = "Glitter", Amount = 1 } } },
+    { Bees = 20, Name = "Beekeeper's Boots", Type = "Boots", Honey = 15000000, Ingredients = { { Item = "Blue Extract", Amount = 3 }, { Item = "Red Extract", Amount = 3 }, { Item = "Oil", Amount = 5 } } },
+    { Bees = 25, Name = "Mondo Belt Bag", Type = "Belt", Honey = 12400000, Ingredients = { { Item = "Soft Wax", Amount = 1 }, { Item = "Stinger", Amount = 10 }, { Item = "Pineapple", Amount = 150 }, { Item = "Sunflower Seed", Amount = 150 } } },
+    { Bees = 20, Name = "Blue Port-O-Hive", Type = "Bag", Honey = 12500000, Ingredients = { { Item = "Blue Extract", Amount = 2 }, { Item = "Soft Wax", Amount = 2 } } },
+    { Bees = 20, Name = "Silver Soakers", Type = "Sprinkler", Honey = 22222222 },
+    { Bees = 20, Name = "Elite Blue Guard", Type = "Guard", Honey = 5000000, Ingredients = { { Item = "Blue Extract", Amount = 3 }, { Item = "Royal Jelly", Amount = 5 }, { Item = "Moon Charm", Amount = 15 }, { Item = "Blueberry", Amount = 50 } } },
+    { Bees = 20, Name = "Elite Red Guard", Type = "Guard", Honey = 5000000, Ingredients = { { Item = "Red Extract", Amount = 3 }, { Item = "Royal Jelly", Amount = 5 }, { Item = "Stinger", Amount = 5 }, { Item = "Strawberry", Amount = 50 } } },
+    { Bees = 25, Name = "Bucko Guard", Type = "Guard", Honey = 30000000, Ingredients = { { Item = "Blue Extract", Amount = 10 }, { Item = "Glue", Amount = 5 }, { Item = "Moon Charm", Amount = 75 }, { Item = "Blueberry", Amount = 100 } } },
+    { Bees = 25, Name = "Riley Guard", Type = "Guard", Honey = 30000000, Ingredients = { { Item = "Red Extract", Amount = 10 }, { Item = "Glue", Amount = 5 }, { Item = "Stinger", Amount = 25 }, { Item = "Strawberry", Amount = 100 } } },
+    { Bees = 0, Name = "Candy Planter", Type = "Planter", Honey = 5000000, Ingredients = { { Item = "Soft Wax", Amount = 5 }, { Item = "Gumdrop", Amount = 30 }, { Item = "Jelly Beans", Amount = 3 }, { Item = "Magic Bean", Amount = 5 } } },
+    { Bees = 25, Name = "Glider", Type = "Glider", Honey = 5000000 },
+    { Bees = 25, Name = "Golden Rake", Type = "Tool", Honey = 20000000 },
+    { Bees = 25, Name = "Porcelain Dipper", Type = "Tool", Honey = 150000000 },
+    { Bees = 25, Name = "Porcelain Port-O-Hive", Type = "Bag", Honey = 250000000, Ingredients = { { Item = "Soft Wax", Amount = 3 }, { Item = "Glitter", Amount = 3 }, { Item = "Moon Charm", Amount = 10 } } },
+    { Bees = 0, Name = "Blue Clay Planter", Type = "Planter", Honey = 10000000, Ingredients = { { Item = "Blue Extract", Amount = 15 }, { Item = "Soft Wax", Amount = 20 }, { Item = "Magic Bean", Amount = 5 } } },
+    { Bees = 0, Name = "Red Clay Planter", Type = "Planter", Honey = 10000000, Ingredients = { { Item = "Red Extract", Amount = 15 }, { Item = "Soft Wax", Amount = 20 }, { Item = "Magic Bean", Amount = 5 } } },
+    { Bees = 20, Name = "Bubble Mask", Type = "Hat", Honey = 100000000, Ingredients = { { Item = "Blue Extract", Amount = 50 }, { Item = "Oil", Amount = 25 }, { Item = "Glitter", Amount = 15 }, { Item = "Blueberry", Amount = 500 } } },
+    { Bees = 20, Name = "Honey Mask", Type = "Hat", Honey = 100000000, Ingredients = { { Item = "Enzymes", Amount = 25 }, { Item = "Oil", Amount = 50 }, { Item = "Gold Egg", Amount = 5 }, { Item = "Treat", Amount = 9999 } } },
+    { Bees = 20, Name = "Fire Mask", Type = "Hat", Honey = 100000000, Ingredients = { { Item = "Red Extract", Amount = 50 }, { Item = "Enzymes", Amount = 25 }, { Item = "Glue", Amount = 15 }, { Item = "Strawberry", Amount = 500 } } },
+    { Bees = 20, Name = "Cobalt Guard", Type = "Guard", Honey = 200000000, Ingredients = { { Item = "Blue Extract", Amount = 100 }, { Item = "Enzymes", Amount = 50 }, { Item = "Glitter", Amount = 25 }, { Item = "Stinger", Amount = 100 } } },
+    { Bees = 20, Name = "Crimson Guard", Type = "Guard", Honey = 200000000, Ingredients = { { Item = "Red Extract", Amount = 100 }, { Item = "Oil", Amount = 50 }, { Item = "Glitter", Amount = 25 }, { Item = "Stinger", Amount = 100 } } },
+    { Bees = 25, Name = "Golden Gushers", Type = "Sprinkler", Honey = 333333333 },
+    { Bees = 35, Name = "Tacky Planter", Type = "Planter", Honey = 50000000, Ingredients = { { Item = "Soft Wax", Amount = 20 }, { Item = "Hard Wax", Amount = 5 }, { Item = "Purple Potion", Amount = 1 }, { Item = "Magic Bean", Amount = 10 } } },
+    { Bees = 20, Name = "Diamond Mask", Type = "Hat", Honey = 5000000000, Ingredients = { { Item = "Blue Extract", Amount = 250 }, { Item = "Oil", Amount = 150 }, { Item = "Glitter", Amount = 100 }, { Item = "Diamond Egg", Amount = 5 }, { Item = "Comforting Vial", Amount = 1 } } },
+    { Bees = 20, Name = "Demon Mask", Type = "Hat", Honey = 5000000000, Ingredients = { { Item = "Red Extract", Amount = 250 }, { Item = "Enzymes", Amount = 150 }, { Item = "Glue", Amount = 100 }, { Item = "Stinger", Amount = 500 }, { Item = "Invigorating Vial", Amount = 1 } } },
+    { Bees = 20, Name = "Gummy Mask", Type = "Hat", Honey = 5000000000, Ingredients = { { Item = "Glue", Amount = 250 }, { Item = "Enzymes", Amount = 100 }, { Item = "Oil", Amount = 100 }, { Item = "Glitter", Amount = 100 }, { Item = "Satisfying Vial", Amount = 1 } } },
+    { Bees = 35, Name = "Diamond Drenchers", Type = "Sprinkler", Honey = 4444444444 },
+    { Bees = 35, Name = "Coconut Canister", Type = "Bag", Honey = 25000000000, Ingredients = { { Item = "Blue Extract", Amount = 150 }, { Item = "Red Extract", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Coconut", Amount = 250 }, { Item = "Refreshing Vial", Amount = 2 } } },
+    { Bees = 35, Name = "Pesticide Planter", Type = "Planter", Honey = 750000000, Ingredients = { { Item = "Glue", Amount = 15 }, { Item = "Caustic Wax", Amount = 3 }, { Item = "Hard Wax", Amount = 10 }, { Item = "Neonberry", Amount = 25 }, { Item = "Magic Bean", Amount = 25 } } },
+    { Bees = 35, Name = "Coconut Clogs", Type = "Boots", Honey = 10000000000, Ingredients = { { Item = "Glue", Amount = 100 }, { Item = "Oil", Amount = 100 }, { Item = "Tropical Drink", Amount = 50 }, { Item = "Coconut", Amount = 150 }, { Item = "Refreshing Vial", Amount = 1 } } },
+    { Bees = 35, Name = "The Supreme Saturator", Type = "Sprinkler", Honey = 55555555555 },
+    { Bees = 50, Name = "Tide Popper", Type = "Tool", Honey = 2500000000000, Ingredients = { { Item = "Blue Extract", Amount = 1500 }, { Item = "Swirled Wax", Amount = 75 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Stinger", Amount = 150 }, { Item = "Comforting Vial", Amount = 3 } } },
+    { Bees = 50, Name = "Dark Scythe", Type = "Tool", Honey = 2500000000000, Ingredients = { { Item = "Red Extract", Amount = 1500 }, { Item = "Hard Wax", Amount = 100 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Stinger", Amount = 150 }, { Item = "Invigorating Vial", Amount = 3 } } },
+    { Bees = 50, Name = "Gummyballer", Type = "Tool", Honey = 10000000000000, Ingredients = { { Item = "Glue", Amount = 1500 }, { Item = "Gumdrop", Amount = 2000 }, { Item = "Caustic Wax", Amount = 50 }, { Item = "Super Smoothie", Amount = 50 }, { Item = "Turpentine", Amount = 5 }, { Item = "Satisfying Vial", Amount = 3 } } },
+    { Bees = 50, Name = "Hydroponic Planter", Type = "Planter", Honey = 750000000000, Ingredients = { { Item = "Blue Extract", Amount = 750 }, { Item = "Soft Wax", Amount = 500 }, { Item = "Caustic Wax", Amount = 25 }, { Item = "Turpentine", Amount = 1 }, { Item = "Magic Bean", Amount = 75 } } },
+    { Bees = 50, Name = "Heat-Treated Planter", Type = "Planter", Honey = 750000000000, Ingredients = { { Item = "Red Extract", Amount = 750 }, { Item = "Hard Wax", Amount = 150 }, { Item = "Swirled Wax", Amount = 25 }, { Item = "Turpentine", Amount = 1 }, { Item = "Magic Bean", Amount = 75 } } },
+    { Bees = 50, Name = "Petal Planter", Type = "Planter", Honey = 5000000000000, Ingredients = { { Item = "Glitter", Amount = 100 }, { Item = "Soft Wax", Amount = 250 }, { Item = "Swirled Wax", Amount = 50 }, { Item = "Super Smoothie", Amount = 25 }, { Item = "Magic Bean", Amount = 100 } } },
+    { Bees = 35, Name = "Gummy Boots", Type = "Boots", Honey = 100000000000, Ingredients = { { Item = "Glue", Amount = 500 }, { Item = "Glitter", Amount = 250 }, { Item = "Red Extract", Amount = 250 }, { Item = "Blue Extract", Amount = 250 }, { Item = "Satisfying Vial", Amount = 1 }, { Item = "Motivating Vial", Amount = 1 } } },
+    { Bees = 50, Name = "Coconut Belt", Type = "Belt", Honey = 7500000000000, Ingredients = { { Item = "Tropical Drink", Amount = 1500 }, { Item = "Purple Potion", Amount = 200 }, { Item = "Hard Wax", Amount = 200 }, { Item = "Turpentine", Amount = 3 }, { Item = "Coconut", Amount = 500 }, { Item = "Refreshing Vial", Amount = 3 } } },
+    { Bees = 50, Name = "Plenty Planter", Type = "Planter", Honey = 100000000000000, Ingredients = { { Item = "Super Smoothie", Amount = 100 }, { Item = "Swirled Wax", Amount = 100 }, { Item = "Caustic Wax", Amount = 100 }, { Item = "Turpentine", Amount = 25 }, { Item = "Magic Bean", Amount = 500 } } },
+    { Bees = 35, Name = "Petal Belt", Type = "Belt", Honey = 15000000000, Ingredients = { { Item = "Glue", Amount = 100 }, { Item = "Glitter", Amount = 50 }, { Item = "Star Jelly", Amount = 25 }, { Item = "Spirit Petal", Amount = 1 } } },
+    { Bees = 35, Name = "Petal Wand", Type = "Tool", Honey = 1500000000, Ingredients = { { Item = "Enzymes", Amount = 75 }, { Item = "Glitter", Amount = 25 }, { Item = "Star Jelly", Amount = 10 }, { Item = "Spirit Petal", Amount = 1 } } }
 }
 
 local serverStats = nil
@@ -814,6 +1054,22 @@ local function countItem(item, data)
     end
 
     local variants, cItem = nameVariants(item, cleanKey)
+
+    -- Honey hien tai nam o data.Honey; data.Totals.Honey la all-time (Honey Badge).
+    -- Uu tien data.Honey truoc khi quet cac folder de khong lay nham chi so badge.
+    -- Neu khong tim thay current honey thi tra 0, khong fallback ve Totals.Honey.
+    if cItem == "honey" and type(data) == "table" then
+        local currentHoney = readAmount(data.Honey)
+        if currentHoney ~= nil then return currentHoney end
+        local currency = data.Currency
+        if type(currency) == "table" then
+            currentHoney = readAmount(currency.Honey)
+            if currentHoney ~= nil then return currentHoney end
+        end
+        currentHoney = readAmount(data.CurrentHoney or data.currentHoney)
+        if currentHoney ~= nil then return currentHoney end
+        return 0
+    end
 
     if getgenv then
         local g = getgenv()
@@ -2352,6 +2608,27 @@ local function collectPurchases(tbl, depth)
     local items = {}
     local seen = {}
 
+    -- chi nhan item co trong DEFAULT_ROUTE; bo qua icon/asset id/field name
+    local function addItem(raw, bees)
+        if type(raw) == "string" then
+            local canonical = toItemName(raw)
+            if canonical and isRouteItem(canonical) then
+                items[#items + 1] = { Name = canonical, Bees = bees }
+            end
+        elseif type(raw) == "table" then
+            local nm = raw.Name or raw.Item or raw.Target or raw.Gear
+            if type(nm) == "string" then
+                local canonical = toItemName(nm)
+                if canonical and isRouteItem(canonical) then
+                    local copy = {}
+                    for k, v in pairs(raw) do copy[k] = v end
+                    copy.Name = canonical
+                    items[#items + 1] = copy
+                end
+            end
+        end
+    end
+
     local function scan(t, d)
         if type(t) ~= "table" or d > 8 then return end
         if seen[t] then return end
@@ -2367,14 +2644,10 @@ local function collectPurchases(tbl, depth)
             local reqBees = tonumber(t.required_bees or t.Bees or t.req_bees) or 0
             if type(p) == "table" then
                 for _, itm in ipairs(p) do
-                    if type(itm) == "string" then
-                        table.insert(items, { Name = itm, Bees = reqBees })
-                    elseif type(itm) == "table" then
-                        table.insert(items, itm)
-                    end
+                    addItem(itm, reqBees)
                 end
             elseif type(p) == "string" then
-                table.insert(items, { Name = p, Bees = reqBees })
+                addItem(p, reqBees)
             end
         end
 
@@ -2384,21 +2657,17 @@ local function collectPurchases(tbl, depth)
             local reqBees = tonumber(t.Bees or t.required_bees or t.req_bees) or 0
             if type(data) == "table" then
                 for _, itm in ipairs(data) do
-                    if type(itm) == "string" then
-                        table.insert(items, { Name = itm, Bees = reqBees })
-                    elseif type(itm) == "table" then
-                        table.insert(items, itm)
-                    end
+                    addItem(itm, reqBees)
                 end
             elseif type(data) == "string" then
-                table.insert(items, { Name = data, Bees = reqBees })
+                addItem(data, reqBees)
             end
         end
 
         local directName = t.target or t.Target or t.gear or t.Gear
         if directName and type(directName) == "string" then
             local reqBees = tonumber(t.Bees or t.required_bees) or 0
-            table.insert(items, { Name = directName, Bees = reqBees })
+            addItem(directName, reqBees)
         end
 
         if #t > 0 then
@@ -3026,6 +3295,7 @@ local function getRoute()
                     Name = base and base.Name or tostring(canonical),
                     Type = base and base.Type or "Gear",
                     Bees = itemBees,
+                    Honey = base and base.Honey or nil,
                     Ingredients = base and base.Ingredients or nil
                 })
             end
@@ -3060,44 +3330,169 @@ local targetSource = "none"
 
 local nextItemCache = { at = 0, val = nil, raw = nil }
 
--- doc dong "Next item: <ten>" tren UI Atlas, day la nguon dang tin nhat
-local function readNextItemLabel()
-    if tick() - nextItemCache.at < 4 then return nextItemCache.val end
-    nextItemCache.at = tick()
-    nextItemCache.val, nextItemCache.raw = nil, nil
+local function isOwnUI(obj)
+    if not obj then return false end
+    local name = tostring(obj.Name or "")
+    if name == "AutoProg_HUD" or name == "AutoProg_RouteFlowModal" or name == "WindUI" or name == "AutoProg" then
+        return true
+    end
+    if obj:FindFirstAncestor("WindUI") or obj:FindFirstAncestor("AutoProg_HUD") or obj:FindFirstAncestor("AutoProg_RouteFlowModal") then
+        return true
+    end
+    return false
+end
 
-    local uiRoots = {}
-    pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
-    pcall(function() table.insert(uiRoots, CoreGui) end)
-    pcall(function() table.insert(uiRoots, player:FindFirstChild("PlayerGui")) end)
+-- doc dong "Next item: ..." trong text cua Atlas
+local function parseNextItemLine(line)
+    local m = line:match("[Nn]ext%s+[Ii]tem%s*[:%-]%s*(.+)")
+    if not m then return nil end
+    m = m:gsub("^%s+", ""):gsub("%s+$", "")
+    local cleanPart = m:match("^[^\r\n:]+") or m
+    cleanPart = cleanPart:gsub("%s+[Nn]ext.*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
 
-    for _, root in ipairs(uiRoots) do
-        if root then
-            local okD, descs = pcall(function() return root:GetDescendants() end)
-            if okD and type(descs) == "table" then
-                for _, d in ipairs(descs) do
-                    local okC, isText = pcall(function() return d:IsA("TextLabel") or d:IsA("TextButton") end)
-                    if okC and isText and d.Name ~= "AutoProg_HUD" then
-                        local okT, txt = pcall(function() return d.Text end)
-                        if okT and type(txt) == "string" and #txt < 120 then
-                            txt = txt:gsub("<[^>]+>", "")
-                            local m = txt:match("[Nn]ext%s+[Ii]tem%s*[:%-]%s*([^\n\r:]+)")
-                            if m then
-                                m = m:gsub("^%s+", "")
-                                m = m:gsub("%s+$", "")
-                                nextItemCache.raw = m
-                                local res = toItemNameExact(m) or toItemNameExact((m:gsub("[%s%d]+$", "")))
-                                if res then
-                                    nextItemCache.val = res
-                                    return res
-                                end
-                            end
-                        end
+    local res = toItemNameExact(cleanPart)
+        or toItemNameExact((cleanPart:gsub("[%s%d]+$", "")))
+        or toItemNameExact(m)
+        or toItemNameExact((m:gsub("[%s%d]+$", "")))
+    if not res then
+        local candidate = toItemName(cleanPart) or toItemName(m)
+        if candidate and isRouteItem(candidate) then res = candidate end
+    end
+    if res then return res, m end
+    return nil
+end
+
+local function scanNextItemIn(root)
+    if not root then return nil end
+    local okD, descs = pcall(function() return root:GetDescendants() end)
+    if not okD or type(descs) ~= "table" then return nil end
+    for _, d in ipairs(descs) do
+        if not isOwnUI(d) then
+            local okC, isText = pcall(function()
+                return d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox")
+            end)
+            if okC and isText then
+                local okT, rawTxt = pcall(function() return d.Text end)
+                if okT and type(rawTxt) == "string" and rawTxt ~= "" and #rawTxt < 2000 then
+                    local txt = rawTxt:gsub("<br%s*/?>", "\n"):gsub("<[^>]+>", " ")
+                    for line in txt:gmatch("[^\r\n]+") do
+                        local res, m = parseNextItemLine(line)
+                        if res then return res, m end
                     end
                 end
             end
         end
     end
+    return nil
+end
+
+local function getUiRoots()
+    local uiRoots = {}
+    pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
+    pcall(function() table.insert(uiRoots, CoreGui) end)
+    pcall(function() table.insert(uiRoots, player:FindFirstChild("PlayerGui")) end)
+    return uiRoots
+end
+
+-- cua so Atlas: Frame co TabButtons + Tab (noi dung chi duoc dung khi mo tab)
+local atlasWindowCache = nil
+local function findAtlasWindow()
+    if atlasWindowCache and atlasWindowCache.Parent then return atlasWindowCache end
+    atlasWindowCache = nil
+    for _, root in ipairs(getUiRoots()) do
+        local okD, descs = pcall(function() return root:GetDescendants() end)
+        if okD then
+            for _, d in ipairs(descs) do
+                if d.Name == "TabButtons" and d.Parent and d.Parent:FindFirstChild("Tab") and not isOwnUI(d) then
+                    atlasWindowCache = d.Parent
+                    return atlasWindowCache
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function atlasTabButtons(win)
+    local list = {}
+    local holder = win and win:FindFirstChild("TabButtons")
+    if not holder then return list end
+    for _, b in ipairs(holder:GetDescendants()) do
+        if b:IsA("TextButton") then
+            local key = (b.Text:gsub("<[^>]+>", ""):gsub("[%s%-_']", "")):lower()
+            if key ~= "" then list[#list + 1] = { key = key, btn = b } end
+        end
+    end
+    return list
+end
+
+local function pressAtlasButton(btn)
+    if not btn then return false end
+    if fireConnections(btn.MouseButton1Click) > 0 then return true end
+    return triggerButtonHeadless(btn)
+end
+
+-- Atlas chi dung muc "Progression" (nhan Next item) khi tab Toys dang mo.
+-- Mo Toys 1 chut, doc nhan roi tra lai tab cu.
+local lastTabPeek = 0
+local lastGoodNext = { val = nil, raw = nil, at = 0 }
+
+local function peekNextItemFromToysTab()
+    local win = findAtlasWindow()
+    if not win then return nil end
+    local tabs = atlasTabButtons(win)
+    local toysBtn, activeBtn, bestBg = nil, nil, 2
+    for _, t in ipairs(tabs) do
+        if t.key == "toys" then toysBtn = t.btn end
+        local bg = t.btn.BackgroundTransparency
+        if bg < bestBg then bestBg = bg; activeBtn = t.btn end
+    end
+    if not toysBtn then return nil end
+
+    local switched = (activeBtn ~= toysBtn)
+    if switched then
+        if not pressAtlasButton(toysBtn) then return nil end
+        task.wait(0.35)
+    end
+    local res, raw = scanNextItemIn(win:FindFirstChild("Tab"))
+    if switched and activeBtn then
+        pressAtlasButton(activeBtn)
+        task.wait(0.05)
+    end
+    return res, raw
+end
+
+local function readNextItemLabel()
+    if tick() - nextItemCache.at < 2 then return nextItemCache.val end
+    nextItemCache.at = tick()
+
+    -- 1) nhan dang hien san tren man hinh (tab Toys dang mo)
+    for _, root in ipairs(getUiRoots()) do
+        local res, raw = scanNextItemIn(root)
+        if res then
+            nextItemCache.val, nextItemCache.raw = res, raw
+            lastGoodNext = { val = res, raw = raw, at = tick() }
+            return res
+        end
+    end
+
+    -- 2) tab Toys dong -> mo ra doc roi dong lai (toi da 1 lan / 15s)
+    if tick() - lastTabPeek > 15 then
+        lastTabPeek = tick()
+        local ok, res, raw = pcall(peekNextItemFromToysTab)
+        if ok and res then
+            nextItemCache.val, nextItemCache.raw = res, raw
+            lastGoodNext = { val = res, raw = raw, at = tick() }
+            return res
+        end
+    end
+
+    -- 3) giu gia tri doc duoc gan nhat (toi da 90s) de khong nhay sang nguon khac
+    if lastGoodNext.val and tick() - lastGoodNext.at < 90 then
+        nextItemCache.val, nextItemCache.raw = lastGoodNext.val, lastGoodNext.raw
+        return lastGoodNext.val
+    end
+    nextItemCache.val, nextItemCache.raw = nil, nil
     return nil
 end
 
@@ -3114,7 +3509,12 @@ local function getLiveTarget()
         return nil
     end
 
-    -- 1. Uu tien doc ngam tu memory (settings / globals / Atlas objects)
+    local uiNext = readNextItemLabel()
+    if uiNext then
+        targetSource = "ui: nhan 'Next item' cua Atlas"
+        return uiNext
+    end
+
     local settings = findAtlasSettings()
     if settings then
         local t = settings.toys
@@ -3149,14 +3549,6 @@ local function getLiveTarget()
         end
     end
 
-    -- 2. Neu memory chua co truc tiep target, doc label Next Item tren UI Atlas
-    local uiNext = readNextItemLabel()
-    if uiNext then
-        targetSource = "ui: nhan 'Next item' cua Atlas"
-        return uiNext
-    end
-
-    -- 3. Quet route trong memory de lay mon dau tien chua mua
     if settings and settings.toys and type(settings.toys.route) == "table" then
         local pList = collectPurchases(settings.toys.route, 0)
         if pList and #pList > 0 then
@@ -3175,7 +3567,6 @@ local function getLiveTarget()
         end
     end
 
-    -- quet UI: chi nhan dang "Target: <ten>" va ten phai khop dung 1 item
     if allowUI then
         local uiRoots = {}
         pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
@@ -3193,17 +3584,31 @@ local function getLiveTarget()
         for _, root in ipairs(uiRoots) do
             if root then
                 for _, desc in ipairs(root:GetDescendants()) do
-                    if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-                        local txt = desc.Text
-                        if txt and txt ~= "" and #txt < 120 and desc.Name ~= "AutoProg_HUD" and desc.Parent and desc.Parent.Name ~= "AutoProg_HUD" then
-                            for _, pat in ipairs(patterns) do
-                                local m = txt:match(pat)
-                                if m then
-                                    local res = toItemNameExact(m)
-                                        or toItemNameExact((m:gsub("[%s%d]+$", "")))
-                                    if res then
-                                        targetSource = "ui:" .. desc:GetFullName():sub(-60) .. " = '" .. txt:sub(1, 50) .. "'"
-                                        return res
+                    if not isOwnUI(desc) then
+                        local okC, isText = pcall(function()
+                            return desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox")
+                        end)
+                        if okC and isText then
+                            local rawTxt = desc.Text
+                            if rawTxt and rawTxt ~= "" and #rawTxt < 2000 then
+                                local txt = rawTxt:gsub("<br%s*/?>", "\n"):gsub("<[^>]+>", " ")
+                                for line in txt:gmatch("[^\r\n]+") do
+                                    for _, pat in ipairs(patterns) do
+                                        local m = line:match(pat)
+                                        if m then
+                                            local res = toItemNameExact(m)
+                                                or toItemNameExact((m:gsub("[%s%d]+$", "")))
+                                            if not res then
+                                                local candidate = toItemName(m)
+                                                if candidate and isRouteItem(candidate) then
+                                                    res = candidate
+                                                end
+                                            end
+                                            if res then
+                                                targetSource = "ui:" .. desc:GetFullName():sub(-60) .. " = '" .. txt:sub(1, 50) .. "'"
+                                                return res
+                                            end
+                                        end
                                     end
                                 end
                             end
@@ -3257,6 +3662,20 @@ local function checkIngredients(milestone, data, beeCount)
     end
 end
 
+-- chi con thieu Honey (nguyen lieu da du) thi khong doi field, chi bao thieu Honey
+local function honeyDeficitFor(milestone, data)
+    local need = tonumber(milestone and milestone.Honey) or 0
+    if need <= 0 then return 0 end
+    return math.max(0, need - countItem("Honey", data))
+end
+
+local function hasTopLevelDeficit(milestone, data)
+    for _, ing in ipairs(milestone and milestone.Ingredients or {}) do
+        if countItem(ing.Item, data) < ing.Amount then return true end
+    end
+    return false
+end
+
 local function pickNextTarget(data, beeCount)
     local char = player.Character
 
@@ -3298,6 +3717,10 @@ local function pickNextTarget(data, beeCount)
                     local progField = getRouteField(beeCount)
                     return matchedMilestone.Name, mat, amt, progField, true
                 else
+                    local honeyDef = honeyDeficitFor(matchedMilestone, data)
+                    if isReady and honeyDef > 0 and not hasTopLevelDeficit(matchedMilestone, data) then
+                        return matchedMilestone.Name, "Honey", honeyDef, nil, false
+                    end
                     local progField = getRouteField(beeCount)
                     return matchedMilestone.Name, nil, 0, progField, false
                 end
@@ -3316,6 +3739,10 @@ local function pickNextTarget(data, beeCount)
             if field then
                 return milestone.Name, mat, amt, field, false
             elseif isReady then
+                local honeyDef = honeyDeficitFor(milestone, data)
+                if honeyDef > 0 and not hasTopLevelDeficit(milestone, data) then
+                    return milestone.Name, "Honey", honeyDef, nil, false
+                end
                 local progField = getRouteField(beeCount)
                 return milestone.Name, nil, 0, progField, false
             elseif isUnfarm then
@@ -3372,60 +3799,167 @@ hudLabel.TextXAlignment = Enum.TextXAlignment.Right
 hudLabel.Text = "[Auto Prog] Initializing..."
 hudLabel.Parent = hudGui
 
-local function describeIngredients(targetItem, data, beeCount)
-    if not targetItem or targetItem == "None" then return "None" end
-    local matched = nil
-    local cTarget = targetItem:gsub("[%s%-_']", ""):lower()
+-- dinh dang so de doc: 9,999 / 12.5K / 2.31M / 12.5M / 2.5B / 1.2T
+local function formatAmount(value)
+    local n = tonumber(value) or 0
+    local sign = n < 0 and "-" or ""
+    n = math.abs(n)
+    if n < 100000 then
+        local s = tostring(math.floor(n + 0.5))
+        local k
+        repeat
+            s, k = s:gsub("^(%d+)(%d%d%d)", "%1,%2")
+        until k == 0
+        return sign .. s
+    end
+    local scaled, suffix
+    if n >= 1e12 then
+        scaled, suffix = n / 1e12, "T"
+    elseif n >= 1e9 then
+        scaled, suffix = n / 1e9, "B"
+    elseif n >= 1e6 then
+        scaled, suffix = n / 1e6, "M"
+    else
+        scaled, suffix = n / 1e3, "K"
+    end
+    local text = string.format("%.2f", scaled):gsub("0+$", ""):gsub("%.$", "")
+    return sign .. text .. suffix
+end
+
+local function findRouteEntry(targetItem)
+    if not targetItem or targetItem == "None" then return nil end
+    local cTarget = tostring(targetItem):gsub("[%s%-_']", ""):lower()
     for _, m in ipairs(DEFAULT_ROUTE) do
-        local cm = m.Name:gsub("[%s%-_']", ""):lower()
-        if cm == cTarget then
-            matched = m
-            break
+        if tostring(m.Name or ""):gsub("[%s%-_']", ""):lower() == cTarget then
+            return m
         end
     end
-
-    if not matched then
-        local activeRoute = routeCache or getRoute()
-        if type(activeRoute) == "table" then
-            for _, m in ipairs(activeRoute) do
-                local cm = tostring(m.Name or ""):gsub("[%s%-_']", ""):lower()
-                if cm == cTarget then
-                    matched = m
-                    break
-                end
+    local activeRoute = routeCache or getRoute()
+    if type(activeRoute) == "table" then
+        for _, m in ipairs(activeRoute) do
+            if tostring(m.Name or ""):gsub("[%s%-_']", ""):lower() == cTarget then
+                return m
             end
         end
     end
+    return nil
+end
 
-    if not matched or not matched.Ingredients or #matched.Ingredients == 0 then
-        return "Honey Only"
+-- tra ve (thieu, dang co, can) cua Honey cho 1 item
+local function getHoneyInfo(targetItem, data)
+    local matched = findRouteEntry(targetItem)
+    local need = tonumber(matched and matched.Honey) or 0
+    if need <= 0 then return 0, 0, 0 end
+    local have = countItem("Honey", data)
+    return math.max(0, need - have), have, need
+end
+
+-- thieu nguyen lieu chinh (khong tinh nguyen lieu tho dung de craft)
+local function topLevelMissing(targetItem, data)
+    local matched = findRouteEntry(targetItem)
+    if not matched then return nil end
+    for _, ing in ipairs(matched.Ingredients or {}) do
+        local have = countItem(ing.Item, data)
+        if have < ing.Amount then
+            return ing.Item, ing.Amount - have
+        end
     end
+    local honeyDef, honeyHave, honeyNeed = getHoneyInfo(targetItem, data)
+    if honeyDef > 0 then return "Honey", honeyDef, honeyHave, honeyNeed end
+    return nil
+end
+
+local function describeIngredients(targetItem, data, beeCount, plain)
+    if not targetItem or targetItem == "None" then return "None" end
+    local matched = findRouteEntry(targetItem)
+    if not matched then return "Honey Only" end
+
+    local honeyNeed = tonumber(matched.Honey) or 0
+    local hasIngredients = matched.Ingredients and #matched.Ingredients > 0
+    if not hasIngredients and honeyNeed <= 0 then return "Honey Only" end
 
     local lines = {}
-    for _, ing in ipairs(matched.Ingredients) do
-        local invCount = countItem(ing.Item, data)
-        local isMissing = invCount < ing.Amount
-        local isUnfarm = false
-        if isMissing then
-            local _, _, tf, unf = findMissingMaterial(ing.Item, ing.Amount, data, beeCount or 35)
-            if not tf and unf then isUnfarm = true end
+    local missing = {}
+    local missingSeen = {}
+    local honeyLine = nil
+
+    local function markMissing(item, deficit)
+        local key = tostring(item)
+        if not missingSeen[key] then
+            missingSeen[key] = true
+            missing[#missing + 1] = string.format("%s %s", key, formatAmount(deficit))
         end
-        local status = not isMissing and "[OK]" or (isUnfarm and "[NEED - MANUAL]" or "[NEED]")
-        local line = string.format("• **%s**: %d/%d (%s)", ing.Item, invCount, ing.Amount, status)
-        if isMissing and RECIPES[ing.Item] then
-            local def = ing.Amount - invCount
-            local subParts = {}
-            for _, sub in ipairs(RECIPES[ing.Item]) do
-                local totalFruit = def * sub.Amount
-                local curFruit = countItem(sub.Item, data)
-                table.insert(subParts, string.format("%d %s [have %d]", totalFruit, sub.Item, curFruit))
-            end
-            if #subParts > 0 then
-                line = line .. "\n  └ *Raw: " .. table.concat(subParts, ", ") .. "*"
-            end
-        end
-        table.insert(lines, line)
     end
+
+    -- depth 0 = nguyen lieu chinh; depth > 0 = nguyen lieu tho de craft mon chinh
+    local function addLine(item, need, depth)
+        local have = countItem(item, data)
+        local name = plain and tostring(item) or ("**" .. tostring(item) .. "**")
+        local pad = depth == 0 and "• " or (string.rep("   ", depth) .. "-> ")
+        local deficit = need - have
+        if deficit <= 0 then
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Enough", pad, name, formatAmount(have), formatAmount(need))
+            return
+        end
+        if depth == 0 then markMissing(item, deficit) end
+        local recipe = getRecipe(item)
+        if recipe and depth < 4 then
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit))
+            for _, sub in ipairs(recipe) do
+                addLine(sub.Item, deficit * sub.Amount, depth + 1)
+            end
+        elseif item == "Stinger" then
+            -- stinger lay tu Vicious Bee, script da ho tro
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s (Vicious Bee)", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit))
+        elseif getFarmField(item, beeCount or 35) then
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit))
+        else
+            -- mon khong ho tro (khong craft, khong farm): chi bao thieu
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s (can't farm)", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit))
+        end
+    end
+
+    if hasIngredients then
+        for _, ing in ipairs(matched.Ingredients) do
+            addLine(ing.Item, ing.Amount, 0)
+        end
+    end
+
+    if honeyNeed > 0 then
+        local honeyHave = countItem("Honey", data)
+        local honeyName = plain and "Honey" or "**Honey**"
+        if honeyHave >= honeyNeed then
+            honeyLine = string.format("• %s: %s/%s - Enough", honeyName, formatAmount(honeyHave), formatAmount(honeyNeed))
+        else
+            local deficit = honeyNeed - honeyHave
+            honeyLine = string.format("• %s: %s/%s - Need %s", honeyName, formatAmount(honeyHave), formatAmount(honeyNeed), formatAmount(deficit))
+            missing[#missing + 1] = string.format("Honey %s", formatAmount(deficit))
+        end
+        lines[#lines + 1] = honeyLine
+    end
+
+    local status
+    if #missing == 0 then
+        status = "READY TO BUY"
+    else
+        status = "MISSING: " .. table.concat(missing, ", ")
+    end
+
+    -- gioi han so dong de webhook khong vuot gioi han Discord
+    if #lines > 38 then
+        local kept = {}
+        for i = 1, 38 do kept[i] = lines[i] end
+        if honeyLine then
+            local hasHoney = false
+            for _, l in ipairs(kept) do
+                if l == honeyLine then hasHoney = true break end
+            end
+            if not hasHoney then kept[#kept + 1] = honeyLine end
+        end
+        kept[#kept + 1] = string.format("… +%d more", #lines - 38)
+        lines = kept
+    end
+    lines[#lines + 1] = status
     return table.concat(lines, "\n")
 end
 
@@ -3434,37 +3968,107 @@ local lastWebhookTarget = nil
 local lastWebhookField = nil
 local lastWebhookMat = nil
 
-local function sendProgressWebhook(beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable, neededMat)
-    local roots = dropNils({ getgenv and getgenv(), _G, shared }, 3)
-    local webhookUrl = nil
-    local interval = 600
+-- lay link webhook + thoi gian gui lai tu getgenv/_G/shared
+-- gia tri nhap tu UI (uu tien hon getgenv)
+local WebhookState = { url = "", interval = nil, notifyBuy = true, notifyConfig = true, owned = nil, seen = {} }
 
-    for _, r in ipairs(roots) do
+local function getWebhookSettings()
+    local url, interval = nil, 600
+    for _, r in ipairs(dropNils({ getgenv and getgenv(), _G, shared }, 3)) do
         if type(r) == "table" then
-            if r.DiscordWebhookUrl and type(r.DiscordWebhookUrl) == "string" and r.DiscordWebhookUrl ~= "" then
-                webhookUrl = r.DiscordWebhookUrl
-            elseif r.WebhookUrl and type(r.WebhookUrl) == "string" and r.WebhookUrl ~= "" then
-                webhookUrl = r.WebhookUrl
+            if type(r.DiscordWebhookUrl) == "string" and r.DiscordWebhookUrl ~= "" then
+                url = r.DiscordWebhookUrl
+            elseif type(r.WebhookUrl) == "string" and r.WebhookUrl ~= "" then
+                url = r.WebhookUrl
             end
-            if r.WebhookInterval and tonumber(r.WebhookInterval) then
-                interval = tonumber(r.WebhookInterval)
-            end
+            if tonumber(r.WebhookInterval) then interval = tonumber(r.WebhookInterval) end
         end
     end
+    if WebhookState.url ~= "" then url = WebhookState.url end
+    if WebhookState.interval then interval = WebhookState.interval end
+    return url, interval
+end
 
-    if not webhookUrl or webhookUrl == "" then return end
+local function getHttpRequest()
+    return (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+end
+
+-- Components V2: 1 container gom cac khoi text, phan cach bang separator.
+-- blocks = { "## tieu de", "noi dung", "-# footer" } (khoi dau/cuoi khong can separator)
+local function buildV2Payload(blocks, color)
+    local inner = {}
+    for i, text in ipairs(blocks) do
+        if i > 1 then
+            inner[#inner + 1] = { type = 14, divider = (i == 2), spacing = 1 }
+        end
+        inner[#inner + 1] = { type = 10, content = text }
+    end
+    return {
+        username = getWebhookTitle(),
+        flags = 32768, -- IS_COMPONENTS_V2
+        components = { { type = 17, accent_color = color, components = inner } },
+    }
+end
+
+-- gui V2 truoc, neu Discord tu choi thi gui lai bang embed thuong
+local function postWebhook(url, v2Payload, embedPayload)
+    local httpRequest = getHttpRequest()
+    if not httpRequest or not url or url == "" then return false end
+
+    local function send(target, payload)
+        local okEnc, body = pcall(function() return HttpService:JSONEncode(payload) end)
+        if not okEnc then return false end
+        local ok, res = pcall(httpRequest, {
+            Url = target,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = body,
+        })
+        if not ok then return false end
+        if type(res) == "table" then
+            local code = tonumber(res.StatusCode)
+            if code and code >= 400 then return false end
+            if res.Success == false then return false end
+        end
+        return true
+    end
+
+    local v2Url = url .. (url:find("?", 1, true) and "&" or "?") .. "with_components=true"
+    if send(v2Url, v2Payload) then return true end
+    if embedPayload then return send(url, embedPayload) end
+    return false
+end
+
+-- bao su kien (mua do, doi config...). kind = "buy" | "config" | nil
+local function sendEventWebhook(kind, title, body, color)
+    if kind == "buy" and not WebhookState.notifyBuy then return false end
+    if kind == "config" and not WebhookState.notifyConfig then return false end
+    local url = getWebhookSettings()
+    if not url then return false end
+    return postWebhook(url,
+        buildV2Payload({
+            "## " .. title,
+            body,
+            string.format("-# %s • <t:%d:R>", player.Name, os.time()),
+        }, color or 3447003),
+        {
+            username = getWebhookTitle(),
+            embeds = { {
+                title = title, description = body, color = color or 3447003,
+                footer = { text = "Player: " .. player.Name },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+            } },
+        })
+end
+
+local function sendProgressWebhook(beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable, neededMat)
+    local webhookUrl, interval = getWebhookSettings()
+    if not webhookUrl or not getHttpRequest() then return end
 
     local now = tick()
     local stateChanged = (targetStr ~= lastWebhookTarget or fieldStr ~= lastWebhookField or neededMat ~= lastWebhookMat)
-    if not stateChanged and (now - lastWebhookTime < interval) then
-        return
-    end
-    if stateChanged and (now - lastWebhookTime < 15) then
-        return
-    end
-
-    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if not httpRequest then return end
+    if not stateChanged and (now - lastWebhookTime < interval) then return end
+    if stateChanged and (now - lastWebhookTime < 15) then return end
 
     lastWebhookTime = now
     lastWebhookTarget = targetStr
@@ -3472,96 +4076,33 @@ local function sendProgressWebhook(beeCount, targetStr, fieldStr, routeStr, data
     lastWebhookMat = neededMat
 
     local needIngredients = describeIngredients(targetStr, data, beeCount)
-    local noteText = isUnfarmable and string.format("\n⚠️ **Note:** Missing unfarmable item `%s` (cannot farm in fields).", tostring(needStr or targetStr or "Item")) or ""
+    local noteText = ""
+    if isUnfarmable then
+        noteText = string.format("\n⚠️ **Note:** can't farm `%s` in a field, you need to get it yourself.", tostring(needStr or targetStr or "this item"))
+    end
 
     local bodyText = string.format(
-        "**Bees :** %d\n" ..
-        "**Current Target:** %s%s\n" ..
-        "**Need:**\n%s\n" ..
-        "**Field:** %s\n" ..
-        "**Route:** %s",
-        tonumber(beeCount) or 0,
-        tostring(targetStr),
-        tostring(noteText),
-        tostring(needIngredients),
-        tostring(fieldStr),
-        tostring(routeStr)
+        "**Bees:** %d\n**Next item:** %s%s\n**Need:**\n%s\n**Field:** %s\n**Route:** %s",
+        tonumber(beeCount) or 0, tostring(targetStr), noteText,
+        tostring(needIngredients), tostring(fieldStr), tostring(routeStr)
     )
+    local color = isUnfarmable and 16744448 or 3447003
+    local title = getWebhookTitle()
 
-    local embedColor = isUnfarmable and 16744448 or 3447003
-
-    local payloadV2 = {
-        flags = 32768,
-        components = {
-            {
-                type = 17,
-                accent_color = embedColor,
-                components = {
-                    {
-                        type = 10,
-                        content = "## Ivyiz Auto Change Field Webhook v1.0"
-                    },
-                    {
-                        type = 14,
-                        divider = true,
-                        spacing = 1
-                    },
-                    {
-                        type = 10,
-                        content = bodyText
-                    },
-                    {
-                        type = 14,
-                        divider = false,
-                        spacing = 1
-                    },
-                    {
-                        type = 10,
-                        content = string.format("-# Player: %s • %s", player.Name, os.date("%X"))
-                    }
-                }
-            }
-        }
-    }
-
-    local ok, encoded = pcall(function() return HttpService:JSONEncode(payloadV2) end)
-    if ok and encoded then
-        local v2Url = webhookUrl .. (webhookUrl:find("?", 1, true) and "&with_components=true" or "?with_components=true")
-        local reqOk, res = pcall(function()
-            return httpRequest({
-                Url = v2Url,
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = encoded
-            })
-        end)
-
-        if not reqOk or (type(res) == "table" and res.StatusCode and res.StatusCode >= 400) then
-            local fallbackPayload = {
-                username = "Ivyiz Auto Change Field",
-                embeds = {
-                    {
-                        title = "Ivyiz Auto Change Field Webhook v1.0",
-                        description = bodyText,
-                        color = embedColor,
-                        footer = { text = string.format("Player: %s", player.Name) },
-                        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-                    }
-                }
-            }
-            local s2, enc2 = pcall(function() return HttpService:JSONEncode(fallbackPayload) end)
-            if s2 and enc2 then
-                pcall(function()
-                    httpRequest({
-                        Url = webhookUrl,
-                        Method = "POST",
-                        Headers = { ["Content-Type"] = "application/json" },
-                        Body = enc2
-                    })
-                end)
-            end
-        end
-    end
+    postWebhook(webhookUrl,
+        buildV2Payload({
+            "## " .. title,
+            bodyText,
+            string.format("-# %s • <t:%d:R>", player.Name, os.time()),
+        }, color),
+        {
+            username = title,
+            embeds = { {
+                title = title, description = bodyText, color = color,
+                footer = { text = "Player: " .. player.Name },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+            } },
+        })
 end
 
 local function printDebug()
@@ -3921,47 +4462,29 @@ local function applyStagePreset(stageInfo)
 end
 
 local function sendStageWebhook(oldStage, newStageInfo, beeCount, minLvl)
-    local roots = dropNils({ getgenv and getgenv(), _G, shared }, 3)
-    local webhookUrl = nil
-    for _, r in ipairs(roots) do
-        if type(r) == "table" then
-            if r.DiscordWebhookUrl and type(r.DiscordWebhookUrl) == "string" and r.DiscordWebhookUrl ~= "" then
-                webhookUrl = r.DiscordWebhookUrl
-            elseif r.WebhookUrl and type(r.WebhookUrl) == "string" and r.WebhookUrl ~= "" then
-                webhookUrl = r.WebhookUrl
-            end
-        end
-    end
-    if not webhookUrl or webhookUrl == "" then return end
+    if not WebhookState.notifyConfig then return end
+    local webhookUrl = getWebhookSettings()
+    if not webhookUrl or not getHttpRequest() then return end
 
-    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if not httpRequest then return end
-
-    local payload = {
-        embeds = {
-            {
-                title = "🚀 Auto Change Config - Thăng cấp Giai đoạn!",
-                description = string.format(
-                    "**Giai đoạn mới:** %s\n**File Config:** `%s`\n**Số ong:** %d\n**Min Level:** %d",
-                    tostring(newStageInfo.Name), tostring(newStageInfo.FileName), tonumber(beeCount) or 0, tonumber(minLvl) or 0
-                ),
-                color = 65280,
-                footer = { text = string.format("Player: %s", player.Name) },
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-            }
-        }
-    }
-    local ok, enc = pcall(function() return HttpService:JSONEncode(payload) end)
-    if ok and enc then
-        pcall(function()
-            httpRequest({
-                Url = webhookUrl,
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = enc
-            })
-        end)
-    end
+    local title = "Auto Change Config - Thăng cấp Giai đoạn!"
+    local bodyText = string.format(
+        "**Giai đoạn mới:** %s\n**File Config:** `%s`\n**Số ong:** %d\n**Min Level:** %d",
+        tostring(newStageInfo.Name), tostring(newStageInfo.FileName), tonumber(beeCount) or 0, tonumber(minLvl) or 0
+    )
+    postWebhook(webhookUrl,
+        buildV2Payload({
+            "## " .. title,
+            bodyText,
+            string.format("-# %s • <t:%d:R>", player.Name, os.time()),
+        }, 65280),
+        {
+            username = getWebhookTitle(),
+            embeds = { {
+                title = title, description = bodyText, color = 65280,
+                footer = { text = "Player: " .. player.Name },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+            } },
+        })
 end
 
 local function checkConfigStage(data, beeCount, minLvl)
@@ -3981,6 +4504,11 @@ local function checkConfigStage(data, beeCount, minLvl)
         if pendingStage ~= targetStageIdx then
             pendingStage = targetStageIdx
             pendingStageTime = tick()
+            local debounce = (getgenv and tonumber(getgenv().AutoChangeConfigDebounce)) or 15
+            task.spawn(sendEventWebhook, "config", "Đủ điều kiện đổi config",
+                string.format("**Sắp chuyển:** %s\n**Số ong:** %d (cần %d)\n**Min Level:** %d (cần %d)\nSẽ đổi sau khoảng %d giây nếu vẫn đủ điều kiện.",
+                    tostring(targetStage.Name), tonumber(beeCount) or 0, targetStage.MinBees, tonumber(minLvl) or 0, targetStage.MinLevel, debounce),
+                16776960)
             return
         end
 
@@ -4035,25 +4563,158 @@ _G.AutoProgDebug = printDebug
     }
 
     local MAP_COLORS = {
-        background = Color3.fromHex("#18181B"),
-        panel = Color3.fromHex("#27272A"),
+        background = Color3.fromHex("#101010"),
+        panel = Color3.fromHex("#2A2A2C"),
+        panelSoft = Color3.fromHex("#202022"),
         outline = Color3.fromHex("#3F3F46"),
-        text = Color3.fromHex("#F4F4F7"),
-        muted = Color3.fromHex("#A1A1AA"),
-        done = Color3.fromHex("#22C55E"),
+        text = Color3.fromHex("#FFFFFF"),
+        muted = Color3.fromHex("#A1A1A1"),
+        done = Color3.fromHex("#33C759"),
+        accent = Color3.fromHex("#0091FF"),
     }
     local MAP_FONT = Enum.Font.FredokaOne
+    local MAIN_FONT_FACE = Font.new("rbxasset://fonts/families/FredokaOne.json", Enum.FontWeight.Medium)
 
-    local routeSubLabel = nil
+    -- Mau cua gear tile bam theo theme WindUI dang dung. Theme co the doi luc
+    -- chay qua Settings > UI Theme, nen khong hard-code mau toi nua.
+    -- Gom state + helper vao mot table de khong vuot gioi han local cua Luau.
     local routeCountLabel = nil
-    local routeBarFill = nil
-    local hideOwned = false
+    local gearVisual = {
+        progressTrack = nil,
+        orderSignature = nil,
+        theme = {
+            background = MAP_COLORS.background,
+            panel = MAP_COLORS.panel,
+            panelSoft = MAP_COLORS.panelSoft,
+            panelTransparency = 0,
+            outline = MAP_COLORS.outline,
+            text = MAP_COLORS.text,
+            muted = MAP_COLORS.muted,
+            done = MAP_COLORS.done,
+            accent = MAP_COLORS.accent,
+        },
+    }
+
+    function gearVisual.color(theme, keys, fallback)
+        for _, key in ipairs(keys) do
+            local v = theme[key]
+            if typeof(v) == "Color3" then return v end
+            if type(v) == "string" and v:sub(1, 1) == "#" then
+                return Color3.fromHex(v)
+            end
+        end
+        return Color3.fromHex(fallback)
+    end
+
+    function gearVisual.refresh()
+        if not WindUI or not WindUI.GetCurrentTheme or not WindUI.GetThemes then return end
+        local ok, themeName = pcall(function() return WindUI:GetCurrentTheme() end)
+        if not ok or not themeName then return end
+        local themes = WindUI:GetThemes()
+        local theme = type(themes) == "table" and themes[themeName] or nil
+        if type(theme) ~= "table" then return end
+
+        local t = gearVisual.theme
+        t.background = gearVisual.color(theme, { "Background" }, "#101010")
+        t.panel = gearVisual.color(theme, { "ElementBackground", "PanelBackground" }, "#2A2A2C")
+        t.panelTransparency = tonumber(theme.ElementBackgroundTransparency) or 0
+        t.text = gearVisual.color(theme, { "Text" }, "#FFFFFF")
+        t.muted = gearVisual.color(theme, { "Placeholder", "Icon" }, "#A1A1A1")
+        t.outline = gearVisual.color(theme, { "Placeholder", "Outline" }, "#3F3F46")
+        t.done = gearVisual.color(theme, { "Toggle", "Primary", "Slider", "Accent", "Button" }, "#33C759")
+        t.accent = gearVisual.color(theme, { "Primary", "Slider", "Accent", "Button", "Toggle" }, "#0091FF")
+        t.panelSoft = t.panel:Lerp(t.background, 0.35)
+    end
+
+    function gearVisual.paint(obj)
+        if not obj or not obj.item then return end
+        local t = gearVisual.theme
+        local state = obj.state or "locked"
+
+        obj.item.BackgroundColor3 = (state == "owned") and t.panelSoft or t.panel
+        obj.item.BackgroundTransparency = t.panelTransparency
+        obj.tag.TextColor3 = t.muted
+        obj.status.TextColor3 = t.muted
+        obj.icon.ImageTransparency = (state == "owned") and 0.55 or 0
+        if obj.initialLbl then obj.initialLbl.TextColor3 = t.muted end
+
+        if state == "owned" then
+            obj.stroke.Color = t.done
+            obj.stroke.Transparency = 0.15
+            obj.nameLbl.TextColor3 = t.muted
+            obj.status.Text = "OWN"
+            obj.status.TextColor3 = t.done
+        elseif state == "target" then
+            obj.stroke.Color = t.accent
+            obj.stroke.Transparency = 0
+            obj.nameLbl.TextColor3 = t.text
+            obj.status.Text = "NEXT"
+            obj.status.TextColor3 = t.accent
+        else
+            obj.stroke.Color = t.outline
+            obj.stroke.Transparency = 0.65
+            obj.nameLbl.TextColor3 = t.text
+            obj.status.Text = ""
+        end
+
+        obj.item.Visible = not (gearHideOwned and state == "owned")
+    end
+
+    function gearVisual.applyTheme()
+        gearVisual.refresh()
+        local t = gearVisual.theme
+        if gearProgressText then gearProgressText.TextColor3 = t.text end
+        if routeCountLabel then routeCountLabel.TextColor3 = t.muted end
+        if gearVisual.progressTrack then gearVisual.progressTrack.BackgroundColor3 = t.outline end
+        if gearProgressFill then gearProgressFill.BackgroundColor3 = t.done end
+        for _, obj in pairs(routePills) do gearVisual.paint(obj) end
+    end
+
+    -- Sap xep tile theo dung thu tu route Atlas vua doc duoc. Mon nao khong
+    -- nam trong route hien tai thi giu thu tu goc va nam sau cac mon cua route.
+    function gearVisual.applyOrder(activeRoute)
+        if not gearListMounted or next(routePills) == nil then return end
+        if type(activeRoute) ~= "table" then activeRoute = getRoute() end
+        if type(activeRoute) ~= "table" then return end
+
+        local ordered, used, signatureParts = {}, {}, {}
+        local function add(obj)
+            if not obj or used[obj.key] then return end
+            used[obj.key] = true
+            ordered[#ordered + 1] = obj
+            signatureParts[#signatureParts + 1] = obj.key
+        end
+
+        for _, milestone in ipairs(activeRoute) do
+            local rawName = (type(milestone) == "table" and (milestone.Name or milestone.Item or milestone.Target)) or nil
+            if rawName then add(routePills[itemKey(rawName)]) end
+        end
+
+        local leftovers = {}
+        for key, obj in pairs(routePills) do
+            if not used[key] then leftovers[#leftovers + 1] = obj end
+        end
+        table.sort(leftovers, function(a, b)
+            return (a.baseOrder or 0) < (b.baseOrder or 0)
+        end)
+        for _, obj in ipairs(leftovers) do add(obj) end
+
+        local signature = table.concat(signatureParts, "|")
+        if signature == gearVisual.orderSignature then return end
+        gearVisual.orderSignature = signature
+
+        for index, obj in ipairs(ordered) do
+            obj.item.LayoutOrder = index
+            obj.tag.Text = tostring(index)
+        end
+    end
 
     local function makeLabel(parent, props)
         local lbl = Instance.new("TextLabel")
         lbl.BackgroundTransparency = 1
         lbl.BorderSizePixel = 0
         lbl.Font = MAP_FONT
+        lbl.FontFace = MAIN_FONT_FACE
         lbl.TextColor3 = MAP_COLORS.text
         for k, v in pairs(props) do lbl[k] = v end
         lbl.Parent = parent
@@ -4066,158 +4727,89 @@ _G.AutoProgDebug = printDebug
         return getRouteIcon(key) or ""
     end
 
-    local function buildRouteMap()
-        if routeMapGui then return end
-        local hui = (gethui and gethui()) or CoreGui
-        local old = hui:FindFirstChild("AutoProg_RouteFlowModal")
-        if old then pcall(function() old:Destroy() end) end
+    -- Build the gear list inside a WindUI tab, so it uses the same window,
+    -- theme, font and scrolling behaviour as the main tabs.
+    local function buildGearList(tab, progressLabel)
+        if gearListMounted then return end
 
-        routeMapGui = Instance.new("ScreenGui")
-        routeMapGui.Name = "AutoProg_RouteFlowModal"
-        routeMapGui.ResetOnSpawn = false
-        routeMapGui.DisplayOrder = 300000
-        routeMapGui.Enabled = false
-        routeMapGui.Parent = hui
+        local parent = tab and tab.UIElements and tab.UIElements.ContainerFrame
+        if not parent then return end
 
-        local camera = workspace.CurrentCamera
-        local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-        local width = math.min(450, viewport.X - 20)
-        local height = math.min(480, viewport.Y - 40)
+        gearListMounted = true
+        gearProgressLabel = progressLabel
 
-        routeMapFrame = Instance.new("Frame")
-        routeMapFrame.Name = "MainFrame"
-        routeMapFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-        routeMapFrame.Size = UDim2.fromOffset(width, height)
-        routeMapFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-        routeMapFrame.BackgroundColor3 = MAP_COLORS.background
-        routeMapFrame.BorderSizePixel = 0
-        routeMapFrame.Parent = routeMapGui
-        Instance.new("UICorner", routeMapFrame).CornerRadius = UDim.new(0, 12)
-        local border = Instance.new("UIStroke", routeMapFrame)
-        border.Color = MAP_COLORS.outline
+        gearListRoot = Instance.new("Frame")
+        gearListRoot.Name = "GearList"
+        gearListRoot.BackgroundTransparency = 1
+        gearListRoot.BorderSizePixel = 0
+        gearListRoot.Size = UDim2.new(1, 0, 0, 0)
+        gearListRoot.AutomaticSize = Enum.AutomaticSize.Y
+        gearListRoot.LayoutOrder = 50
+        gearListRoot.Parent = parent
 
-        -- thanh tren: ten + so luong + nut dong
-        local header = Instance.new("Frame")
-        header.Name = "Header"
-        header.Size = UDim2.new(1, 0, 0, 50)
-        header.BackgroundTransparency = 1
-        header.Parent = routeMapFrame
+        local rootLayout = Instance.new("UIListLayout", gearListRoot)
+        rootLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        rootLayout.Padding = UDim.new(0, 8)
+        rootLayout.FillDirection = Enum.FillDirection.Vertical
+        rootLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
-        makeLabel(header, {
-            Size = UDim2.new(0.5, 0, 0, 22),
-            Position = UDim2.new(0, 14, 0, 7),
-            Text = "Gear list",
-            TextSize = 16,
-            TextXAlignment = Enum.TextXAlignment.Left,
-        })
-        routeSubLabel = makeLabel(header, {
-            Size = UDim2.new(1, -110, 0, 14),
-            Position = UDim2.new(0, 14, 0, 28),
-            Text = "...",
-            TextSize = 11,
-            TextColor3 = MAP_COLORS.muted,
+        local summary = Instance.new("Frame")
+        summary.Name = "Summary"
+        summary.BackgroundTransparency = 1
+        summary.Size = UDim2.new(1, 0, 0, 18)
+        summary.LayoutOrder = 1
+        summary.Parent = gearListRoot
+
+        gearProgressText = makeLabel(summary, {
+            Size = UDim2.new(1, -82, 1, 0),
+            Text = "0/0 gear owned",
+            TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
         })
-        routeCountLabel = makeLabel(header, {
-            Size = UDim2.fromOffset(60, 20),
-            Position = UDim2.new(1, -100, 0, 10),
+        routeCountLabel = makeLabel(summary, {
+            Size = UDim2.fromOffset(76, 18),
+            Position = UDim2.new(1, -76, 0, 0),
             Text = "0/0",
             TextSize = 13,
             TextColor3 = MAP_COLORS.muted,
             TextXAlignment = Enum.TextXAlignment.Right,
         })
 
-        local closeBtn = Instance.new("TextButton")
-        closeBtn.Name = "CloseButton"
-        closeBtn.Size = UDim2.fromOffset(24, 24)
-        closeBtn.Position = UDim2.new(1, -34, 0, 10)
-        closeBtn.BackgroundColor3 = MAP_COLORS.panel
-        closeBtn.Font = MAP_FONT
-        closeBtn.Text = "x"
-        closeBtn.TextSize = 12
-        closeBtn.TextColor3 = MAP_COLORS.text
-        closeBtn.Parent = header
-        Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
-        local closeStroke = Instance.new("UIStroke", closeBtn)
-        closeStroke.Color = MAP_COLORS.outline
-        closeBtn.MouseButton1Click:Connect(function()
-            routeMapGui.Enabled = false
-        end)
-
-        -- keo thanh tren de di chuyen
-        local dragging, dragStart, startPos = false, nil, nil
-        header.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = true
-                dragStart = input.Position
-                startPos = routeMapFrame.Position
-            end
-        end)
-        trackConn(UserInputService.InputChanged:Connect(function(input)
-            if not dragging then return end
-            if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-                local delta = input.Position - dragStart
-                routeMapFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-            end
-        end))
-        trackConn(UserInputService.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = false
-            end
-        end))
-
-        -- thanh tien do
         local bar = Instance.new("Frame")
-        bar.Size = UDim2.new(1, -28, 0, 4)
-        bar.Position = UDim2.new(0, 14, 0, 50)
-        bar.BackgroundColor3 = MAP_COLORS.outline
+        bar.Name = "ProgressBar"
+        bar.Size = UDim2.new(1, 0, 0, 4)
+        bar.BackgroundColor3 = gearVisual.theme.outline
         bar.BorderSizePixel = 0
-        bar.Parent = routeMapFrame
+        bar.LayoutOrder = 2
+        bar.Parent = gearListRoot
         Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
-        routeBarFill = Instance.new("Frame")
-        routeBarFill.Size = UDim2.new(0, 0, 1, 0)
-        routeBarFill.BackgroundColor3 = MAP_COLORS.done
-        routeBarFill.BorderSizePixel = 0
-        routeBarFill.Parent = bar
-        Instance.new("UICorner", routeBarFill).CornerRadius = UDim.new(1, 0)
+        gearVisual.progressTrack = bar
 
-        -- nut an mon da co
-        local filterBtn = Instance.new("TextButton")
-        filterBtn.Size = UDim2.new(1, -28, 0, 26)
-        filterBtn.Position = UDim2.new(0, 14, 0, 62)
-        filterBtn.BackgroundColor3 = MAP_COLORS.panel
-        filterBtn.Font = MAP_FONT
-        filterBtn.TextSize = 12
-        filterBtn.TextColor3 = MAP_COLORS.muted
-        filterBtn.Text = "Showing everything (tap to hide owned)"
-        filterBtn.AutoButtonColor = true
-        filterBtn.Parent = routeMapFrame
-        Instance.new("UICorner", filterBtn).CornerRadius = UDim.new(0, 6)
-        local filterStroke = Instance.new("UIStroke", filterBtn)
-        filterStroke.Color = MAP_COLORS.outline
+        gearProgressFill = Instance.new("Frame")
+        gearProgressFill.Name = "Fill"
+        gearProgressFill.Size = UDim2.new(0, 0, 1, 0)
+        gearProgressFill.BackgroundColor3 = MAP_COLORS.done
+        gearProgressFill.BorderSizePixel = 0
+        gearProgressFill.Parent = bar
+        Instance.new("UICorner", gearProgressFill).CornerRadius = UDim.new(1, 0)
 
-        routeList = Instance.new("ScrollingFrame")
-        routeList.Name = "Items"
-        routeList.Size = UDim2.new(1, -20, 1, -98)
-        routeList.Position = UDim2.new(0, 10, 0, 94)
-        routeList.BackgroundTransparency = 1
-        routeList.BorderSizePixel = 0
-        routeList.ScrollBarThickness = 3
-        routeList.ScrollBarImageColor3 = MAP_COLORS.outline
-        routeList.CanvasSize = UDim2.new(0, 0, 0, 0)
-        routeList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        routeList.ScrollingDirection = Enum.ScrollingDirection.Y
-        routeList.Parent = routeMapFrame
+        gearListGrid = Instance.new("Frame")
+        gearListGrid.Name = "Grid"
+        gearListGrid.BackgroundTransparency = 1
+        gearListGrid.BorderSizePixel = 0
+        gearListGrid.Size = UDim2.new(1, 0, 0, 0)
+        gearListGrid.AutomaticSize = Enum.AutomaticSize.Y
+        gearListGrid.LayoutOrder = 3
+        gearListGrid.Parent = gearListRoot
 
-        local grid = Instance.new("UIGridLayout", routeList)
+        local grid = Instance.new("UIGridLayout", gearListGrid)
+        grid.Name = "GridLayout"
         grid.SortOrder = Enum.SortOrder.LayoutOrder
-        grid.CellSize = UDim2.fromOffset(76, 84)
+        grid.CellSize = UDim2.fromOffset(86, 92)
         grid.CellPadding = UDim2.fromOffset(6, 6)
         grid.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        local pad = Instance.new("UIPadding", routeList)
-        pad.PaddingBottom = UDim.new(0, 6)
-        pad.PaddingTop = UDim.new(0, 2)
+        grid.VerticalAlignment = Enum.VerticalAlignment.Top
 
         routePills = {}
         local step = 0
@@ -4228,101 +4820,94 @@ _G.AutoProgDebug = printDebug
                 local tile = Instance.new("Frame")
                 tile.Name = "Item_" .. step
                 tile.LayoutOrder = step
-                tile.BackgroundColor3 = MAP_COLORS.panel
+                tile.BackgroundColor3 = gearVisual.theme.panel
                 tile.BorderSizePixel = 0
-                tile.Parent = routeList
-                Instance.new("UICorner", tile).CornerRadius = UDim.new(0, 8)
+                tile.Parent = gearListGrid
+                Instance.new("UICorner", tile).CornerRadius = UDim.new(0, 10)
+
                 local stroke = Instance.new("UIStroke", tile)
-                stroke.Color = MAP_COLORS.outline
+                stroke.Color = gearVisual.theme.outline
+                stroke.Thickness = 1
+                stroke.Transparency = 0.65
+
+                local tag = makeLabel(tile, {
+                    Size = UDim2.fromOffset(34, 13),
+                    Position = UDim2.new(0, 6, 0, 5),
+                    Text = tostring(step),
+                    TextSize = 9,
+                    TextColor3 = gearVisual.theme.muted,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                })
+                local status = makeLabel(tile, {
+                    Size = UDim2.new(1, -48, 0, 13),
+                    Position = UDim2.new(0, 42, 0, 5),
+                    Text = "",
+                    TextSize = 8,
+                    TextColor3 = gearVisual.theme.muted,
+                    TextXAlignment = Enum.TextXAlignment.Right,
+                })
 
                 local icon = Instance.new("ImageLabel")
                 icon.Name = "Icon"
-                icon.Size = UDim2.fromOffset(40, 40)
-                icon.Position = UDim2.new(0.5, -20, 0, 6)
+                icon.Size = UDim2.fromOffset(38, 38)
+                icon.Position = UDim2.new(0.5, -19, 0, 9)
                 icon.BackgroundTransparency = 1
                 icon.BorderSizePixel = 0
                 icon.ScaleType = Enum.ScaleType.Fit
                 icon.Parent = tile
+
                 local asset = getItemIcon(rawName)
+                local initialLbl = nil
                 if asset ~= "" then
                     icon.Image = asset
                 else
-                    -- chua co anh: hien chu cai dau
-                    makeLabel(tile, {
-                        Size = UDim2.fromOffset(40, 40),
-                        Position = UDim2.new(0.5, -20, 0, 6),
+                    initialLbl = makeLabel(tile, {
+                        Size = UDim2.fromOffset(38, 38),
+                        Position = UDim2.new(0.5, -19, 0, 9),
                         Text = rawName:sub(1, 1),
-                        TextSize = 22,
-                        TextColor3 = MAP_COLORS.outline,
+                        TextSize = 21,
+                        TextColor3 = gearVisual.theme.muted,
                     })
                 end
 
                 local nameLbl = makeLabel(tile, {
-                    Size = UDim2.new(1, -6, 0, 28),
-                    Position = UDim2.new(0, 3, 0, 50),
+                    Size = UDim2.new(1, -8, 0, 30),
+                    Position = UDim2.new(0, 4, 0, 55),
                     Text = rawName,
-                    Font = Enum.Font.GothamMedium,
                     TextSize = 10,
                     TextWrapped = true,
+                    TextYAlignment = Enum.TextYAlignment.Top,
+                    TextXAlignment = Enum.TextXAlignment.Center,
                 })
 
-                local tag = makeLabel(tile, {
-                    Size = UDim2.fromOffset(30, 12),
-                    Position = UDim2.new(0, 4, 0, 3),
-                    Text = tostring(step),
-                    TextSize = 9,
-                    TextColor3 = MAP_COLORS.muted,
-                    TextXAlignment = Enum.TextXAlignment.Left,
-                })
-
-                routePills[(rawName:gsub("[%s%-_']", "")):lower()] = {
-                    item = tile, stroke = stroke, nameLbl = nameLbl, tag = tag, icon = icon, name = rawName,
+                local key = (rawName:gsub("[%s%-_']", "")):lower()
+                routePills[key] = {
+                    item = tile, stroke = stroke, nameLbl = nameLbl, tag = tag,
+                    status = status, icon = icon, initialLbl = initialLbl,
+                    name = rawName, key = key, baseOrder = step, state = "locked",
                 }
             end
         end
-
-        local function paintFilter()
-            filterBtn.Text = hideOwned and "Hiding owned gear (tap to show all)" or "Showing everything (tap to hide owned)"
-            for _, obj in pairs(routePills) do
-                obj.item.Visible = not (hideOwned and obj.state == "owned")
-            end
-        end
-        filterBtn.MouseButton1Click:Connect(function()
-            hideOwned = not hideOwned
-            paintFilter()
-        end)
+        gearVisual.applyTheme()
+        gearVisual.applyOrder(getRoute())
     end
 
+    local function paintGearFilter()
+        for _, obj in pairs(routePills) do
+            obj.item.Visible = not (gearHideOwned and obj.state == "owned")
+        end
+    end
     local function setItemState(obj, state)
         if obj.state == state then return end
         obj.state = state
-        obj.item.Visible = not (hideOwned and state == "owned")
-        if state == "owned" then
-            obj.item.BackgroundColor3 = MAP_COLORS.panel
-            obj.stroke.Color = MAP_COLORS.done
-            obj.nameLbl.TextColor3 = MAP_COLORS.muted
-            obj.tag.Text = "own"
-            obj.tag.TextColor3 = MAP_COLORS.done
-            obj.icon.ImageTransparency = 0.5
-        elseif state == "target" then
-            obj.item.BackgroundColor3 = MAP_COLORS.text
-            obj.stroke.Color = MAP_COLORS.text
-            obj.nameLbl.TextColor3 = MAP_COLORS.panel
-            obj.tag.Text = "next"
-            obj.tag.TextColor3 = MAP_COLORS.panel
-            obj.icon.ImageTransparency = 0
-        else
-            obj.item.BackgroundColor3 = MAP_COLORS.panel
-            obj.stroke.Color = MAP_COLORS.outline
-            obj.nameLbl.TextColor3 = MAP_COLORS.text
-            obj.tag.Text = ""
-            obj.icon.ImageTransparency = 0
-        end
+        gearVisual.paint(obj)
     end
 
     local function updateRouteMap(activeTarget, char, data)
         lastMapArgs = { activeTarget, char, data }
-        if not routeMapGui or not routeMapGui.Enabled then return end
+        if not gearListMounted then return end
+
+        gearVisual.applyOrder(getRoute())
 
         local targetKey = activeTarget and (activeTarget:gsub("[%s%-_']", "")):lower()
         local owned, total = 0, 0
@@ -4338,17 +4923,57 @@ _G.AutoProgDebug = printDebug
             end
         end
 
-        routeCountLabel.Text = string.format("%d/%d", owned, total)
-        routeBarFill.Size = UDim2.new(total > 0 and owned / total or 0, 0, 1, 0)
-        routeSubLabel.Text = activeTarget and ("going for: " .. activeTarget) or "all done"
+        if routeCountLabel then routeCountLabel.Text = string.format("%d/%d", owned, total) end
+        if gearProgressText then
+            gearProgressText.Text = string.format("%d/%d gear owned", owned, total)
+        end
+        if gearProgressFill then
+            gearProgressFill.Size = UDim2.new(total > 0 and owned / total or 0, 0, 1, 0)
+        end
+        if gearProgressLabel then
+            gearProgressLabel:SetTitle(string.format("Gear %d/%d", owned, total))
+            gearProgressLabel:SetDesc(activeTarget and ("Next: " .. activeTarget) or "All route gear owned")
+        end
     end
 
     local function toggleRouteMap()
-        buildRouteMap()
-        if not routeMapGui then return end
-        routeMapGui.Enabled = not routeMapGui.Enabled
-        if routeMapGui.Enabled and lastMapArgs then
-            updateRouteMap(lastMapArgs[1], lastMapArgs[2], lastMapArgs[3])
+        if openGearListFn then
+            pcall(openGearListFn)
+        end
+    end
+
+    -- phat hien mon do moi so huu de bao webhook (lan doc dau chi ghi nho, khong bao)
+    local function trackPurchases(p)
+        if not p or not p.data then return end
+        local char = player.Character
+        local total, ownedCount, fresh = 0, 0, {}
+        local firstRun = (WebhookState.owned == nil)
+        if firstRun then WebhookState.owned = {} end
+        for _, row in ipairs(ROUTE_MAP_ROWS) do
+            for _, name in ipairs(row) do
+                total = total + 1
+                if ownsItem(name, "Gear", char, p.data) then
+                    ownedCount = ownedCount + 1
+                    if not WebhookState.owned[name] then
+                        if firstRun then
+                            WebhookState.owned[name] = true
+                        else
+                            -- phai thay 2 lan lien tiep cho chac, tranh bao nham
+                            WebhookState.seen[name] = (WebhookState.seen[name] or 0) + 1
+                            if WebhookState.seen[name] >= 2 then
+                                WebhookState.owned[name] = true
+                                fresh[#fresh + 1] = name
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if #fresh > 0 then
+            task.spawn(sendEventWebhook, "buy", "Đã mua xong đồ mới",
+                string.format("**Đã có:** %s\n**Tiến độ:** %d/%d món\n**Món tiếp theo:** %s",
+                    table.concat(fresh, ", "), ownedCount, total, tostring(p.targetItem or "xong route")),
+                5763719)
         end
     end
 
@@ -4365,19 +4990,34 @@ _G.AutoProgDebug = printDebug
     end
 
     local function describeNeed(p)
-        if p.neededMat then
-            return string.format("%s (%s)%s", p.neededMat, tostring(p.neededAmt), p.isUnfarmable and " [Unfarmable]" or "")
+        if p.neededMat == "Honey" and p.targetItem then
+            local deficit, have, need = getHoneyInfo(p.targetItem, p.data)
+            if deficit <= 0 then deficit = tonumber(p.neededAmt) or 0 end
+            return string.format("Honey %s (have %s/%s)", formatAmount(deficit), formatAmount(have), formatAmount(need))
         end
-        return p.targetItem and "Honey" or "None"
+        if p.neededMat then
+            return string.format("%s %s%s", tostring(p.neededMat), formatAmount(p.neededAmt),
+                p.isUnfarmable and " [Unfarmable]" or "")
+        end
+        if p.targetItem then
+            local mat, amt, have, need = topLevelMissing(p.targetItem, p.data)
+            if mat == "Honey" then
+                return string.format("Honey %s (have %s/%s)", formatAmount(amt), formatAmount(have), formatAmount(need))
+            elseif mat then
+                return string.format("%s %s", tostring(mat), formatAmount(amt))
+            end
+            return "READY"
+        end
+        return "None"
     end
 
     local function refreshProgressionUI(p)
         local ok, err = pcall(function()
             p = p or snapshotProgress()
             local targetTitle = string.format("Next item: %s", tostring(p.targetItem or "nothing left"))
-            local needBody = describeIngredients(p.targetItem, p.data, p.beeCount)
+            local needBody = describeIngredients(p.targetItem, p.data, p.beeCount, true)
             local targetDesc = string.format("Field: %s\nBees: %d, lowest level %d\n\nNeed:\n%s",
-                tostring(p.field or "None"),
+                tostring(p.field or (p.targetItem and "Unchanged" or "None")),
                 tonumber(p.beeCount) or 0,
                 tonumber(p.minBeeLvl) or 0,
                 tostring(needBody)
@@ -4428,6 +5068,8 @@ _G.AutoProgDebug = printDebug
 
             checkConfigStage(p.data, p.beeCount, p.minBeeLvl)
 
+            trackPurchases(p)
+
             task.spawn(sendProgressWebhook, p.beeCount, p.targetItem or "None", p.field or "Unchanged",
                 routeFound and "Found" or "Not Found", p.data, describeNeed(p), p.isUnfarmable, p.neededMat)
         end)
@@ -4454,9 +5096,18 @@ _G.AutoProgDebug = printDebug
         if hudGui and hudGui.Destroy then
             pcall(function() hudGui:Destroy() end)
         end
-        if routeMapGui and routeMapGui.Destroy then
-            pcall(function() routeMapGui:Destroy() end)
+        if gearListRoot and gearListRoot.Destroy then
+            pcall(function() gearListRoot:Destroy() end)
         end
+        gearListRoot = nil
+        gearListGrid = nil
+        gearProgressLabel = nil
+        gearProgressText = nil
+        gearProgressFill = nil
+        routePills = {}
+        gearListMounted = false
+        gearVisual.orderSignature = nil
+        gearVisual.progressTrack = nil
     end
 
     return {
@@ -4466,13 +5117,34 @@ _G.AutoProgDebug = printDebug
         rescanProgression = rescanProgression,
         setHudVisible = setHudVisible,
         toggleRouteMap = toggleRouteMap,
+        openGearList = toggleRouteMap,
+        mountGearList = buildGearList,
+        applyGearTheme = function() gearVisual.applyTheme() end,
+        setGearHideOwned = function(v)
+            gearHideOwned = v and true or false
+            paintGearFilter()
+        end,
+        setOpenGearList = function(fn)
+            openGearListFn = fn
+        end,
         cleanupProgression = cleanupProgression,
         setTargetLabel = function(targetP)
             progTargetLabel = targetP
         end,
         setAutoProgression = function(v) autoProgressionEnabled = v end,
         setAutoFieldSwitch = function(v) autoFieldSwitchEnabled = v end,
-        setAutoHuntVicious = function(v) autoHuntViciousEnabled = v end
+        setAutoHuntVicious = function(v) autoHuntViciousEnabled = v end,
+        setWebhookUrl = function(url) WebhookState.url = url or "" end,
+        setWebhookInterval = function(seconds) WebhookState.interval = tonumber(seconds) end,
+        setNotifyBuy = function(v) WebhookState.notifyBuy = v and true or false end,
+        setNotifyConfig = function(v) WebhookState.notifyConfig = v and true or false end,
+        sendTestWebhook = function()
+            local url = getWebhookSettings()
+            if not url then return false, "no link" end
+            if not getHttpRequest() then return false, "executor has no http request" end
+            local ok = sendEventWebhook(nil, "Test message", "Webhook is working. This came from Ivyis's Tool.", 5763719)
+            return ok, ok and "sent" or "Discord refused it"
+        end,
     }
 end)()
 
@@ -4944,6 +5616,79 @@ local function setGameSetting(settingName, val)
     safeClientCall("PlayerSettingsEvent", settingName, val)
 end
 
+-- Bee Swarm's "Until gifted" auto-jelly switch is stored as "RollToGifted" in
+-- current builds. Very old builds used "UntilGifted"; writing that dead key is
+-- silently ignored, so the switch never turned on even though the web asked for
+-- it. Detect the key the running game actually uses.
+local function giftedRollKey()
+    local data = getStatData()
+    local settings = data and data.Settings
+    if type(settings) == "table" and settings.RollToGifted == nil and settings.UntilGifted ~= nil then
+        return "UntilGifted"
+    end
+    return "RollToGifted"
+end
+
+local function setUntilGifted(value)
+    pcall(setGameSetting, giftedRollKey(), value == true)
+end
+
+local function rollSettingKeys()
+    return { "RollToMythic", "RollToLegendary", giftedRollKey() }
+end
+
+-- What the game currently has for those three switches. Sent with every state
+-- post so the web checkboxes show the real in-game values, not a guess.
+local function readRollSettings()
+    local data = getStatData()
+    local settings = data and data.Settings
+    if type(settings) ~= "table" then return nil end
+    return {
+        untilGifted = settings.RollToGifted == true or settings.UntilGifted == true,
+        untilMythic = settings.RollToMythic == true,
+        untilLegendary = settings.RollToLegendary == true,
+    }
+end
+
+local originalRollSettings = nil
+
+captureRollSettings = function()
+    if originalRollSettings then return end
+    local data = getStatData()
+    local settings = data and data.Settings
+    if not settings then return end
+    local saved = {}
+    for _, key in ipairs(rollSettingKeys()) do
+        local value = settings[key]
+        if type(value) == "boolean" then
+            saved[key] = value
+        end
+    end
+    if next(saved) then
+        originalRollSettings = saved
+    end
+end
+
+restoreRollSettings = function()
+    local saved = originalRollSettings
+    originalRollSettings = nil
+    if not saved then return end
+    -- With sync off the roll never touched Until mythic/legendary, so restoring
+    -- those keys would only overwrite a change the player made in the meantime.
+    local sync = forcedRollFlags.syncSettings ~= false
+    local giftedKey = giftedRollKey()
+    for key, value in pairs(saved) do
+        if key == giftedKey or sync then
+            pcall(setGameSetting, key, value)
+        end
+    end
+    -- A finished roll puts the player's own switches back, but the web's
+    -- "Until gifted" must survive that restore.
+    if forcedRollFlags.untilGifted then
+        setUntilGifted(true)
+    end
+end
+
 WindUI:AddTheme({
     Name = "Pearl",
     Accent = Color3.fromHex("#18181B"),
@@ -5017,46 +5762,105 @@ task.spawn(function()
     end
 end)
 
-task.spawn(function()
-    local customBgAsset = loadIcon()
-    local hui = (gethui and gethui()) or game:GetService("CoreGui")
-    for _ = 1, 40 do
-        task.wait(0.25)
-        local win = hui:FindFirstChild("WindUI")
-        local window = win and win:FindFirstChild("Window")
-        local frame = window and window:FindFirstChild("Frame")
-        if frame then
-            local bg = frame:FindFirstChild("IvyisBackground")
-            if not bg then
-                bg = Instance.new("ImageLabel")
-                bg.Name = "IvyisBackground"
-                bg.AnchorPoint = Vector2.new(0, 0)
-                bg.Size = UDim2.new(1, 0, 1, 0)
-                bg.Position = UDim2.new(0, 0, 0, 0)
-                bg.BackgroundTransparency = 1
-                bg.ScaleType = Enum.ScaleType.Crop
-                bg.Image = customBgAsset
-                bg.ImageTransparency = 0.55
-                bg.ZIndex = 2
-                Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 10)
-                bg.Parent = frame
-            else
-                bg.AnchorPoint = Vector2.new(0, 0)
-                bg.Size = UDim2.new(1, 0, 1, 0)
-                bg.Position = UDim2.new(0, 0, 0, 0)
-                bg.ScaleType = Enum.ScaleType.Crop
-                bg.Image = customBgAsset
-                bg.ImageTransparency = 0.55
-            end
-            break
-        end
-    end
-end)
-
 local FeedTab = Window:Tab({ Title = "Feed", Icon = "cookie" })
 local HiveTab = Window:Tab({ Title = "Hive", Icon = "layout-grid" })
 local ProgTab = Window:Tab({ Title = "Progress", Icon = "route" })
+local GearTab = Window:Tab({ Title = "Gear", Icon = "backpack" })
 local SettingsTab = Window:Tab({ Title = "Settings", Icon = "settings" })
+
+-- luu cai dat vao workspace cua executor, lan sau execute tu nap lai
+local SettingsStore = {
+    path = "AutoFeedBSS/settings_" .. tostring(player.Name):gsub("[^%w_%-]", "_") .. ".json",
+    sharedPath = "AutoFeedBSS/settings.json", -- file chung cu, chi doc de lam mau lan dau
+    data = {},
+    pending = {},
+    ready = false,
+    queued = false,
+    skip = {
+        ["Auto feed"] = true, ["Auto roll"] = true,
+        ["Show info text on screen"] = true, ["Paste layout text"] = true,
+        ["Discord link code"] = true,
+    },
+}
+
+do
+    if isfile and readfile then
+        local source = isfile(SettingsStore.path) and SettingsStore.path
+            or (isfile(SettingsStore.sharedPath) and SettingsStore.sharedPath)
+        if source then
+            local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(source)) end)
+            if ok and type(decoded) == "table" then SettingsStore.data = decoded end
+        end
+    end
+
+    local function writeNow()
+        if not writefile then return end
+        pcall(function()
+            if makefolder and isfolder and not isfolder("AutoFeedBSS") then makefolder("AutoFeedBSS") end
+        end)
+        pcall(writefile, SettingsStore.path, HttpService:JSONEncode(SettingsStore.data))
+    end
+
+    local function queueWrite()
+        if SettingsStore.queued then return end
+        SettingsStore.queued = true
+        task.delay(1.5, function()
+            SettingsStore.queued = false
+            writeNow()
+        end)
+    end
+
+    local function hasValue(list, v)
+        if type(list) ~= "table" then return false end
+        for _, x in ipairs(list) do if x == v then return true end end
+        return false
+    end
+
+    local function hook(tab, tabName)
+        for _, kind in ipairs({ "Toggle", "Slider", "Dropdown", "Input" }) do
+            local original = tab[kind]
+            tab[kind] = function(self, opts)
+                if not opts.Callback or SettingsStore.skip[opts.Title] then
+                    return original(self, opts)
+                end
+                local key = tabName .. "/" .. tostring(opts.Title)
+                local callback = opts.Callback
+                local saved = SettingsStore.data[key]
+                local usable = false
+                if saved ~= nil then
+                    if kind == "Toggle" and type(saved) == "boolean" then
+                        opts.Value = saved; usable = true
+                    elseif kind == "Slider" and type(saved) == "number" and type(opts.Value) == "table" then
+                        saved = math.max(opts.Value.Min, math.min(opts.Value.Max, saved))
+                        opts.Value.Default = saved; usable = true
+                    elseif kind == "Dropdown" and type(saved) == "string" and hasValue(opts.Values, saved) then
+                        opts.Value = saved; usable = true
+                    elseif kind == "Input" and type(saved) == "string" then
+                        opts.Value = saved; usable = true
+                    end
+                end
+                local wrapped = function(v, ...)
+                    if SettingsStore.ready then
+                        SettingsStore.data[key] = v
+                        queueWrite()
+                    end
+                    return callback(v, ...)
+                end
+                opts.Callback = wrapped
+                if usable then
+                    SettingsStore.pending[#SettingsStore.pending + 1] = { wrapped, saved }
+                end
+                return original(self, opts)
+            end
+        end
+    end
+
+    hook(FeedTab, "Feed")
+    hook(HiveTab, "Hive")
+    hook(ProgTab, "Progress")
+    hook(GearTab, "Gear")
+    hook(SettingsTab, "Settings")
+end
 FeedTab:Section({ Title = "Feed settings" })
 
 local treatStatusLabel = FeedTab:Paragraph({
@@ -5210,12 +6014,17 @@ for _, b in ipairs(ALL_BEES) do
     local opt = b.name
     beeMapByOption[opt] = b.id
     beeMapByOption[b.id] = b.id
-    table.insert(beeDropdownOptions, opt)
+    -- Basic Bee is the starter bee and can never be rolled/applied as a target.
+    -- Keep it resolvable (existing layouts, hive scans) but out of the picker.
+    if b.id ~= "BasicBee" then
+        table.insert(beeDropdownOptions, opt)
+    end
 end
 
 local refreshHiveGrid
 local refreshBuilderStatus
 local refreshQuotaText
+local refreshSsaStatus
 
 local hui = (gethui and gethui()) or game:GetService("CoreGui")
 if hui:FindFirstChild("AutoFeed_HiveModalGui") then
@@ -5225,22 +6034,25 @@ if hui:FindFirstChild("AutoFeed_MobileToggle") then
     hui:FindFirstChild("AutoFeed_MobileToggle"):Destroy()
 end
 
-local function toggleMainWindow()
-    local winFrame = Window.UIElements and Window.UIElements.Main
-    local isHidden = Window.Closed or (winFrame and winFrame.Size.Y.Offset < 50) or (winFrame and not winFrame.Visible) or (winFrame and winFrame:FindFirstChild("Main") and not winFrame.Main.Visible)
-    if isHidden then
-        if Window.Open then pcall(function() Window:Open() end) end
-        if winFrame then
-            winFrame.Visible = true
-            if winFrame:FindFirstChild("Main") then winFrame.Main.Visible = true end
-        end
-    else
-        if Window.Close then
-            pcall(function() Window:Close() end)
-        elseif winFrame then
-            winFrame.Visible = false
+-- bat/tat cua so ngay lap tuc, khong chay animation cua WindUI
+local function findWindUIGui()
+    for _, root in ipairs({ (gethui and gethui()) or false, CoreGui, player:FindFirstChild("PlayerGui") }) do
+        if root then
+            local g = root:FindFirstChild("WindUI")
+            if g and g:IsA("ScreenGui") then return g end
         end
     end
+    return nil
+end
+
+local function toggleMainWindow()
+    local g = findWindUIGui()
+    if g then
+        g.Enabled = not g.Enabled
+        return
+    end
+    local winFrame = Window.UIElements and Window.UIElements.Main
+    if winFrame then winFrame.Visible = not winFrame.Visible end
 end
 
 local mobileGui = Instance.new("ScreenGui")
@@ -5312,7 +6124,9 @@ trackConn(mobileBtn.Activated:Connect(function()
     btnMoved = false
 end))
 
-pcall(function() Window:SetToggleKey(Enum.KeyCode.RightControl) end)
+trackConn(UserInputService.InputBegan:Connect(function(input, processed)
+    if not processed and input.KeyCode == Enum.KeyCode.RightControl then toggleMainWindow() end
+end))
 pcall(function()
     Window:OnClose(function()
         if mobileGui then mobileGui.Enabled = true end
@@ -5711,7 +6525,7 @@ local ssaMissingLabel = HiveTab:Paragraph({
     Desc = "Calculating..."
 })
 
-local function refreshSsaStatus()
+function refreshSsaStatus()
     local disc = ssaGetGiftedDiscoveredMap()
     local giftedCount, missingCount = 0, 0
     local rarityDiscovered = { Common = 0, Rare = 0, Epic = 0, Legendary = 0, Mythic = 0, Event = 0 }
@@ -6083,9 +6897,9 @@ HiveTab:Button({
 
 HiveTab:Section({ Title = "Royal jelly" })
 
-HiveTab:Toggle({
+autoSyncToggle = HiveTab:Toggle({
     Title = "Copy roll settings from game",
-    Value = true,
+    Value = autoSyncSettings,
     Callback = function(v) autoSyncSettings = v end
 })
 
@@ -6139,7 +6953,7 @@ ProgTab:Section({ Title = "Gear" })
 ProgTab:Button({
     Title = "Open gear list",
     Callback = function()
-        Progression.toggleRouteMap()
+        Progression.openGearList()
     end
 })
 
@@ -6164,7 +6978,7 @@ ProgTab:Toggle({
 
 ProgTab:Toggle({
     Title = "Show info text on screen",
-    Value = false,
+    Value = true,
     Callback = function(v)
         Progression.setHudVisible(v)
     end
@@ -6183,6 +6997,37 @@ ProgTab:Button({
 })
 
 Progression.setTargetLabel(progTargetLabel)
+
+-- Gear list lives in a normal WindUI tab now, instead of a separate raw GUI.
+-- This keeps the same theme, font, sidebar and scrolling as the main tabs.
+GearTab:Section({ Title = "Collection" })
+local gearProgressLabel = GearTab:Paragraph({
+    Title = "Gear 0/0",
+    Desc = "reading route..."
+})
+GearTab:Toggle({
+    Title = "Hide owned gear",
+    Value = false,
+    Callback = function(v)
+        Progression.setGearHideOwned(v)
+    end
+})
+Progression.mountGearList(GearTab, gearProgressLabel)
+pcall(function()
+    if WindUI.OnThemeChange then
+        WindUI:OnThemeChange(function()
+            Progression.applyGearTheme()
+        end)
+    end
+end)
+Progression.setOpenGearList(function()
+    Window:Open()
+    GearTab:Select()
+end)
+pcall(function()
+    FeedTab:Select()
+end)
+
 SettingsTab:Section({ Title = "General" })
 
 SettingsTab:Toggle({
@@ -6375,6 +7220,178 @@ SettingsTab:Dropdown({
     Value = "Dark",
     Callback = function(theme)
         pcall(function() WindUI:SetTheme(theme) end)
+    end
+})
+
+SettingsTab:Section({ Title = "Discord webhook" })
+
+SettingsTab:Input({
+    Title = "Webhook link",
+    Value = "",
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Callback = function(v)
+        v = tostring(v or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if v == "" or v:match("^https://[%w%.]*discord%.com/api/webhooks/") or v:match("^https://[%w%.]*discordapp%.com/api/webhooks/") then
+            Progression.setWebhookUrl(v)
+        else
+            Progression.setWebhookUrl("")
+            WindUI:Notify({ Title = "Webhook", Content = "That doesn't look like a Discord webhook link", Duration = 3 })
+        end
+    end
+})
+
+SettingsTab:Slider({
+    Title = "Send status every (minutes)",
+    Step = 1,
+    Value = { Min = 1, Max = 60, Default = 10 },
+    Callback = function(v) Progression.setWebhookInterval(v * 60) end
+})
+
+SettingsTab:Toggle({
+    Title = "Tell me when I buy gear",
+    Value = true,
+    Callback = function(v) Progression.setNotifyBuy(v) end
+})
+
+SettingsTab:Toggle({
+    Title = "Tell me when config changes",
+    Value = true,
+    Callback = function(v) Progression.setNotifyConfig(v) end
+})
+
+SettingsTab:Button({
+    Title = "Send test message",
+    Icon = "send",
+    Callback = function()
+        task.spawn(function()
+            local ok, why = Progression.sendTestWebhook()
+            WindUI:Notify({
+                Title = "Webhook",
+                Content = ok and "Test message sent" or ("Not sent: " .. tostring(why)),
+                Duration = 3,
+            })
+        end)
+    end
+})
+
+SettingsTab:Section({ Title = "Discord remote" })
+
+getgenv().IvyisDiscordStatusLabel = SettingsTab:Paragraph({
+    Title = "Discord bridge",
+    Desc = "not connected"
+})
+
+getgenv().IvyisDiscordCodeInput = ""
+
+-- Show the current panel address even if getgenv still holds the old default
+-- from a previous execution (the bridge migrates it on start).
+local initialBridgeUrl = tostring((getgenv and getgenv().IvyisBridgeUrl) or "")
+if
+    initialBridgeUrl == ""
+    or initialBridgeUrl == "http://78.154.103.24:14873"
+    or initialBridgeUrl == "http://78.154.103.8:16573"
+then
+    initialBridgeUrl = "http://78.154.103.12:16477"
+end
+
+SettingsTab:Input({
+    Title = "Bridge URL",
+    Value = initialBridgeUrl,
+    Placeholder = "https://your-tunnel.trycloudflare.com",
+    Callback = function(v)
+        local bridge = getgenv().IvyisDiscordBridge
+        if bridge then
+            bridge.setUrl(v)
+        end
+    end
+})
+
+SettingsTab:Input({
+    Title = "Discord link code",
+    Value = "",
+    Placeholder = "IVY-XXXXXXXX",
+    Callback = function(v)
+        getgenv().IvyisDiscordCodeInput = tostring(v or "")
+    end
+})
+
+SettingsTab:Button({
+    Title = "Connect Discord",
+    Icon = "link",
+    Callback = function()
+        local bridge = getgenv().IvyisDiscordBridge
+        if not bridge then
+            WindUI:Notify({ Title = "Discord", Content = "Bridge is still loading", Duration = 3 })
+            return
+        end
+        task.spawn(function()
+            local ok, why = bridge.connect(getgenv().IvyisDiscordCodeInput)
+            WindUI:Notify({
+                Title = "Discord",
+                Content = ok and "Linked" or ("Failed: " .. tostring(why or "unknown")),
+                Duration = 4,
+            })
+        end)
+    end
+})
+
+SettingsTab:Button({
+    Title = "Disconnect Discord",
+    Icon = "unlink",
+    Callback = function()
+        local bridge = getgenv().IvyisDiscordBridge
+        if not bridge then return end
+        bridge.disconnect()
+        WindUI:Notify({ Title = "Discord", Content = "Disconnected", Duration = 3 })
+    end
+})
+
+SettingsTab:Section({ Title = "Executor" })
+
+local detectedExecutorName = tostring(select(1, detectExecutor()) or "Unknown")
+
+getgenv().IvyisExecutorLabel = SettingsTab:Paragraph({
+    Title = "Detected executor",
+    Desc = detectedExecutorName
+})
+
+-- Mobile forks often keep the base executor's globals (Arceus X is built on
+-- Fluxus), so detection can still be wrong on a new build. This field lets the
+-- player correct the name that appears in Discord /status without editing code.
+SettingsTab:Input({
+    Title = "Executor name override",
+    Value = tostring((getgenv and getgenv().IvyisExecutorNameOverride) or ""),
+    Placeholder = "Auto: " .. detectedExecutorName,
+    Callback = function(v)
+        local text = tostring(v or "")
+        text = text:gsub("^%s+", ""):gsub("%s+$", "")
+        if text == "" then
+            if getgenv then getgenv().IvyisExecutorNameOverride = nil end
+            EXECUTOR_NAME = nil
+            EXECUTOR_VERSION = nil
+            detectExecutor()
+        else
+            if getgenv then getgenv().IvyisExecutorNameOverride = text end
+            EXECUTOR_NAME = cleanExecutorText(text, 48)
+            EXECUTOR_VERSION = nil
+        end
+        if getgenv then
+            getgenv().IvyisExecutorName = EXECUTOR_NAME
+            getgenv().IvyisExecutorVersion = EXECUTOR_VERSION
+        end
+        local label = getgenv and getgenv().IvyisExecutorLabel
+        if label then
+            pcall(function() label:SetDesc(tostring(getExecutorLabel(true))) end)
+        end
+        local bridge = getgenv and getgenv().IvyisDiscordBridge
+        if bridge and bridge.sendState then
+            task.spawn(function() pcall(bridge.sendState) end)
+        end
+        WindUI:Notify({
+            Title = "Executor",
+            Content = "Name set to " .. tostring(EXECUTOR_NAME or "Unknown"),
+            Duration = 3,
+        })
     end
 })
 
@@ -6615,11 +7632,18 @@ task.spawn(function()
 
                     local sumRemaining = 0
                     local primaryNeededTarget = nil
+                    local rarityRank = { Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5 }
+                    local primaryRank = -1
                     for tag, rem in pairs(remainingNeeded) do
                         sumRemaining = sumRemaining + rem
-                        if rem > 0 and not primaryNeededTarget then
+                        if rem > 0 then
                             local bId, g = tag:match("^(.-)|(.*)$")
-                            primaryNeededTarget = { beeId = bId, gifted = g }
+                            local bee = beeMapById and beeMapById[bId]
+                            local rank = bee and (rarityRank[bee.rarity] or 0) or 0
+                            if not primaryNeededTarget or rank > primaryRank then
+                                primaryNeededTarget = { beeId = bId, gifted = g }
+                                primaryRank = rank
+                            end
                         end
                     end
 
@@ -6659,20 +7683,41 @@ task.spawn(function()
                     return
                 end
 
-                if autoSyncSettings and currentTargetObj then
-                    local b = beeMapById[currentTargetObj.beeId]
-                    local r = b and b.rarity or "Mythic"
-                    if r == "Mythic" then
-                        setGameSetting("RollToMythic", true)
-                        setGameSetting("RollToLegendary", false)
-                    elseif r == "Legendary" then
-                        setGameSetting("RollToLegendary", true)
-                        setGameSetting("RollToMythic", true)
-                    else
-                        setGameSetting("RollToLegendary", false)
-                        setGameSetting("RollToMythic", false)
+                local keepGifted = forcedRollFlags.untilGifted == true
+                -- A target that must be gifted always needs the game's own stop
+                -- condition, even with both web toggles off. Without it one
+                -- remote call burns the whole 25k Royal Jelly batch.
+                local needGifted = currentTargetObj ~= nil
+                    and tostring(currentTargetObj.gifted or ""):lower() == "gifted"
+                -- Auto switch: the Until gifted switch follows the slot being
+                -- rolled. A plan that mixes one gifted bee with one plain bee
+                -- turns the switch on for the gifted slot, then back off for the
+                -- plain one, instead of keeping one stop condition for the whole
+                -- plan. The player's own "Until gifted" toggle still wins: with it
+                -- on the switch never drops.
+                local wantGifted = keepGifted or needGifted
+                local wantMythic = false
+                local wantLegendary = false
+                if currentTargetObj then
+                    if captureRollSettings then pcall(captureRollSettings) end
+                    if autoSyncSettings then
+                        -- Sync on: the script may turn on Until mythic/legendary so a
+                        -- 25k Royal Jelly batch stops as soon as that rarity appears.
+                        local b = beeMapById[currentTargetObj.beeId]
+                        local r = b and b.rarity or "Mythic"
+                        if r == "Mythic" then
+                            wantMythic = true
+                        elseif r == "Legendary" then
+                            wantLegendary = true
+                            wantMythic = true
+                        end
+                        setGameSetting("RollToMythic", wantMythic)
+                        setGameSetting("RollToLegendary", wantLegendary)
                     end
-                    setGameSetting("UntilGifted", currentTargetObj.gifted == "Gifted")
+                    -- The gifted switch is per-bee, so it follows the target even
+                    -- when "sync settings" is off (sync only governs the rarity
+                    -- switches: Until mythic / Until legendary).
+                    setUntilGifted(wantGifted)
                 end
 
                 local data = getStatData()
@@ -6708,8 +7753,15 @@ task.spawn(function()
                 task.wait(0.5)
                 if not rollRunning or not scriptAlive then return end
 
-                local rollBatch = math.min(currentRJ, 25000)
-                local okR, res = rollBee(nextTargetSlot.col, nextTargetSlot.row, rollBatch)
+                local beforeRollRJ = currentRJ
+                -- The 25k batch only pays off while one of the game's own stop
+                -- switches is on: the game then stops early the moment the bee
+                -- turns gifted / mythic / legendary. With no stop switch the whole
+                -- batch is spent on a single random result, so roll one jelly at a
+                -- time and let the plan check decide after each one.
+                local hasStop = wantGifted or wantMythic or wantLegendary
+                local rollBatch = hasStop and math.min(currentRJ, 25000) or math.min(currentRJ, 1)
+                local okR = rollBee(nextTargetSlot.col, nextTargetSlot.row, rollBatch)
                 if not okR then
                     rollFailCount = rollFailCount + 1
                     if rollFailCount >= 5 then
@@ -6720,12 +7772,33 @@ task.spawn(function()
                     rollStatusLabel:SetDesc(string.format("Roll remote failed (%d/5)! Retrying...", rollFailCount))
                     task.wait(1)
                     return
-                else
-                    rollFailCount = 0
                 end
 
                 task.wait(1)
                 if not rollRunning or not scriptAlive then return end
+
+                -- RemoteEvent does not report a rejected roll. If Royal Jelly was
+                -- not consumed after two reads, count it as a failed attempt.
+                local afterRollData = getStatData()
+                local afterRollRJ = getRoyalJellies(afterRollData)
+                if beforeRollRJ > 0 and afterRollRJ >= beforeRollRJ then
+                    task.wait(1)
+                    if not rollRunning or not scriptAlive then return end
+                    afterRollData = getStatData()
+                    afterRollRJ = getRoyalJellies(afterRollData)
+                end
+                if beforeRollRJ > 0 and afterRollRJ >= beforeRollRJ then
+                    rollFailCount = rollFailCount + 1
+                    if rollFailCount >= 5 then
+                        rollStatusLabel:SetDesc("Game rejected 5 rolls (RJ not used)! Stopped.")
+                        stopAutoRoll()
+                        return
+                    end
+                    rollStatusLabel:SetDesc(string.format("Game did not use RJ (%d/5)! Retrying...", rollFailCount))
+                    task.wait(1)
+                    return
+                end
+                rollFailCount = 0
 
                 local refreshedGrid = readHiveGrid(true)
                 local newCell = refreshedGrid[nextTargetSlot.row] and refreshedGrid[nextTargetSlot.row][nextTargetSlot.col]
@@ -6778,6 +7851,1005 @@ pcall(function()
     if refreshSsaStatus then refreshSsaStatus() end
 end)
 
+getgenv().IvyisDiscordBridge = (function()
+    local DEFAULT_BRIDGE_URL = "http://78.154.103.12:16477"
+    -- Panel hosts rotate. Saved sessions keep the URL they were linked with, so
+    -- old defaults are rewritten on load instead of leaving the client pointed
+    -- at a host that no longer exists.
+    local LEGACY_BRIDGE_URLS = {
+        ["http://78.154.103.24:14873"] = true,
+        ["http://78.154.103.8:16573"] = true,
+    }
+    local bridgeUrl = tostring((getgenv and getgenv().IvyisBridgeUrl) or DEFAULT_BRIDGE_URL)
+    local sessionToken = nil
+    local linkedDiscordId = nil
+    local statusSink = nil
+    local started = false
+    local generation = 0
+    local remoteRollJob = nil
+    local connectedOnce = false
+    local lastRollFlagsSignature = ""
+    -- False until the stored flags reached this client, so a fresh reload never
+    -- overwrites the web setting with the game's pre-sync value.
+    local rollFlagsSynced = false
+
+    -- Keep the local mirror and (when idle) the game's own switches in sync with
+    -- the three toggles on /selectbee and /buildhive. force=true is used for
+    -- explicit commands so the in-game UI updates even if nothing changed.
+    local function applyRollFlags(flags, force)
+        if type(flags) ~= "table" then return forcedRollFlags end
+        local wasGifted = forcedRollFlags.untilGifted == true
+        forcedRollFlags.untilGifted = flags.untilGifted == true
+        forcedRollFlags.syncSettings = flags.syncSettings ~= false
+        forcedRollFlags.rev = tonumber(flags.rev) or 0
+
+        -- The sync switch is the same setting as the script's own "Copy roll
+        -- settings from game" toggle, so the web and the Lua UI always agree.
+        autoSyncSettings = forcedRollFlags.syncSettings
+        pcall(function()
+            if autoSyncToggle then autoSyncToggle:Set(autoSyncSettings) end
+        end)
+        rollFlagsSynced = true
+
+        local signature = string.format(
+            "%s|%s",
+            tostring(forcedRollFlags.untilGifted),
+            tostring(forcedRollFlags.syncSettings)
+        )
+        if not force and signature == lastRollFlagsSignature then
+            return forcedRollFlags
+        end
+        lastRollFlagsSignature = signature
+
+        -- While a roll runs the batch loop writes these switches before every
+        -- roll; touching them here as well would fight with it.
+        local rolling = rollRunning == true or (remoteRollJob and remoteRollJob.active == true)
+        if rolling then return forcedRollFlags end
+
+        -- Idle: mirror the web's "Until gifted" into the game, on or off. Until
+        -- mythic/legendary are only ever touched while a roll is running.
+        if forcedRollFlags.untilGifted then
+            if captureRollSettings then pcall(captureRollSettings) end
+            setUntilGifted(true)
+        elseif wasGifted then
+            setUntilGifted(false)
+        end
+        -- The switch the web just set is the new baseline. Drop any snapshot
+        -- taken before it, otherwise a much later roll would restore stale
+        -- values (and could silently re-enable a switch the player turned off).
+        originalRollSettings = nil
+        return forcedRollFlags
+    end
+    local executorRequest = (getgenv and getgenv().request)
+        or (type(_G) == "table" and _G.request)
+        or (syn and syn.request)
+        or (http and http.request)
+        or http_request
+        or (fluxus and fluxus.request)
+
+    local function trim(value)
+        return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    end
+
+    local function normalizeBridgeUrl(value)
+        local url = trim(value):gsub("/+$", "")
+        if LEGACY_BRIDGE_URLS[url] then return DEFAULT_BRIDGE_URL end
+        return url
+    end
+
+    local function sessionPath()
+        local safe = tostring(player.Name or "player"):gsub("[^%w_%-]", "_")
+        return "AutoFeedBSS/discord_session_" .. safe .. ".json"
+    end
+
+    local function setStatus(text)
+        if statusSink then pcall(statusSink, text) end
+        if getgenv then pcall(function() getgenv().IvyisDiscordStatus = text end) end
+    end
+
+    local function ensureDir()
+        if ensureHiveConfigDir then pcall(ensureHiveConfigDir) end
+    end
+
+    local function saveSession()
+        if not writefile then return end
+        ensureDir()
+        local ok, raw = pcall(function()
+            return HttpService:JSONEncode({
+                url = bridgeUrl,
+                token = sessionToken,
+                discordId = linkedDiscordId,
+            })
+        end)
+        if ok and raw then pcall(writefile, sessionPath(), raw) end
+    end
+
+    local function loadSession()
+        if not (isfile and readfile) then return end
+        local path = sessionPath()
+        if not isfile(path) then return end
+        local ok, content = pcall(readfile, path)
+        if not ok or not content then return end
+        local decodedOk, decoded = pcall(function() return HttpService:JSONDecode(content) end)
+        if not decodedOk or type(decoded) ~= "table" then return end
+        local urlChanged = false
+        if type(decoded.url) == "string" and decoded.url ~= "" then
+            local rawUrl = trim(decoded.url):gsub("/+$", "")
+            local restored = normalizeBridgeUrl(rawUrl)
+            urlChanged = restored ~= rawUrl
+            bridgeUrl = restored
+        end
+        if type(decoded.token) == "string" and decoded.token ~= "" then sessionToken = decoded.token end
+        if decoded.discordId then linkedDiscordId = tostring(decoded.discordId) end
+        if urlChanged then saveSession() end
+    end
+
+    local function clearSession()
+        sessionToken = nil
+        linkedDiscordId = nil
+        if writefile and isfile and isfile(sessionPath()) then
+            pcall(writefile, sessionPath(), "{}")
+        end
+    end
+
+    local function request(method, path, body, token)
+        local httpRequest = getHttpRequest and getHttpRequest() or nil
+        httpRequest = httpRequest
+            or (syn and syn.request)
+            or (http and http.request)
+            or http_request
+            or (fluxus and fluxus.request)
+            or executorRequest
+        if type(httpRequest) ~= "function" then return nil, "executor_has_no_http" end
+        local base = trim(bridgeUrl):gsub("/+$", "")
+        if base == "" then return nil, "bridge_url_missing" end
+
+        local headers = {
+            ["Content-Type"] = "application/json",
+            ["Accept"] = "application/json",
+        }
+        if token and token ~= "" then headers.Authorization = "Bearer " .. token end
+
+        local opts = {
+            Url = base .. path,
+            Method = method,
+            Headers = headers,
+        }
+        if body ~= nil then
+            local okEnc, encoded = pcall(function() return HttpService:JSONEncode(body) end)
+            if not okEnc or not encoded then return nil, "json_encode_failed" end
+            opts.Body = encoded
+        end
+
+        -- Executor request functions can hang forever on a half-open socket
+        -- (phone sleeps, Wi-Fi drops). Run the call in its own thread so one
+        -- stuck request cannot freeze the heartbeat/poll loops and make
+        -- /status report a false "offline".
+        local timeout = 20
+        if method == "GET" and path:find("/poll", 1, true) then
+            timeout = 30 -- the server long-polls for up to 25s
+        end
+        local finished = false
+        local ok, res = false, nil
+        task.spawn(function()
+            ok, res = pcall(httpRequest, opts)
+            finished = true
+        end)
+        local waited = 0
+        while not finished and waited < timeout do
+            task.wait(0.1)
+            waited = waited + 0.1
+        end
+        if not finished then return nil, "timeout" end
+        if not ok then return nil, tostring(res) end
+        local code = type(res) == "table" and (tonumber(res.StatusCode) or 0) or 0
+        if code == 401 or code == 403 then return nil, "unauthorized", code end
+        if code == 204 then return {}, nil, code end
+
+        local raw = type(res) == "table" and res.Body or nil
+        if type(raw) ~= "string" or raw == "" then
+            if code >= 400 then return nil, "http_" .. tostring(code), code end
+            return {}, nil, code
+        end
+        local decodeOk, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+        if not decodeOk or type(decoded) ~= "table" then return nil, "bad_json", code end
+        if code >= 400 then return nil, tostring(decoded.error or ("http_" .. tostring(code))), code end
+        return decoded, nil, code
+    end
+
+    local function buildState()
+        local data = getStatData and getStatData() or nil
+        local hive = {}
+        local beesInHive = 0
+        local grid = (readHiveGrid and readHiveGrid()) or {}
+        for r = 1, 10 do
+            for c = 1, 5 do
+                local cell = grid[r] and grid[r][c]
+                local beeId = tostring((cell and cell.beeType) or "Empty")
+                if beeId ~= "Empty" then beesInHive = beesInHive + 1 end
+                hive[#hive + 1] = {
+                    slot = string.format("C%d,%d", c, r),
+                    beeId = beeId,
+                    gifted = (cell and cell.gifted == true) or false,
+                }
+            end
+        end
+
+        local gifted = {}
+        if ssaGetGiftedDiscoveredMap then
+            local map = ssaGetGiftedDiscoveredMap()
+            if type(map) == "table" then
+                for name, value in pairs(map) do
+                    if value then gifted[tostring(name)] = true end
+                end
+            end
+        end
+
+        local rollText = ""
+        if rollStatusLabel then
+            pcall(function() rollText = tostring(rollStatusLabel.Desc or "") end)
+        end
+        local executorName = "Unknown"
+        if detectExecutor then
+            pcall(function() executorName = select(1, detectExecutor()) or "Unknown" end)
+        end
+        local platform = "Unknown"
+        if getPlatformLabel then pcall(function() platform = getPlatformLabel() end) end
+
+        return {
+            schema = 1,
+            player = tostring(player.Name),
+            placeId = tostring(game.PlaceId),
+            jobId = tostring(game.JobId),
+            executor = executorName,
+            platform = platform,
+            beeCount = beesInHive,
+            honey = (getHoney and getHoney(data)) or 0,
+            rj = (getRoyalJellies and getRoyalJellies(data)) or 0,
+            gifted = gifted,
+            hive = hive,
+            roll = {
+                running = rollRunning == true,
+                mode = tostring(currentBuildMode or "Composition"),
+                status = rollText,
+            },
+            rollSettings = readRollSettings(),
+            flagsSynced = rollFlagsSynced,
+            flagsRev = forcedRollFlags.rev,
+            remote = remoteRollJob and {
+                active = remoteRollJob.active == true,
+                target = remoteRollJob.target,
+                targetName = remoteRollJob.targetName,
+                reason = remoteRollJob.reason,
+                detail = remoteRollJob.detail,
+                startedAt = remoteRollJob.startedAt,
+                finishedAt = remoteRollJob.finishedAt,
+                slots = remoteRollJob.eligible,
+                slot = remoteRollJob.slot,
+            } or nil,
+            updatedAt = os.time(),
+        }
+    end
+
+    local stateFailures = 0
+    local unauthorizedHits = 0
+
+    local function sendState()
+        if not sessionToken or sessionToken == "" then return false end
+        -- A broken hive/stat reader used to throw here, the heartbeat swallowed
+        -- the error, and the bridge went "offline" forever while the game was
+        -- still running. Report it instead of failing silently.
+        local builtOk, state = pcall(buildState)
+        if not builtOk or type(state) ~= "table" then
+            stateFailures = stateFailures + 1
+            if stateFailures == 3 then
+                warn("[DiscordBridge] buildState failed: " .. tostring(state))
+                setStatus("State error: " .. tostring(state))
+            end
+            return false
+        end
+        local res, err = request("POST", "/api/v1/state", state, sessionToken)
+        if not res then
+            if err == "unauthorized" then
+                -- A single 401 can be a transient server hiccup (restart, busy
+                -- DB). Only wipe the saved session once it repeats.
+                unauthorizedHits = unauthorizedHits + 1
+                if unauthorizedHits >= 2 then
+                    connectedOnce = false
+                    clearSession()
+                    setStatus("Discord session expired. Run /link again.")
+                else
+                    setStatus("Session rejected, retrying...")
+                end
+                return false
+            end
+            stateFailures = stateFailures + 1
+            if stateFailures == 3 then
+                warn("[DiscordBridge] state failed: " .. tostring(err or "network"))
+                setStatus("Bridge unreachable: " .. tostring(err or "network"))
+            end
+            return false
+        end
+        if stateFailures > 0 or not connectedOnce then
+            setStatus("Connected")
+        end
+        stateFailures = 0
+        unauthorizedHits = 0
+        connectedOnce = true
+        if type(res.rollFlags) == "table" then
+            pcall(applyRollFlags, res.rollFlags, false)
+        end
+        return true
+    end
+
+    local function copyTable(value)
+        if type(value) ~= "table" then return value end
+        local out = {}
+        for key, item in pairs(value) do
+            out[key] = copyTable(item)
+        end
+        return out
+    end
+
+    local function discoveredIdSet()
+        local set = {}
+        if not ssaGetGiftedDiscoveredMap then return set end
+        local map = ssaGetGiftedDiscoveredMap()
+        if type(map) ~= "table" then return set end
+        for _, bee in ipairs(ALL_BEES or {}) do
+            if map[bee.name] then set[bee.id] = true end
+        end
+        return set
+    end
+
+    local function finishRemoteRoll(reason, detail)
+        local job = remoteRollJob
+        if not job or not job.active then return end
+        job.active = false
+        job.reason = tostring(reason or "finished")
+        job.detail = detail and tostring(detail) or ""
+        job.finishedAt = os.time()
+
+        pcall(stopAutoRoll)
+        local snapshot = job.snapshot
+        if snapshot then
+            currentBuildMode = snapshot.mode or "Composition"
+            compositionTargets = snapshot.composition or {}
+            exactSlotTargets = snapshot.exact or {}
+            selectedHiveSlots = snapshot.selected or {}
+            autoSyncSettings = snapshot.autoSync ~= false
+            autoBuyRJ = snapshot.autoBuy ~= false
+            buyRJAmount = tonumber(snapshot.buyAmount) or buyRJAmount
+        end
+        -- The web owns the sync permission, so a job snapshot must not revive a
+        -- value the player already changed there.
+        autoSyncSettings = forcedRollFlags.syncSettings ~= false
+        pcall(function() if autoSyncToggle then autoSyncToggle:Set(autoSyncSettings) end end)
+        hasUserConfiguredTargets = (#compositionTargets > 0) or (next(exactSlotTargets) ~= nil)
+
+        if refreshQuotaText then pcall(refreshQuotaText) end
+        if refreshHiveGrid then pcall(refreshHiveGrid) end
+        if refreshBuilderStatus then pcall(refreshBuilderStatus) end
+        if refreshSsaStatus then pcall(refreshSsaStatus) end
+
+        local label = string.format("Discord roll finished: %s", tostring(reason or "done"))
+        if detail and detail ~= "" then label = label .. " (" .. tostring(detail) .. ")" end
+        if rollStatusLabel then
+            pcall(function() rollStatusLabel:SetDesc(label) end)
+        end
+        pcall(function()
+            WindUI:Notify({
+                Title = "Discord roll",
+                Content = label,
+                Duration = 6,
+            })
+        end)
+        task.spawn(function()
+            task.wait(0.5)
+            sendState()
+        end)
+    end
+
+    local function startRemoteRoll(beeId, slot, options)
+        options = type(options) == "table" and options or {}
+        local targetOrder = {}
+        local targets = {}
+        local function addTarget(value)
+            local item = beeMapById and beeMapById[tostring(value or "")]
+            if item and not targets[item.id] then
+                targets[item.id] = item
+                table.insert(targetOrder, item.id)
+            end
+        end
+        if type(options.beeIds) == "table" then
+            for _, value in ipairs(options.beeIds) do
+                addTarget(value)
+            end
+        end
+        addTarget(beeId)
+        if #targetOrder == 0 then return false, "unknown_bee" end
+
+        local primaryBee = targets[targetOrder[1]]
+        local ignoreNewGifted = options.ignoreNewGifted == true
+        local skipExistingGiftedCheck = type(options.beeIds) == "table"
+        if remoteRollJob and remoteRollJob.active then return false, "already_running" end
+
+        local wantedSlot = nil
+        if slot ~= nil and tostring(slot) ~= "" then
+            local rawSlot = tostring(slot):upper():gsub("%s+", "")
+            local col, row = rawSlot:match("^C([1-5]),([1-9][0-9]?)$")
+            col = tonumber(col)
+            row = tonumber(row)
+            if not col or not row or row < 1 or row > 10 then
+                return false, "invalid_slot"
+            end
+            wantedSlot = string.format("C%d,%d", col, row)
+        end
+
+        local grid = (readHiveGrid and readHiveGrid()) or {}
+        local eligible = {}
+        local eligibleCount = 0
+        local existingGiftedSlot = nil
+        local selectedSlotGifted = nil
+        for r = 1, 10 do
+            for c = 1, 5 do
+                local cell = grid[r] and grid[r][c]
+                local key = string.format("C%d,%d", c, r)
+                if not skipExistingGiftedCheck and cell and cell.beeType and targets[cell.beeType] and cell.gifted == true then
+                    existingGiftedSlot = key
+                end
+                if wantedSlot then
+                    if key == wantedSlot then
+                        if cell and cell.gifted == true then
+                            selectedSlotGifted = key
+                        else
+                            eligible[key] = true
+                            eligibleCount = 1
+                        end
+                    end
+                elseif not (cell and cell.gifted == true) then
+                    eligible[key] = true
+                    eligibleCount = eligibleCount + 1
+                end
+            end
+        end
+
+        if existingGiftedSlot then
+            return false, "already_gifted_in_" .. existingGiftedSlot
+        end
+        if selectedSlotGifted then
+            return false, "slot_gifted"
+        end
+        if eligibleCount == 0 then return false, "no_eligible_slots" end
+
+        if rollRunning then pcall(stopAutoRoll) end
+
+        local snapshot = {
+            mode = currentBuildMode,
+            composition = copyTable(compositionTargets),
+            exact = copyTable(exactSlotTargets),
+            selected = copyTable(selectedHiveSlots),
+            autoSync = autoSyncSettings,
+            autoBuy = autoBuyRJ,
+            buyAmount = buyRJAmount,
+        }
+
+        local targetNames = {}
+        local rarityRank = { Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5 }
+        local topRarity = "Common"
+        local topRank = 0
+        for _, id in ipairs(targetOrder) do
+            local item = targets[id]
+            table.insert(targetNames, item.name)
+            local rank = rarityRank[item.rarity] or 0
+            if rank > topRank then
+                topRank = rank
+                topRarity = item.rarity
+            end
+        end
+        local targetName = table.concat(targetNames, ", ")
+
+        remoteRollJob = {
+            active = true,
+            target = primaryBee.id,
+            targetName = targetName,
+            targetIds = targetOrder,
+            targets = targets,
+            ignoreNewGifted = ignoreNewGifted,
+            startedAt = os.time(),
+            snapshot = snapshot,
+            discovered = discoveredIdSet(),
+            eligible = eligibleCount,
+            slot = wantedSlot,
+        }
+        currentBuildMode = "Composition"
+        compositionTargets = {}
+        for _, id in ipairs(targetOrder) do
+            table.insert(compositionTargets, { beeId = id, gifted = "Gifted", count = 1 })
+        end
+        exactSlotTargets = {}
+        selectedHiveSlots = eligible
+        -- The web owns the "sync game settings" permission: a queue/remote roll
+        -- must not re-enable Until mythic/legendary when the player turned sync
+        -- off. With sync on this keeps the historical behaviour.
+        autoSyncSettings = forcedRollFlags.syncSettings ~= false
+        autoBuyRJ = true
+        buyRJAmount = math.max(25000, tonumber(buyRJAmount) or 25000)
+        hasUserConfiguredTargets = true
+
+        if feedRunning then pcall(stopAutoFeed, true) end
+        pcall(pauseAtlas, true)
+        rollRunning = true
+        if rollToggle then
+            pcall(function() rollToggle:Set(true) end)
+        end
+        if rollStatusLabel then
+            pcall(function()
+                rollStatusLabel:SetDesc(string.format("Discord: rolling %s until gifted", targetName))
+            end)
+        end
+        if refreshQuotaText then pcall(refreshQuotaText) end
+        if refreshBuilderStatus then pcall(refreshBuilderStatus) end
+        task.spawn(function()
+            task.wait(0.4)
+            sendState()
+        end)
+        return true, {
+            target = primaryBee.id,
+            targetName = targetName,
+            targets = targetOrder,
+            slots = eligibleCount,
+            slot = wantedSlot,
+        }
+    end
+
+    local function checkRemoteRoll()
+        local job = remoteRollJob
+        if not job or not job.active then return end
+
+        local grid = (readHiveGrid and readHiveGrid()) or {}
+
+        local function isTargetCell(cell)
+            return cell
+                and cell.beeType
+                and cell.beeType ~= "Empty"
+                and cell.gifted == true
+                and job.targets
+                and job.targets[cell.beeType] ~= nil
+        end
+
+        local targetSlot = nil
+        if job.slot then
+            local col, row = tostring(job.slot):match("^C(%d+),(%d+)$")
+            col = tonumber(col)
+            row = tonumber(row)
+            local cell = col and row and grid[row] and grid[row][col]
+            if isTargetCell(cell) then
+                local bee = beeMapById and beeMapById[cell.beeType]
+                local name = bee and bee.name or cell.beeType
+                finishRemoteRoll("target_gifted", string.format("%s in %s", name, job.slot))
+                return
+            end
+        else
+            for r = 1, 10 do
+                for c = 1, 5 do
+                    local cell = grid[r] and grid[r][c]
+                    if isTargetCell(cell) then
+                        targetSlot = string.format("C%d,%d", c, r)
+                        break
+                    end
+                end
+                if targetSlot then break end
+            end
+        end
+
+        if targetSlot then
+            finishRemoteRoll("target_gifted", string.format("%s in %s", job.targetName, targetSlot))
+            return
+        end
+
+        if not job.ignoreNewGifted then
+            local newGifted = nil
+            local newGiftedSlot = nil
+            for r = 1, 10 do
+                for c = 1, 5 do
+                    local cell = grid[r] and grid[r][c]
+                    if isTargetCell(cell) then
+                        -- Target is handled above, including slot-specific jobs.
+                    elseif cell and cell.beeType and cell.beeType ~= "Empty" and cell.gifted == true then
+                        local key = string.format("C%d,%d", c, r)
+                        if not job.discovered[cell.beeType] then
+                            newGifted = cell.beeType
+                            newGiftedSlot = key
+                            break
+                        end
+                    end
+                end
+                if newGifted then break end
+            end
+            if newGifted then
+                local bee = beeMapById and beeMapById[newGifted]
+                local name = bee and bee.name or newGifted
+                finishRemoteRoll("new_gifted", string.format("%s in %s", name, tostring(newGiftedSlot)))
+                return
+            end
+        end
+        if not rollRunning then
+            finishRemoteRoll("stopped", "auto roll is off")
+            return
+        end
+        if os.time() - (tonumber(job.startedAt) or os.time()) > 1800 then
+            finishRemoteRoll("timeout", "30 minutes")
+        end
+    end
+
+    local function report(command, ok, result, err)
+        if not command or not command.id then return end
+        request("POST", "/api/v1/result", {
+            commandId = command.id,
+            ok = ok and true or false,
+            result = result or {},
+            error = err and tostring(err) or "",
+        }, sessionToken)
+    end
+
+    local function applyRemoteConfig(payload)
+        if type(payload) ~= "table" then return false, "bad_config" end
+        local config = type(payload.config) == "table" and payload.config or payload
+        local name = trim(config.name or "DiscordHive"):gsub("[^%w_%- ]", ""):gsub("%s+", " ")
+        if name == "" then name = "DiscordHive" end
+        name = name:sub(1, 48)
+        config.name = name
+
+        ensureDir()
+        local path = HIVE_CONFIGS_DIR .. "/" .. name .. ".json"
+        if writefile then
+            local okEnc, raw = pcall(function() return HttpService:JSONEncode(config) end)
+            if okEnc and raw then pcall(writefile, path, raw) end
+        end
+
+        local ok, err = applyLoadedHiveConfig(config)
+        if not ok then return false, err or "apply_failed" end
+        if refreshQuotaText then pcall(refreshQuotaText) end
+        if refreshHiveGrid then pcall(refreshHiveGrid) end
+        if refreshBuilderStatus then pcall(refreshBuilderStatus) end
+        if refreshSsaStatus then pcall(refreshSsaStatus) end
+        return true, { name = name, path = path }
+    end
+
+    -- /startroll and the web "Roll" button: roll the hive plan that is already
+    -- applied (Composition / Exact targets), the same thing the in-game
+    -- "Auto roll" switch does. A targeted /rollssa job owns the roll loop while
+    -- it runs, so refuse instead of fighting it.
+    local function startBuilderRoll()
+        if remoteRollJob and remoteRollJob.active then
+            return false, "targeted_roll_running"
+        end
+        if rollRunning then
+            return true, { started = true, already = true, mode = tostring(currentBuildMode or "Composition") }
+        end
+        if not hasUserConfiguredTargets then
+            return false, "no_targets_configured"
+        end
+        if feedRunning then pcall(stopAutoFeed, true) end
+        pcall(pauseAtlas, true)
+        rollRunning = true
+        if rollToggle then
+            pcall(function() rollToggle:Set(true) end)
+        end
+        if rollStatusLabel then
+            pcall(function()
+                rollStatusLabel:SetDesc(string.format("Rolling %s plan", tostring(currentBuildMode or "Composition")))
+            end)
+        end
+        if refreshQuotaText then pcall(refreshQuotaText) end
+        if refreshBuilderStatus then pcall(refreshBuilderStatus) end
+        task.spawn(function()
+            task.wait(0.3)
+            sendState()
+        end)
+        return true, { started = true, mode = tostring(currentBuildMode or "Composition") }
+    end
+
+    local function applyCommand(command)
+        local kind = tostring(command.type or "")
+        if kind == "PING" then
+            return true, { pong = true }
+        elseif kind == "REQUEST_STATE" then
+            sendState()
+            return true, { sent = true }
+        elseif kind == "APPLY_HIVE_CONFIG" then
+            return applyRemoteConfig(command.payload)
+        elseif kind == "START_ROLL" then
+            -- The web Roll button sends the plan along with the start request so
+            -- pressing it once both applies the hive and starts rolling.
+            local payload = command.payload or {}
+            if type(payload.config) == "table" then
+                local configOk, configError = applyRemoteConfig(payload.config)
+                if not configOk then return false, configError or "apply_failed" end
+            end
+            return startBuilderRoll()
+        elseif kind == "STOP_ROLL" then
+            -- Builder stop. Finishing the targeted job first keeps it from being
+            -- stranded (its roll loop is the same one stopAutoRoll switches off).
+            if remoteRollJob and remoteRollJob.active then
+                finishRemoteRoll("stopped_by_user", "/stoproll")
+            elseif stopAutoRoll then
+                pcall(stopAutoRoll)
+            end
+            return true, { stopped = true }
+        elseif kind == "STOP_SSA" then
+            if not (remoteRollJob and remoteRollJob.active) then
+                return false, "no_targeted_roll"
+            end
+            finishRemoteRoll("stopped_by_user", "/stoprollssa")
+            return true, { stopped = true }
+        elseif kind == "ROLL_SSA" then
+            local payload = command.payload or {}
+            if type(payload.rollFlags) == "table" then
+                pcall(applyRollFlags, payload.rollFlags, true)
+            end
+            return startRemoteRoll(payload.beeId or payload.bee or payload.name, payload.slot, payload)
+        elseif kind == "SET_ROLL_FLAGS" then
+            local flags = applyRollFlags(command.payload or {}, true)
+            return true, { rollFlags = flags }
+        end
+        return false, "unknown_command"
+    end
+
+    local function handleCommand(command)
+        local ok, result, detail = pcall(function()
+            return applyCommand(command)
+        end)
+        if not ok then
+            report(command, false, nil, result)
+            return
+        end
+
+        local success = result == true
+        local payload = success and (type(detail) == "table" and detail or {}) or nil
+        local errorText = success and "" or tostring(detail or "command_failed")
+        report(command, success, payload, errorText)
+        if success then sendState() end
+    end
+
+    local function pollOnce()
+        local res, err = request("GET", "/api/v1/poll?timeout=20", nil, sessionToken)
+        if not res then
+            if err == "unauthorized" then
+                -- Do not wipe the session from here: sendState() confirms a 401
+                -- twice before clearing, so a transient server error cannot
+                -- permanently unlink a healthy client.
+                setStatus("Session rejected, retrying...")
+            end
+            return
+        end
+        if type(res.command) == "table" and res.command.id then
+            handleCommand(res.command)
+        end
+    end
+
+    local function startLoops()
+        generation = generation + 1
+        local myGeneration = generation
+        task.spawn(function()
+            while scriptAlive and myGeneration == generation do
+                if sessionToken and sessionToken ~= "" then
+                    local ok, err = pcall(pollOnce)
+                    if not ok then warn("[DiscordBridge] poll: " .. tostring(err)) end
+                else
+                    task.wait(2)
+                end
+            end
+        end)
+        task.spawn(function()
+            while scriptAlive and myGeneration == generation do
+                if sessionToken and sessionToken ~= "" then
+                    pcall(sendState)
+                end
+                task.wait(8)
+            end
+        end)
+    end
+
+    local function stopLoops()
+        generation = generation + 1
+    end
+
+    local function shutdown()
+        local job = remoteRollJob
+        if job and job.active then
+            job.active = false
+            job.reason = "script_reloaded"
+            job.detail = "cleanup"
+            job.finishedAt = os.time()
+            local snapshot = job.snapshot
+            if snapshot then
+                currentBuildMode = snapshot.mode or "Composition"
+                compositionTargets = snapshot.composition or {}
+                exactSlotTargets = snapshot.exact or {}
+                selectedHiveSlots = snapshot.selected or {}
+                autoSyncSettings = snapshot.autoSync ~= false
+                autoBuyRJ = snapshot.autoBuy ~= false
+                buyRJAmount = tonumber(snapshot.buyAmount) or buyRJAmount
+            end
+            autoSyncSettings = forcedRollFlags.syncSettings ~= false
+            pcall(function() if autoSyncToggle then autoSyncToggle:Set(autoSyncSettings) end end)
+            hasUserConfiguredTargets = (#compositionTargets > 0) or (next(exactSlotTargets) ~= nil)
+        end
+        stopLoops()
+    end
+
+    local function connect(code)
+        code = trim(code)
+        if code == "" then
+            setStatus("Enter the code from /link")
+            return false, "code_missing"
+        end
+        if trim(bridgeUrl) == "" then
+            setStatus("Set the bridge URL first")
+            return false, "url_missing"
+        end
+        connectedOnce = false
+        setStatus("Linking...")
+
+        local executorName = "Unknown"
+        if detectExecutor then pcall(function() executorName = select(1, detectExecutor()) or "Unknown" end) end
+        local platform = "Unknown"
+        if getPlatformLabel then pcall(function() platform = getPlatformLabel() end) end
+
+        local res, err = request("POST", "/api/v1/link", {
+            code = code,
+            playerName = tostring(player.Name),
+            placeId = tostring(game.PlaceId),
+            jobId = tostring(game.JobId),
+            executor = executorName,
+            platform = platform,
+        })
+
+        if not res or type(res.token) ~= "string" or res.token == "" then
+            local why = tostring(err or (type(res) == "table" and res.error) or "unknown")
+            setStatus("Link failed: " .. why)
+            return false, why
+        end
+
+        sessionToken = res.token
+        linkedDiscordId = res.discordId and tostring(res.discordId) or nil
+        saveSession()
+        setStatus("Linked to Discord " .. tostring(linkedDiscordId or ""))
+        startLoops()
+        task.spawn(function()
+            task.wait(0.5)
+            sendState()
+        end)
+        return true
+    end
+
+    local function disconnect()
+        connectedOnce = false
+        generation = generation + 1
+        if sessionToken and sessionToken ~= "" then
+            pcall(function() request("POST", "/api/v1/unlink", nil, sessionToken) end)
+        end
+        clearSession()
+        setStatus("Disconnected")
+    end
+
+    local function setUrl(value)
+        bridgeUrl = normalizeBridgeUrl(value)
+        if getgenv then pcall(function() getgenv().IvyisBridgeUrl = bridgeUrl end) end
+        if sessionToken and sessionToken ~= "" then
+            saveSession()
+        end
+    end
+
+    local function start()
+        if started then return end
+        started = true
+        loadSession()
+        if getgenv then
+            local g = getgenv()
+            if type(g) == "table" then
+                if type(g.IvyisBridgeUrl) == "string" and g.IvyisBridgeUrl ~= "" then
+                    bridgeUrl = normalizeBridgeUrl(g.IvyisBridgeUrl)
+                end
+            end
+        end
+        if sessionToken and sessionToken ~= "" then
+            setStatus("Reconnecting...")
+            startLoops()
+            task.spawn(function()
+                task.wait(2)
+                sendState()
+            end)
+        else
+            setStatus(bridgeUrl ~= "" and "Not linked. Run /link." or "Set the bridge URL.")
+        end
+    end
+
+    task.spawn(function()
+        while scriptAlive do
+            if remoteRollJob and remoteRollJob.active then
+                local ok, err = pcall(checkRemoteRoll)
+                if not ok then warn("[DiscordBridge] remote roll: " .. tostring(err)) end
+            end
+            task.wait(0.25)
+        end
+    end)
+
+    if getgenv then
+        pcall(function()
+            getgenv().IvyisDiscordBridge = {
+                connect = connect,
+                disconnect = disconnect,
+                sendState = sendState,
+                setUrl = setUrl,
+                start = start,
+                stopLoops = stopLoops,
+                shutdown = shutdown,
+                startRoll = startRemoteRoll,
+                stopRoll = function(reason)
+                    finishRemoteRoll(reason or "manual", "bridge")
+                end,
+                getRemoteJob = function() return remoteRollJob end,
+            }
+        end)
+    end
+
+    return {
+        connect = connect,
+        disconnect = disconnect,
+        sendState = sendState,
+        setStatusSink = function(fn) statusSink = fn end,
+        setUrl = setUrl,
+        start = start,
+        stopLoops = stopLoops,
+        shutdown = shutdown,
+        startRoll = startRemoteRoll,
+        stopRoll = function(reason)
+            finishRemoteRoll(reason or "manual", "bridge")
+        end,
+        getRemoteJob = function() return remoteRollJob end,
+        getUrl = function() return bridgeUrl end,
+        isLinked = function() return sessionToken ~= nil and sessionToken ~= "" end,
+    }
+end)()
+
+getgenv().IvyisDiscordBridge.setStatusSink(function(text)
+    local label = getgenv().IvyisDiscordStatusLabel
+    if label then
+        pcall(function() label:SetDesc(tostring(text or "")) end)
+    end
+end)
+
+-- ap dung cai dat da luu, roi moi bat dau ghi lai thay doi
+for _, item in ipairs(SettingsStore.pending) do
+    pcall(item[1], item[2])
+end
+SettingsStore.pending = {}
+SettingsStore.ready = true
+pcall(function()
+    local bridge = getgenv().IvyisDiscordBridge
+    if bridge then bridge.start() end
+end)
+pcall(function() Progression.setHudVisible(true) end)
+
+-- Push a fresh state as soon as the player comes back to the game, so /status
+-- leaves "Idle" immediately instead of waiting for the next heartbeat tick.
+if UserInputService then
+    local okFocus, focusConnection = pcall(function()
+        return UserInputService.WindowFocused:Connect(function()
+            local bridge = getgenv().IvyisDiscordBridge
+            if bridge and bridge.sendState then
+                task.spawn(function() pcall(bridge.sendState) end)
+            end
+        end)
+    end)
+    if okFocus and focusConnection then
+        table.insert(scriptConnections, focusConnection)
+    end
+end
+
 WindUI:Notify({ Title = "Ivyis's Tool", Content = "Ready", Duration = 3 })
 
 if getgenv then
@@ -6785,6 +8857,15 @@ if getgenv then
         scriptAlive = false
         feedRunning = false
         rollRunning = false
+        pcall(function()
+            local bridge = getgenv().IvyisDiscordBridge
+            if bridge and bridge.shutdown then
+                bridge.shutdown()
+            elseif bridge and bridge.stopLoops then
+                bridge.stopLoops()
+            end
+        end)
+        if restoreRollSettings then pcall(restoreRollSettings) end
         Progression.cleanupProgression()
         if pauseAtlas then pcall(function() pauseAtlas(false) end) end
         if activeTween then pcall(function() activeTween:Cancel() end) activeTween = nil end
