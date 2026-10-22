@@ -5739,18 +5739,134 @@ WindUI:AddTheme({
     ElementBackgroundTransparency = 0,
 })
 
+-- ===== In-game UI scale (readable on phones) =====
+-- WindUI lays the window out in unscaled units and multiplies every element by
+-- WindUI.UIScale. The default 1x is far too small to read on a phone, so the
+-- window grows to fill most of the screen when the device is touch-only.
+local IVYIS_UI_BASE = Vector2.new(560, 350)
+local IVYIS_UI_SCALE_CHOICES = { "Auto", "100%", "125%", "150%", "175%", "200%", "250%", "300%" }
+local ivyisWindow = nil
+local ivyisUiSizeChoice = "Auto"
+
+local function ivyisIsTouchDevice()
+    local ok, touch, keyboard = pcall(function()
+        return UserInputService.TouchEnabled, UserInputService.KeyboardEnabled
+    end)
+    if not ok then return false end
+    -- Touch-only device (phone/tablet). Desktop touchscreens still have a keyboard.
+    return touch == true and keyboard ~= true
+end
+
+local function ivyisViewport()
+    local cam = workspace.CurrentCamera
+    if cam and cam.ViewportSize and cam.ViewportSize.X > 0 and cam.ViewportSize.Y > 0 then
+        return cam.ViewportSize
+    end
+    return Vector2.new(1280, 720)
+end
+
+-- How much the base window can grow before it no longer fits on screen.
+local function ivyisFitScale()
+    local vp = ivyisViewport()
+    return math.min((vp.X - 40) / IVYIS_UI_BASE.X, (vp.Y - 40) / IVYIS_UI_BASE.Y)
+end
+
+local function ivyisScaleForChoice(choice)
+    local percent = tostring(choice or "Auto"):match("^(%d+)%%$")
+    if percent then
+        return math.clamp(tonumber(percent) / 100, 0.5, 4)
+    end
+    local fit = ivyisFitScale()
+    if ivyisIsTouchDevice() then
+        -- Fill 70% of the screen (the second number is the floor for tiny screens).
+        return math.clamp(fit * 0.70, 0.85, 2.8)
+    end
+    -- PC keeps the old behaviour: never larger than 1x, shrink only if needed.
+    return math.clamp(fit, 0.6, 1)
+end
+
+-- The script's plain ScreenGuis (status HUD, hive-slot picker, mobile button)
+-- grow with the same setting so the whole in-game UI stays readable together.
+local ivyisScaledGuis = {}
+local ivyisScaleRefreshers = {}
+
+local function ivyisPanelScale()
+    return ivyisScaleForChoice(ivyisUiSizeChoice)
+end
+
+-- Same boost as the panel, but never bigger than what still fits on screen.
+local function ivyisGuiScaleFor(designW, designH, maxScale)
+    local vp = ivyisViewport()
+    local fitX = (vp.X * 0.92) / math.max(tonumber(designW) or 1, 1)
+    local fitY = (vp.Y * 0.92) / math.max(tonumber(designH) or 1, 1)
+    return math.clamp(math.min(ivyisPanelScale(), math.min(fitX, fitY)), 0.5, maxScale or 2.5)
+end
+
+local function ivyisRegisterGuiScale(screenGui, designW, designH, maxScale)
+    if not screenGui then return end
+    ivyisScaledGuis[#ivyisScaledGuis + 1] = { gui = screenGui, w = designW, h = designH, max = maxScale }
+    local uiScale = screenGui:FindFirstChildOfClass("UIScale")
+    if not uiScale then
+        uiScale = Instance.new("UIScale")
+        uiScale.Parent = screenGui
+    end
+    uiScale.Scale = ivyisGuiScaleFor(designW, designH, maxScale)
+    return uiScale
+end
+
+local function ivyisRegisterScaleRefresher(fn)
+    if type(fn) == "function" then
+        ivyisScaleRefreshers[#ivyisScaleRefreshers + 1] = fn
+        pcall(fn)
+    end
+end
+
+local function ivyisRefreshGuiScales()
+    for _, entry in ipairs(ivyisScaledGuis) do
+        local gui = entry.gui
+        if gui and gui.Parent then
+            local uiScale = gui:FindFirstChildOfClass("UIScale")
+            if uiScale then
+                uiScale.Scale = ivyisGuiScaleFor(entry.w, entry.h, entry.max)
+            end
+        end
+    end
+    for _, fn in ipairs(ivyisScaleRefreshers) do
+        pcall(fn)
+    end
+end
+
+local function ivyisApplyUiScale(choice)
+    if choice ~= nil then ivyisUiSizeChoice = choice end
+    if not ivyisWindow then return end
+    local scale = ivyisScaleForChoice(ivyisUiSizeChoice)
+    pcall(function() ivyisWindow:SetUIScale(scale) end)
+    pcall(ivyisRefreshGuiScales)
+    if getgenv then
+        pcall(function() getgenv().IvyisUiScale = scale end)
+    end
+end
+
 local Window = WindUI:CreateWindow({
     Title = "Ivyis's Tool",
     Icon = "sparkles",
     Author = "by ivyis",
     Folder = "AutoFeedBSS",
-    Size = UDim2.fromOffset(560, 350),
+    Size = UDim2.fromOffset(IVYIS_UI_BASE.X, IVYIS_UI_BASE.Y),
     Transparent = true,
     Theme = "Dark",
     SideBarWidth = 180,
     HasOutline = true,
-    Resizable = false
+    Resizable = false,
+    AutoScale = false
 })
+
+-- Set the scale before the tabs are built so every element is laid out with it.
+ivyisWindow = Window
+ivyisApplyUiScale(ivyisUiSizeChoice)
+
+-- The status HUD lives in its own ScreenGui (built earlier); keep it readable too.
+ivyisRegisterGuiScale(hudGui, 600, 20, 2.5)
 
 pcall(function()
     WindUI:SetTheme("Dark")
@@ -6091,7 +6207,8 @@ mobileBtn.BorderSizePixel = 0
 mobileBtn.Text = ""
 mobileBtn.AutoButtonColor = false
 mobileBtn.Parent = mobileGui
-Instance.new("UICorner", mobileBtn).CornerRadius = UDim.new(0, 14)
+local mobileCorner = Instance.new("UICorner", mobileBtn)
+mobileCorner.CornerRadius = UDim.new(0, 14)
 
 local mobileStroke = Instance.new("UIStroke")
 mobileStroke.Thickness = 1.8
@@ -6104,6 +6221,20 @@ mobileIcon.Position = UDim2.new(0.5, -15, 0.5, -15)
 mobileIcon.BackgroundTransparency = 1
 mobileIcon.Image = "rbxassetid://4503856569"
 mobileIcon.Parent = mobileBtn
+
+-- Bigger tap target on phones, following the same "UI size" setting as the
+-- panel. The button keeps plain offset sizes so the drag maths stays in real
+-- screen pixels.
+ivyisRegisterScaleRefresher(function()
+    local s = math.clamp(ivyisPanelScale(), 1, 1.9)
+    local size = math.floor(48 * s + 0.5)
+    local icon = math.floor(30 * s + 0.5)
+    mobileBtn.Size = UDim2.new(0, size, 0, size)
+    mobileIcon.Size = UDim2.new(0, icon, 0, icon)
+    mobileIcon.Position = UDim2.new(0.5, -icon / 2, 0.5, -icon / 2)
+    mobileCorner.CornerRadius = UDim.new(0, math.floor(14 * s + 0.5))
+    mobileStroke.Thickness = 1.8 * s
+end)
 
 local btnDragging = false
 local btnDragStart = nil
@@ -6127,8 +6258,9 @@ trackConn(UserInputService.InputChanged:Connect(function(input)
         local vp = camera and camera.ViewportSize or Vector2.new(1920, 1080)
         local curAbsX = btnStartPos.X.Scale * vp.X + btnStartPos.X.Offset
         local curAbsY = btnStartPos.Y.Scale * vp.Y + btnStartPos.Y.Offset
-        local newX = math.clamp(curAbsX + delta.X, 0, vp.X - 52)
-        local newY = math.clamp(curAbsY + delta.Y, 0, vp.Y - 52)
+        local btnPx = math.max(mobileBtn.AbsoluteSize.X, 1)
+        local newX = math.clamp(curAbsX + delta.X, 0, math.max(vp.X - btnPx - 4, 0))
+        local newY = math.clamp(curAbsY + delta.Y, 0, math.max(vp.Y - btnPx - 4, 0))
         mobileBtn.Position = UDim2.new(0, newX, 0, newY)
     end
 end))
@@ -6159,6 +6291,10 @@ pickerGui.Name = "AutoFeed_HiveModalGui"
 pickerGui.ResetOnSpawn = false
 pickerGui.DisplayOrder = 200000
 pickerGui.Parent = hui
+
+-- Grow the hive-slot picker with the same "UI size" setting (never past the
+-- screen edges).
+ivyisRegisterGuiScale(pickerGui, 264, 570, 2.5)
 
 local pickerFrame = Instance.new("Frame")
 pickerFrame.Name = "HiveSelectionModal"
@@ -7240,6 +7376,16 @@ SettingsTab:Dropdown({
     Value = "Dark",
     Callback = function(theme)
         pcall(function() WindUI:SetTheme(theme) end)
+    end
+})
+
+SettingsTab:Dropdown({
+    Title = "UI size",
+    Desc = "bigger in-game menu (useful on phones)",
+    Values = IVYIS_UI_SCALE_CHOICES,
+    Value = ivyisUiSizeChoice,
+    Callback = function(choice)
+        ivyisApplyUiScale(choice)
     end
 })
 
