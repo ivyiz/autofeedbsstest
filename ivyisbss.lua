@@ -20,6 +20,21 @@ end
 
 local player = Players.LocalPlayer
 
+-- ===== Doi Atlas load xong truoc khi doc/bam UI cua no =====
+-- Mac dinh: cho it nhat 10s, toi da 20s (hoac som hon neu thay cua so Atlas).
+-- Chinh bang getgenv().IvyisAtlasBootMin / IvyisAtlasBootMax.
+do
+    local g = (getgenv and getgenv()) or _G
+    if type(g) == "table" then
+        -- reset moi lan execute: at = thoi diem script vua chay
+        local st = { at = tick(), min = 10, max = 20 }
+        local a, b = tonumber(g.IvyisAtlasBootMin), tonumber(g.IvyisAtlasBootMax)
+        if a then st.min = math.clamp(a, 0, 60) end
+        if b then st.max = math.clamp(b, st.min, 90) end
+        g._IvyisAtlasBoot = st
+    end
+end
+
 -- ===== Executor detection (safe, lazy) =====
 -- Mot so executor implement getexecutorname()/identifyexecutor() kieu yield.
 -- Vi vay probe duoc chay trong thread rieng + timeout, khong block script.
@@ -235,7 +250,7 @@ local function getExecutorLabel(includeVersion)
 end
 
 local function getWebhookTitle()
-    return "Webhook From Ivyis's Tool - " .. getExecutorLabel(false)
+    return "Webhook From Ivyis BSS - " .. getExecutorLabel(false)
 end
 
 if getgenv and getgenv()._AutoFeedCleanup then
@@ -259,8 +274,9 @@ local function isOurIvyisUI(child)
     if child.Name ~= "IvyisUI" and child.Name ~= "WindUI" then return false end
     local ok, ours = pcall(function()
         for _, d in ipairs(child:GetDescendants()) do
-            if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text == "Ivyis's Tool" then
-                return true
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                -- Match current and previous window branding.
+                if tostring(d.Text or ""):find("^Ivyis") then return true end
             end
         end
         return false
@@ -797,7 +813,7 @@ do
             Name = "Title",
             Size = UDim2.new(0.5, -10, 0, 25),
             Position = UDim2.new(0, 10, 0, 0),
-            Text = tostring(cfg.Title or "Ivyis's Tool"),
+            Text = tostring(cfg.Title or "Ivyis BSS"),
             TextSize = 14,
             Font = FONT_BOLD,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -2413,6 +2429,7 @@ local DEFAULT_ROUTE = {
     { Bees = 20, Name = "Diamond Mask", Type = "Hat", Honey = 5000000000, Ingredients = { { Item = "Blue Extract", Amount = 250 }, { Item = "Oil", Amount = 150 }, { Item = "Glitter", Amount = 100 }, { Item = "Diamond Egg", Amount = 5 }, { Item = "Comforting Vial", Amount = 1 } } },
     { Bees = 20, Name = "Demon Mask", Type = "Hat", Honey = 5000000000, Ingredients = { { Item = "Red Extract", Amount = 250 }, { Item = "Enzymes", Amount = 150 }, { Item = "Glue", Amount = 100 }, { Item = "Stinger", Amount = 500 }, { Item = "Invigorating Vial", Amount = 1 } } },
     { Bees = 20, Name = "Gummy Mask", Type = "Hat", Honey = 5000000000, Ingredients = { { Item = "Glue", Amount = 250 }, { Item = "Enzymes", Amount = 100 }, { Item = "Oil", Amount = 100 }, { Item = "Glitter", Amount = 100 }, { Item = "Satisfying Vial", Amount = 1 } } },
+    { Bees = 0, Name = "Honeycomb Belt", Type = "Belt", Honey = 75000000, Ingredients = { { Item = "Enzymes", Amount = 50 }, { Item = "Glue", Amount = 50 }, { Item = "Oil", Amount = 25 } } },
     { Bees = 35, Name = "Diamond Drenchers", Type = "Sprinkler", Honey = 4444444444 },
     { Bees = 35, Name = "Coconut Canister", Type = "Bag", Honey = 25000000000, Ingredients = { { Item = "Blue Extract", Amount = 150 }, { Item = "Red Extract", Amount = 150 }, { Item = "Tropical Drink", Amount = 150 }, { Item = "Coconut", Amount = 250 }, { Item = "Refreshing Vial", Amount = 2 } } },
     { Bees = 35, Name = "Pesticide Planter", Type = "Planter", Honey = 750000000, Ingredients = { { Item = "Glue", Amount = 15 }, { Item = "Caustic Wax", Amount = 3 }, { Item = "Hard Wax", Amount = 10 }, { Item = "Neonberry", Amount = 25 }, { Item = "Magic Bean", Amount = 25 } } },
@@ -2504,7 +2521,8 @@ local function getBeeCount(data)
     if hive and hive:FindFirstChild("Cells") then
         for _, cell in ipairs(hive.Cells:GetChildren()) do
             local ct = cell:FindFirstChild("CellType") or cell:FindFirstChild("Type")
-            if ct and ct.Value ~= "" and ct.Value ~= "Empty" then count = count + 1 end
+            local tv = ct and tostring(ct.Value):lower() or ""
+            if tv ~= "" and tv ~= "empty" and tv ~= "none" and tv ~= "nil" then count = count + 1 end
         end
     end
     if count > 0 then return count end
@@ -3472,16 +3490,30 @@ local function bringIntoView(gui)
     if not gui or not gui:IsA("GuiObject") then return end
     if not isOnScreen(gui) then return end
     local scroll = gui:FindFirstAncestorWhichIsA("ScrollingFrame")
-    if scroll and scroll.AbsoluteSize.Y > 0 then
-        pcall(function()
-            local relY = gui.AbsolutePosition.Y - scroll.AbsolutePosition.Y + scroll.CanvasPosition.Y
-            scroll.CanvasPosition = Vector2.new(0, math.max(0, relY - scroll.AbsoluteSize.Y / 2))
+    if not scroll or scroll.AbsoluteSize.X <= 0 or scroll.AbsoluteSize.Y <= 0 then return end
+    pcall(function()
+        local pos, size = gui.AbsolutePosition, gui.AbsoluteSize
+        local view = scroll.AbsoluteSize
+        local sp = scroll.AbsolutePosition
+        local cx, cy = scroll.CanvasPosition.X, scroll.CanvasPosition.Y
+        -- truc ngang (thanh tab cua Atlas)
+        if pos.X < sp.X or pos.X + size.X > sp.X + view.X then
+            local relX = pos.X - sp.X + cx
+            cx = math.max(0, relX - math.max(0, (view.X - size.X) / 2))
+        end
+        -- truc doc
+        if pos.Y < sp.Y or pos.Y + size.Y > sp.Y + view.Y then
+            local relY = pos.Y - sp.Y + cy
+            cy = math.max(0, relY - math.max(0, (view.Y - size.Y) / 2))
+        end
+        if cx ~= scroll.CanvasPosition.X or cy ~= scroll.CanvasPosition.Y then
+            scroll.CanvasPosition = Vector2.new(cx, cy)
             task.wait(0.04)
-        end)
-    end
+        end
+    end)
 end
 
-local function clickElement(gui)
+local function clickElement(gui, forceTap)
     if not gui or not gui:IsA("GuiObject") then return false end
 
     local clickable = gui
@@ -3491,7 +3523,8 @@ local function clickElement(gui)
 
     bringIntoView(clickable)
 
-    if clickable:IsA("GuiButton") then
+    -- forceTap = bo qua connection, tap thang vao toa do (Android: handler "la")
+    if clickable:IsA("GuiButton") and not forceTap then
         local fired = false
         if getconnections then
             for _, sigName in ipairs({ "MouseButton1Click", "Activated" }) do
@@ -4321,6 +4354,75 @@ local function collectPurchases(tbl, depth)
     return nil
 end
 
+-- ---------------------------------------------------------------------------
+-- Atlas route steps: giu dung thu tu va dung loai buoc
+-- (Codes / Field / Event Bee / Purchase) thay vi chi lay gear.
+-- Gom vao 1 bang de khong vuot gioi han 200 local cua chunk chinh.
+-- ---------------------------------------------------------------------------
+local RouteSteps = { cache = {} }
+
+RouteSteps.kindByType = {
+    codes = "Code", code = "Code",
+    field = "Field", fields = "Field",
+    ["event bee"] = "EventBee", eventbee = "EventBee", ["event bees"] = "EventBee",
+    purchase = "Purchase", purchases = "Purchase", buy = "Purchase", craft = "Purchase",
+}
+
+function RouteSteps.kindOf(group)
+    if type(group) ~= "table" then return nil end
+    return RouteSteps.kindByType[tostring(group.Type or group.type or ""):lower()]
+end
+
+function RouteSteps.push(steps, seen, kind, rawName, bees)
+    if not kind or type(rawName) ~= "string" then return end
+    local name = rawName:gsub("^%s+", ""):gsub("%s+$", "")
+    if #name < 1 or #name > 80 then return end
+    local key = kind .. "\0" .. name:lower()
+    if seen[key] then return end
+    seen[key] = true
+    steps[#steps + 1] = { Kind = kind, Name = name, Bees = tonumber(bees) or 0 }
+end
+
+function RouteSteps.build(rawRoute)
+    local steps, seen = {}, {}
+    for _, group in ipairs(type(rawRoute) == "table" and rawRoute or {}) do
+        local kind = RouteSteps.kindOf(group)
+        if kind then
+            local bees = group.Bees
+            local d = group.Data
+            if type(d) == "string" then
+                RouteSteps.push(steps, seen, kind, d, bees)
+            elseif type(d) == "table" then
+                for _, v in ipairs(d) do
+                    if type(v) == "string" then RouteSteps.push(steps, seen, kind, v, bees) end
+                end
+                if #d == 0 then
+                    for k, v in pairs(d) do
+                        if type(v) == "string" then
+                            RouteSteps.push(steps, seen, kind, v, bees)
+                        elseif type(v) == "table" and type(v.Name) == "string" then
+                            RouteSteps.push(steps, seen, kind, v.Name, bees)
+                        elseif type(k) == "string" then
+                            RouteSteps.push(steps, seen, kind, k, bees)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return steps
+end
+
+function RouteSteps.findByName(rawName)
+    if not rawName then return nil end
+    local low = tostring(rawName):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+    if low == "" then return nil end
+    for _, s in ipairs(RouteSteps.cache) do
+        if s.Name:lower() == low then return s end
+    end
+    return nil
+end
+
 local function findRouteInMemory()
     local settings = findAtlasSettings()
     if settings then
@@ -4894,6 +4996,7 @@ local function getRoute()
         if not rawRoute then rawRoute, routeSrc = tryFile() end
     end
     routeSourceName = routeSrc or "none"
+    RouteSteps.cache = rawRoute and RouteSteps.build(rawRoute) or {}
     local rawItemsList = rawRoute and collectPurchases(rawRoute, 0)
 
     if rawItemsList and type(rawItemsList) == "table" and #rawItemsList > 0 then
@@ -4949,8 +5052,9 @@ local function getRoute()
 end
 
 local targetSource = "none"
+local liveNonGear = false
 
-local nextItemCache = { at = 0, val = nil, raw = nil }
+local nextItemCache = { at = 0, val = nil, raw = nil, nonGear = false }
 
 local function isOwnUI(obj)
     if not obj then return false end
@@ -4971,7 +5075,27 @@ local function parseNextItemLine(line)
     m = m:gsub("^%s+", ""):gsub("%s+$", "")
     local cleanPart = m:match("^[^\r\n:]+") or m
     cleanPart = cleanPart:gsub("%s+[Nn]ext.*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if cleanPart == "" or cleanPart == "?" then return nil end
+    local bare = cleanPart:gsub("%s*%b()%s*$", ""):gsub("%s+$", "")
+    if bare == "" then bare = cleanPart end
 
+    -- 1) buoc Purchase trong route Atlas (bo qua Codes / Field / Event Bee)
+    local step = RouteSteps.findByName(bare) or RouteSteps.findByName(cleanPart) or RouteSteps.findByName(m)
+    if step then
+        if step.Kind == "Purchase" then return (toItemName(step.Name) or step.Name), m end
+        -- nhan nay la buoc khac gear (code / field / event bee): Atlas dang khong che gear
+        return nil, m, true
+    end
+
+    -- 1b) Atlas co the hien "Event Bee: Tabby", "Field: ..." hoac "Code: ..."
+    -- thay vi ten buoc. Cac tien to nay khong bao gio la gear.
+    local lowPart = cleanPart:lower()
+    if lowPart:find("^event%s*bee") or lowPart:find("^code") or lowPart:find("^field")
+        or lowPart:find("field$") then
+        return nil, m, true
+    end
+
+    -- 2) gear item (alias / DEFAULT_ROUTE)
     local res = toItemNameExact(cleanPart)
         or toItemNameExact((cleanPart:gsub("[%s%d]+$", "")))
         or toItemNameExact(m)
@@ -4998,8 +5122,9 @@ local function scanNextItemIn(root)
                 if okT and type(rawTxt) == "string" and rawTxt ~= "" and #rawTxt < 2000 then
                     local txt = rawTxt:gsub("<br%s*/?>", "\n"):gsub("<[^>]+>", " ")
                     for line in txt:gmatch("[^\r\n]+") do
-                        local res, m = parseNextItemLine(line)
-                        if res then return res, m end
+                        local res, m, nonGear = parseNextItemLine(line)
+                        if res then return res, m, false end
+                        if nonGear then return nil, m, true end
                     end
                 end
             end
@@ -5048,20 +5173,80 @@ local function atlasTabButtons(win)
     return list
 end
 
+local lastPressMethod = "none"
+
+-- Atlas can ~10-20s de load xong UI. Trong luc do khong bam tab de tranh truot.
+pcall(function()
+    local g = getgenv and getgenv()
+    if type(g) ~= "table" then return end
+    g.IvyisAtlasBootReady = function()
+        local st = g._IvyisAtlasBoot
+        if type(st) ~= "table" then return true end
+        local elapsed = tick() - (tonumber(st.at) or 0)
+        if elapsed < (tonumber(st.min) or 0) then return false end
+        if elapsed >= (tonumber(st.max) or 0) then return true end
+        return findAtlasWindow() ~= nil
+    end
+    g.IvyisAtlasBootWaitText = function()
+        local st = g._IvyisAtlasBoot
+        if type(st) ~= "table" then return "ready" end
+        local left = (tonumber(st.min) or 0) - (tick() - (tonumber(st.at) or 0))
+        if left > 0 then return string.format("%.0fs (min delay)", left) end
+        return "waiting for the Atlas window"
+    end
+end)
+
 local function pressAtlasButton(btn)
     if not btn then return false end
-    if fireConnections(btn.MouseButton1Click) > 0 then return true end
-    return triggerButtonHeadless(btn)
+    local bootFn = getgenv and getgenv().IvyisAtlasBootReady
+    if bootFn and not bootFn() then
+        local wt = getgenv().IvyisAtlasBootWaitText
+        lastPressMethod = "boot delay: " .. tostring(wt and wt() or "waiting for Atlas")
+        return false
+    end
+    -- ban ca 2 signal: co ban Atlas chi connect Activated, co ban chi MouseButton1Click
+    local nClick = fireConnections(btn.MouseButton1Click)
+    local nAct = fireConnections(btn.Activated)
+    if nClick + nAct > 0 then
+        lastPressMethod = nClick > 0 and "MouseButton1Click connections" or "Activated connections"
+        return true
+    end
+    if triggerButtonHeadless(btn) then
+        lastPressMethod = "Activated/firesignal"
+        return true
+    end
+    -- Android / executor khong co getconnections: tap that vao toa do nut
+    if clickElement(btn) then
+        lastPressMethod = "synthetic tap (coords)"
+        return true
+    end
+    lastPressMethod = "failed (no click backend)"
+    return false
 end
 
 -- Atlas chi dung muc "Progression" (nhan Next item) khi tab Toys dang mo.
 -- Mo Toys 1 chut, doc nhan roi tra lai tab cu.
 local lastTabPeek = 0
+local peekFailStreak = 0
 local lastGoodNext = { val = nil, raw = nil, at = 0 }
+local lastPeekInfo = "not tried yet"
+local lastPeekNoWindow = false
+local forcePeekNext = false
 
 local function peekNextItemFromToysTab()
+    local bootFn = getgenv and getgenv().IvyisAtlasBootReady
+    if bootFn and not bootFn() then
+        local wt = getgenv().IvyisAtlasBootWaitText
+        lastPeekInfo = "boot wait: " .. tostring(wt and wt() or "waiting for Atlas")
+        return nil
+    end
     local win = findAtlasWindow()
-    if not win then return nil end
+    if not win then
+        lastPeekNoWindow = true
+        lastPeekInfo = "no Atlas window found"
+        return nil
+    end
+    lastPeekNoWindow = false
     local tabs = atlasTabButtons(win)
     local toysBtn, activeBtn, bestBg = nil, nil, 2
     for _, t in ipairs(tabs) do
@@ -5069,60 +5254,126 @@ local function peekNextItemFromToysTab()
         local bg = t.btn.BackgroundTransparency
         if bg < bestBg then bestBg = bg; activeBtn = t.btn end
     end
-    if not toysBtn then return nil end
+    if not toysBtn then
+        lastPeekInfo = "no Toys tab in Atlas window"
+        return nil
+    end
 
     local switched = (activeBtn ~= toysBtn)
+    local pressUsed = "tab already open"
     if switched then
-        if not pressAtlasButton(toysBtn) then return nil end
-        task.wait(0.35)
+        if not pressAtlasButton(toysBtn) then
+            lastPeekInfo = "cannot press the Toys tab (" .. tostring(lastPressMethod) .. ")"
+            return nil
+        end
+        pressUsed = lastPressMethod
+        task.wait(0.5)
     end
-    local res, raw = scanNextItemIn(win:FindFirstChild("Tab"))
+    local res, raw, nonGear = scanNextItemIn(win)
+
+    -- At-lan 2: neu chua thay nhan thi tap toa do that (bo qua connection)
+    if switched and not res and not nonGear then
+        if clickElement(toysBtn, true) then
+            task.wait(0.6)
+            res, raw, nonGear = scanNextItemIn(win)
+            if res or nonGear then pressUsed = "retry: synthetic tap" end
+        end
+    end
+
     if switched and activeBtn then
         pressAtlasButton(activeBtn)
         task.wait(0.05)
     end
-    return res, raw
+    lastPressMethod = pressUsed
+    if res then
+        lastPeekInfo = "read gear: " .. tostring(res)
+    elseif nonGear then
+        lastPeekInfo = "read route step (not gear): " .. tostring(raw)
+    else
+        lastPeekInfo = "label empty after switching to Toys"
+    end
+    return res, raw, nonGear
 end
 
 local function readNextItemLabel()
-    if tick() - nextItemCache.at < 2 then return nextItemCache.val end
+    if tick() - nextItemCache.at < 2 then return nextItemCache.val, nextItemCache.nonGear end
     nextItemCache.at = tick()
+
+    -- nap route Atlas truoc de nhan dien ten gear trong route
+    if #RouteSteps.cache == 0 then pcall(getRoute) end
 
     -- 1) nhan dang hien san tren man hinh (tab Toys dang mo)
     for _, root in ipairs(getUiRoots()) do
-        local res, raw = scanNextItemIn(root)
+        local res, raw, nonGear = scanNextItemIn(root)
         if res then
-            nextItemCache.val, nextItemCache.raw = res, raw
-            lastGoodNext = { val = res, raw = raw, at = tick() }
-            return res
+            nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = res, raw, false
+            lastGoodNext = { val = res, raw = raw, nonGear = false, at = tick() }
+            return res, false
+        elseif nonGear then
+            nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = nil, raw, true
+            -- Remember "non-gear" too (not just gear): a later fallback must not
+            -- resurrect an old gear target while Atlas is still on a code/field.
+            lastGoodNext = { val = nil, raw = raw, nonGear = true, at = tick() }
+            return nil, true
         end
     end
 
-    -- 2) tab Toys dong -> mo ra doc roi dong lai (toi da 1 lan / 15s)
-    if tick() - lastTabPeek > 15 then
+    -- 2) tab Toys dong -> mo ra doc roi dong lai (8s/lan, hoac ngay sau khi vua mua gear)
+    -- Trong thoi gian cho Atlas load: khong bam tab.
+    local bootFn = getgenv and getgenv().IvyisAtlasBootReady
+    if bootFn and not bootFn() then
+        nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = nil, nil, false
+        return nil, false
+    end
+    -- Atlas chua mo -> thu lai nhanh (2.5s) de bat duoc ngay khi Atlas vua load
+    local peekInterval = math.min(8 + peekFailStreak * 4, 30)
+    if lastPeekNoWindow then peekInterval = 2.5 end
+    if forcePeekNext or (tick() - lastTabPeek > peekInterval) then
+        forcePeekNext = false
         lastTabPeek = tick()
-        local ok, res, raw = pcall(peekNextItemFromToysTab)
+        local ok, res, raw, nonGear = pcall(peekNextItemFromToysTab)
+        if ok and (res or nonGear) then
+            peekFailStreak = 0
+        elseif lastPeekNoWindow then
+            peekFailStreak = 0 -- khong phai loi, chi la Atlas chua mo
+        else
+            peekFailStreak = peekFailStreak + 1
+        end
         if ok and res then
-            nextItemCache.val, nextItemCache.raw = res, raw
-            lastGoodNext = { val = res, raw = raw, at = tick() }
-            return res
+            nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = res, raw, false
+            lastGoodNext = { val = res, raw = raw, nonGear = false, at = tick() }
+            return res, false
+        elseif ok and nonGear then
+            nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = nil, raw, true
+            lastGoodNext = { val = nil, raw = raw, nonGear = true, at = tick() }
+            return nil, true
         end
     end
 
-    -- 3) giu gia tri doc duoc gan nhat (toi da 90s) de khong nhay sang nguon khac
-    if lastGoodNext.val and tick() - lastGoodNext.at < 90 then
-        nextItemCache.val, nextItemCache.raw = lastGoodNext.val, lastGoodNext.raw
-        return lastGoodNext.val
+    -- 3) giu trang thai doc duoc gan nhat (toi da 90s) de khong nhay sang nguon khac
+    if lastGoodNext.nonGear and tick() - lastGoodNext.at < 90 then
+        nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = nil, lastGoodNext.raw, true
+        return nil, true
     end
-    nextItemCache.val, nextItemCache.raw = nil, nil
-    return nil
+    if lastGoodNext.val and tick() - lastGoodNext.at < 90 then
+        nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = lastGoodNext.val, lastGoodNext.raw, false
+        return lastGoodNext.val, false
+    end
+    nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = nil, nil, false
+    return nil, false
 end
 
 local function getLiveTarget()
     targetSource = "none"
+    liveNonGear = false
 
     local function accept(raw, srcName)
         if raw == nil then return nil end
+        local step = RouteSteps.findByName(tostring(raw))
+        if step and step.Kind == "Purchase" then
+            targetSource = srcName
+            return toItemName(step.Name) or step.Name
+        end
         local res = toItemName(raw)
         if res and isRouteItem(res) then
             targetSource = srcName
@@ -5131,10 +5382,16 @@ local function getLiveTarget()
         return nil
     end
 
-    local uiNext = readNextItemLabel()
+    local uiNext, uiNonGear = readNextItemLabel()
     if uiNext then
         targetSource = "ui: Atlas 'Next item' label"
         return uiNext
+    end
+    if uiNonGear then
+        -- Atlas dang o buoc code / field / event bee: khong tu doan gear theo route
+        targetSource = "ui: Atlas next step is not gear"
+        liveNonGear = true
+        return nil
     end
 
     local settings = findAtlasSettings()
@@ -5146,6 +5403,30 @@ local function getLiveTarget()
                 or accept(t.current_target, "settings.toys.current_target")
                 or accept(t.current_purchase, "settings.toys.current_purchase")
             if r then return r end
+
+            -- ten key co the doi giua cac ban Atlas: quet moi key lien quan
+            for k, v in pairs(t) do
+                if type(v) == "string" then
+                    local lk = tostring(k):lower()
+                    if lk:find("target", 1, true) or lk:find("current", 1, true) or lk:find("next", 1, true)
+                        or lk:find("prog", 1, true) or lk:find("craft", 1, true)
+                        or lk:find("purchase", 1, true) or lk:find("item", 1, true) then
+                        local rr = accept(v, "settings.toys." .. tostring(k))
+                        if rr then return rr end
+                    end
+                end
+            end
+        end
+        -- cac bang trang thai auto progression (ten goi khac nhau tuy ban Atlas)
+        for k, v in pairs(settings) do
+            if type(v) == "table" and tostring(k):lower():find("prog", 1, true) then
+                for k2, v2 in pairs(v) do
+                    if type(v2) == "string" then
+                        local rr = accept(v2, "settings." .. tostring(k) .. "." .. tostring(k2))
+                        if rr then return rr end
+                    end
+                end
+            end
         end
         local r = accept(settings.target, "settings.target")
         if r then return r end
@@ -5304,6 +5585,9 @@ local function pickNextTarget(data, beeCount)
     local liveTarget = getLiveTarget()
     if liveTarget then
         liveMisses = 0
+    elseif liveNonGear then
+        -- Atlas dang chay buoc khac (code/field/event bee): giu nguyen gear dang bam
+        liveMisses = 0
     else
         liveMisses = liveMisses + 1
         if liveMisses >= 3 then lockedTarget = nil end
@@ -5320,6 +5604,12 @@ local function pickNextTarget(data, beeCount)
     if lockedTarget then
         if ownsItem(lockedTarget, "Gear", char, data) then
             lockedTarget = nil
+            -- vua mua xong: doc lai nhan Atlas ngay de bam dung item tiep theo.
+            -- Xoa cache cu, neu khong no tra lai dung mon vua mua moi tick va
+            -- ep peek lien tuc (bam tab Atlas lap lai).
+            lastGoodNext = { val = nil, raw = nil, nonGear = false, at = 0 }
+            forcePeekNext = true
+            nextItemCache.at = 0
         else
             local matchedMilestone = nil
             local cTarget = lockedTarget:gsub("[%s%-_']", ""):lower()
@@ -5615,6 +5905,15 @@ local function getHttpRequest()
     return (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
 end
 
+-- Discord rejects a message over 4000 chars per text display (4096 for an
+-- embed description). Ingredients can grow past that, so clip before sending.
+function RouteSteps.clip(text, maxLen)
+    local s = tostring(text or "")
+    local limit = tonumber(maxLen) or 3500
+    if #s <= limit then return s end
+    return s:sub(1, limit - 3) .. "..."
+end
+
 -- Components V2: 1 container gom cac khoi text, phan cach bang separator.
 -- blocks = { "## tieu de", "noi dung", "-# footer" } (khoi dau/cuoi khong can separator)
 local function buildV2Payload(blocks, color)
@@ -5667,17 +5966,19 @@ local function sendEventWebhook(kind, title, body, color)
     if kind == "config" and not WebhookState.notifyConfig then return false end
     local url = getWebhookSettings()
     if not url then return false end
+    local bodyText = RouteSteps.clip(body, 3500)
+    local footer = "Ivyis BSS-" .. tostring(player.Name)
     return postWebhook(url,
         buildV2Payload({
             "## " .. title,
-            body,
-            string.format("-# %s • <t:%d:R>", player.Name, os.time()),
+            bodyText,
+            string.format("-# %s • <t:%d:R>", footer, os.time()),
         }, color or 3447003),
         {
             username = getWebhookTitle(),
             embeds = { {
-                title = title, description = body, color = color or 3447003,
-                footer = { text = "Player: " .. player.Name },
+                title = title, description = bodyText, color = color or 3447003,
+                footer = { text = footer },
                 timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
             } },
         })
@@ -5703,25 +6004,26 @@ local function sendProgressWebhook(beeCount, targetStr, fieldStr, routeStr, data
         noteText = string.format("\n⚠️ **Note:** can't farm `%s` in a field, you need to get it yourself.", tostring(needStr or targetStr or "this item"))
     end
 
-    local bodyText = string.format(
+    local bodyText = RouteSteps.clip(string.format(
         "**Bees:** %d\n**Next item:** %s%s\n**Need:**\n%s\n**Field:** %s\n**Route:** %s",
         tonumber(beeCount) or 0, tostring(targetStr), noteText,
         tostring(needIngredients), tostring(fieldStr), tostring(routeStr)
-    )
+    ), 3500)
     local color = isUnfarmable and 16744448 or 3447003
     local title = getWebhookTitle()
+    local footer = "Ivyis BSS-" .. tostring(player.Name)
 
     postWebhook(webhookUrl,
         buildV2Payload({
             "## " .. title,
             bodyText,
-            string.format("-# %s • <t:%d:R>", player.Name, os.time()),
+            string.format("-# %s • <t:%d:R>", footer, os.time()),
         }, color),
         {
             username = title,
             embeds = { {
                 title = title, description = bodyText, color = color,
-                footer = { text = "Player: " .. player.Name },
+                footer = { text = footer },
                 timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
             } },
         })
@@ -5737,9 +6039,28 @@ local function printDebug()
     print("Atlas Live Target:", tostring(liveTarget))
     print("Active Latched Target:", tostring(lockedTarget))
     print("Atlas Settings Found:", tostring(findAtlasSettings() ~= nil))
+    print("Atlas Window Found:", tostring(findAtlasWindow() ~= nil))
     print("Live Target Source:", tostring(targetSource))
     print("Atlas UI 'Next item' raw:", tostring(nextItemCache.raw), "-> resolved:", tostring(nextItemCache.val))
+    print("Atlas Label State:", nextItemCache.nonGear and "not gear (code/field/event bee)" or (nextItemCache.val and "gear" or "none"))
+    print("Atlas Peek:", tostring(lastPeekInfo))
+    local bootState = (getgenv and getgenv()._IvyisAtlasBoot) or {}
+    local bootElapsed = tick() - (tonumber(bootState.at) or tick())
+    local bootReadyFn = getgenv and getgenv().IvyisAtlasBootReady
+    print(string.format("Atlas Boot: %.1fs elapsed | min %ss, max %ss | ready=%s",
+        bootElapsed, tostring(bootState.min), tostring(bootState.max),
+        tostring(not bootReadyFn or bootReadyFn())))
+    print("Atlas Tab Press:", tostring(lastPressMethod))
+    print("Peek Backend:", (getconnections and "getconnections" or "no getconnections"),
+        "| firesignal:", tostring(firesignal ~= nil),
+        "| VirtualUser:", tostring(VirtualUser ~= nil),
+        "| VirtualInput:", tostring(VirtualInput ~= nil))
     print("Route Source:", tostring(routeSourceName))
+    print("Atlas Route Steps (all types):", #RouteSteps.cache)
+    for i = 1, math.min(#RouteSteps.cache, 30) do
+        local s = RouteSteps.cache[i]
+        print(string.format("  step[%d] = [%s] %s (bees>=%s)", tonumber(i) or 0, tostring(s.Kind), tostring(s.Name), tostring(s.Bees)))
+    end
     print("Pointer File:", tostring(configState.pointer), "| via pointer:", tostring(configState.viaPointer), "| last read problem:", tostring(configState.lastFail))
     print("Atlas Folders:", table.concat(configState.roots or {}, ", "), "| files scanned:", tostring(configState.fileCount))
     print("Active Config File:", tostring(configState.path), "| route @", tostring(configState.routePath))
@@ -5836,7 +6157,8 @@ local function getHiveStats(data)
             if type(colTable) == "table" then
                 for row = 1, 10 do
                     local bee = colTable["y" .. row]
-                    if type(bee) == "table" and bee.Type and bee.Type ~= "" and bee.Type ~= "Empty" then
+                    local bt = type(bee) == "table" and tostring(bee.Type or ""):lower() or ""
+                    if bt ~= "" and bt ~= "empty" and bt ~= "none" and bt ~= "nil" then
                         beeCount = beeCount + 1
                         local lvl = tonumber(bee.Lvl) or 1
                         if lvl < minLevel then minLevel = lvl end
@@ -5866,10 +6188,17 @@ local function getHiveStats(data)
             local pFound = false
             for _, cell in ipairs(hive.Cells:GetChildren()) do
                 local ct = cell:FindFirstChild("CellType") or cell:FindFirstChild("Type")
-                if ct and ct.Value ~= "" and ct.Value ~= "Empty" then
+                local ctv = ct and tostring(ct.Value):lower() or ""
+                if ctv ~= "" and ctv ~= "empty" and ctv ~= "none" and ctv ~= "nil" then
                     pCount = pCount + 1
                     local lVal = cell:FindFirstChild("CellLevel") or cell:FindFirstChild("Level") or cell:FindFirstChild("Lvl")
-                    local lvl = lVal and tonumber(lVal.Value) or 1
+                    local lvl = lVal and tonumber(lVal.Value) or nil
+                    if not lvl then
+                        local lp = cell:FindFirstChild("LevelPart")
+                        local tl = lp and lp:FindFirstChildWhichIsA("TextLabel", true)
+                        local digits = tl and tostring(tl.Text or ""):match("(%d+)")
+                        lvl = digits and tonumber(digits) or 1
+                    end
                     if lvl < pMin then pMin = lvl end
                     pFound = true
                 end
@@ -6089,21 +6418,22 @@ local function sendStageWebhook(oldStage, newStageInfo, beeCount, minLvl)
     if not webhookUrl or not getHttpRequest() then return end
 
     local title = "Auto Change Config - Stage Up!"
-    local bodyText = string.format(
+    local bodyText = RouteSteps.clip(string.format(
         "**New stage:** %s\n**Config file:** `%s`\n**Bees:** %d\n**Min Level:** %d",
         tostring(newStageInfo.Name), tostring(newStageInfo.FileName), tonumber(beeCount) or 0, tonumber(minLvl) or 0
-    )
+    ), 3500)
+    local footer = "Ivyis BSS-" .. tostring(player.Name)
     postWebhook(webhookUrl,
         buildV2Payload({
             "## " .. title,
             bodyText,
-            string.format("-# %s • <t:%d:R>", player.Name, os.time()),
+            string.format("-# %s • <t:%d:R>", footer, os.time()),
         }, 65280),
         {
             username = getWebhookTitle(),
             embeds = { {
                 title = title, description = bodyText, color = 65280,
-                footer = { text = "Player: " .. player.Name },
+                footer = { text = footer },
                 timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
             } },
         })
@@ -6553,7 +6883,8 @@ _G.AutoProgDebug = printDebug
         end
         if gearProgressLabel then
             gearProgressLabel:SetTitle(string.format("Gear %d/%d", owned, total))
-            gearProgressLabel:SetDesc(activeTarget and ("Next: " .. activeTarget) or "All route gear owned")
+            gearProgressLabel:SetDesc(activeTarget and ("Next: " .. activeTarget)
+                or (liveNonGear and "Atlas step is not gear" or "All route gear owned"))
         end
     end
 
@@ -6638,7 +6969,8 @@ _G.AutoProgDebug = printDebug
     local function refreshProgressionUI(p)
         local ok, err = pcall(function()
             p = p or snapshotProgress()
-            local targetTitle = string.format("Next item: %s", tostring(p.targetItem or "nothing left"))
+            local targetTitle = liveNonGear and "Atlas step: not gear"
+                or string.format("Next item: %s", tostring(p.targetItem or "nothing left"))
             local needBody = describeIngredients(p.targetItem, p.data, p.beeCount, true)
             local targetDesc = string.format("Field: %s\nBees: %d, lowest level %d\n\nNeed:\n%s",
                 tostring(p.field or (p.targetItem and "Unchanged" or "None")),
@@ -6661,7 +6993,7 @@ _G.AutoProgDebug = printDebug
                     stage and stage.Name or "Auto Prog",
                     tonumber(p.beeCount) or 0,
                     tonumber(p.minBeeLvl) or 0,
-                    tostring(p.targetItem or "None"),
+                    tostring(p.targetItem or (liveNonGear and "non-gear step" or "None")),
                     describeNeed(p),
                     tostring(p.field or "Unchanged")
                 )
@@ -6672,6 +7004,9 @@ _G.AutoProgDebug = printDebug
 
     local function progressionTick()
         if not autoProgressionEnabled then return end
+        -- Doi Atlas load xong (10-20s) truoc khi doc/bam UI va ghi preset.
+        local bootReady = getgenv and getgenv().IvyisAtlasBootReady
+        if bootReady and not bootReady() then return end
         local ok, err = pcall(function()
             local p = snapshotProgress()
             refreshProgressionUI(p)
@@ -6766,7 +7101,7 @@ _G.AutoProgDebug = printDebug
             local url = getWebhookSettings()
             if not url then return false, "no link" end
             if not getHttpRequest() then return false, "executor has no http request" end
-            local ok = sendEventWebhook(nil, "Test message", "Webhook is working. This came from Ivyis's Tool.", 5763719)
+            local ok = sendEventWebhook(nil, "Test message", "Webhook is working. This came from Ivyis BSS.", 5763719)
             return ok, ok and "sent" or "Discord refused it"
         end,
     }
@@ -6890,7 +7225,12 @@ end
 local function getCellData(cell)
     if not cell then return nil end
     local cellTypeVal = cell:FindFirstChild("CellType") or cell:FindFirstChild("Type")
-    local typeName = tostring((cellTypeVal and cellTypeVal.Value) or cell:GetAttribute("CellType") or "Empty")
+    local rawType = tostring((cellTypeVal and cellTypeVal.Value) or cell:GetAttribute("CellType") or "Empty")
+    -- BSS reports the short type ("Basic", "Bomber") while the rest of the tool
+    -- (web catalogue, roll targets) uses ids ("BasicBee"). Normalise here once.
+    local typeName = RouteSteps.canonicalBeeId(rawType)
+    local lowType = typeName:lower()
+    if lowType == "" or lowType == "none" or lowType == "nil" then typeName = "Empty" end
 
     local col, row = cell.Name:match("C(%d+),(%d+)")
     col = tonumber(col) or (cell:FindFirstChild("CellX") and cell.CellX.Value) or 1
@@ -6908,21 +7248,53 @@ local function getCellData(cell)
     local lvlVal = 1
     if lp then
         local tl = lp:FindFirstChildWhichIsA("TextLabel", true)
-        if tl and tonumber(tl.Text) then
-            lvlVal = tonumber(tl.Text)
+        if tl then
+            local digits = tostring(tl.Text or ""):match("(%d+)")
+            if digits then lvlVal = tonumber(digits) or 1 end
         end
     end
 
+    -- Gifted is stored in different ways across BSS updates: a "Gifted" attribute,
+    -- a marker child, a "GiftedCell" model, a type name, or the golden star
+    -- particle. Check every source so a gifted bee is never missed.
     local isGifted = false
-    if typeName:lower():find("gifted") then isGifted = true end
-    for _, desc in ipairs(cell:GetDescendants()) do
-        local n = desc.Name:lower()
-        if n:find("gifted") or ((desc:IsA("Decal") or desc:IsA("ParticleEmitter")) and n:find("star")) then
-            isGifted = true
-            break
+    local okA, attrs = pcall(function() return cell:GetAttributes() end)
+    if okA and type(attrs) == "table" then
+        for k, v in pairs(attrs) do
+            local vs = tostring(v):lower()
+            local lk = tostring(k):lower()
+            if (lk:find("gift", 1, true) or lk == "star" or lk == "isstar")
+                and (v == true or (type(v) == "number" and v > 0)
+                    or vs == "true" or vs == "gifted" or vs == "yes" or vs == "1") then
+                isGifted = true
+                break
+            end
         end
     end
-    if cell:FindFirstChild("GiftedCell") then
+    local giftChild = cell:FindFirstChild("Gifted") or cell:FindFirstChild("IsGifted")
+    if giftChild then
+        if giftChild:IsA("ValueBase") then
+            local gv = giftChild.Value
+            local gvs = tostring(gv):lower()
+            if gv == true or (type(gv) == "number" and gv > 0)
+                or gvs == "true" or gvs == "gifted" or gvs == "yes" or gvs == "1" then
+                isGifted = true
+            end
+        else
+            isGifted = true
+        end
+    end
+    if not isGifted and typeName:lower():find("gifted") then isGifted = true end
+    if not isGifted then
+        for _, desc in ipairs(cell:GetDescendants()) do
+            local n = desc.Name:lower()
+            if n:find("gifted") or ((desc:IsA("Decal") or desc:IsA("ParticleEmitter")) and n:find("star")) then
+                isGifted = true
+                break
+            end
+        end
+    end
+    if not isGifted and cell:FindFirstChild("GiftedCell") then
         isGifted = true
     end
 
@@ -6947,21 +7319,82 @@ local function readHiveGrid(force)
         return gridCache
     end
     local myHive = getMyHive()
-    if not myHive then return {} end
-    local cellsFolder = myHive:FindFirstChild("Cells")
-    if not cellsFolder then return {} end
+    local cellsFolder = myHive and myHive:FindFirstChild("Cells") or nil
+    local statOk, statData = pcall(getStatData)
+    local honeycomb = statOk and statData and statData.Honeycomb
+    -- If both the view and the stat cache are missing there is nothing to read.
+    if not cellsFolder and type(honeycomb) ~= "table" then return {} end
+
+    -- Some BSS builds keep the gifted flag in the stat cache instead of the
+    -- rendered cell. Treat any boolean-ish "gift" field as gifted; the field
+    -- name has changed over updates ("Gifted", "IsGifted", "GiftedType").
+    local function statGifted(entry)
+        if type(entry) ~= "table" then return false end
+        for k, v in pairs(entry) do
+            local lk = tostring(k):lower()
+            if lk:find("gift", 1, true) or lk == "star" or lk == "isstar" then
+                local vs = tostring(v):lower()
+                if v == true or (type(v) == "number" and v > 0)
+                    or vs == "true" or vs == "gifted" or vs == "yes" or vs == "1" then
+                    return true
+                end
+            end
+        end
+        if type(entry.Type) == "string" and entry.Type:lower():find("gifted") then return true end
+        return false
+    end
 
     local grid = {}
     for r = 1, 10 do
         grid[r] = {}
         for c = 1, 5 do
             local cellName = string.format("C%d,%d", c, r)
-            local cell = cellsFolder:FindFirstChild(cellName)
+            local cell = cellsFolder and (cellsFolder:FindFirstChild(cellName)
+                or cellsFolder:FindFirstChild(string.format("C%d,R%d", c, r))) or nil
             if cell then
                 grid[r][c] = getCellData(cell)
             end
         end
     end
+
+    -- The stat cache is authoritative and is also available while the hive is
+    -- streamed out. Overlay gifted/level there and fill cells the workspace did
+    -- not provide, so hive counts and SSA never depend on rendering.
+    if type(honeycomb) == "table" then
+        for r = 1, 10 do
+            grid[r] = grid[r] or {}
+            for c = 1, 5 do
+                local colTable = honeycomb["x" .. c]
+                local entry = type(colTable) == "table" and colTable["y" .. r] or nil
+                if type(entry) == "table" and entry.Type and entry.Type ~= "" and entry.Type ~= "Empty" then
+                    local gifted = statGifted(entry)
+                    local existing = grid[r][c]
+                    if existing then
+                        if gifted then existing.gifted = true end
+                        local lvl = tonumber(entry.Lvl)
+                        if lvl then existing.level = lvl end
+                        if not existing.beeType or existing.beeType == "Empty" then
+                            existing.beeType = RouteSteps.canonicalBeeId(entry.Type)
+                        end
+                    else
+                        grid[r][c] = {
+                            cell = nil,
+                            cellName = string.format("C%d,%d", c, r),
+                            col = c,
+                            row = r,
+                            beeType = RouteSteps.canonicalBeeId(entry.Type),
+                            faceTexture = nil,
+                            faceColor = Color3.fromRGB(0, 0, 0),
+                            bgColor = getRarityColor(tostring(entry.Type or ""), gifted),
+                            level = tonumber(entry.Lvl) or 1,
+                            gifted = gifted,
+                        }
+                    end
+                end
+            end
+        end
+    end
+
     gridCache = grid
     gridCacheTime = os.clock()
     return grid
@@ -7440,7 +7873,7 @@ IVYIS_UI.apply = function(choice)
 end
 
 local Window = IvyisUI:CreateWindow({
-    Title = "Ivyis's Tool",
+    Title = "Ivyis BSS",
     Size = UDim2.fromOffset(IVYIS_UI.BASE.X, IVYIS_UI.BASE.Y),
     -- Ivyis da co nut bee rieng (AutoFeed_MobileToggle) nen khong dung nut noi cua Atlas
     FloatingButton = false
@@ -7741,6 +8174,33 @@ for _, b in ipairs(ALL_BEES) do
     end
 end
 
+-- CellType can be short ("Basic"), a full name ("Basic Bee") or an id
+-- ("BasicBee"). Resolve all three without adding another chunk-level local.
+RouteSteps.beeByKey = {}
+for _, b in ipairs(ALL_BEES) do
+    local idKey = b.id:lower()
+    local nameKey = b.name:lower()
+    RouteSteps.beeByKey[idKey] = b.id
+    RouteSteps.beeByKey[idKey:gsub("bee$", "")] = b.id
+    RouteSteps.beeByKey[nameKey] = b.id
+    RouteSteps.beeByKey[nameKey:gsub("%s*bee$", "")] = b.id
+end
+
+function RouteSteps.canonicalBeeId(raw)
+    if raw == nil then return "Empty" end
+    local s = tostring(raw)
+    local key = s:lower():gsub("^%s+", ""):gsub("%s+$", "")
+    if key == "" or key == "none" or key == "nil" then return "Empty" end
+    local map = RouteSteps.beeByKey
+    if map then
+        local id = map[key]
+            or map[key:gsub("%s+", "")]
+            or map[key:gsub("%s*bee$", "")]
+        if id then return id end
+    end
+    return s
+end
+
 local refreshHiveGrid
 local refreshBuilderStatus
 local refreshQuotaText
@@ -7986,7 +8446,7 @@ function refreshHiveGrid()
             local cellData = cellsGrid[r] and cellsGrid[r][c]
             local slotKey = string.format("C%d,%d", c, r)
 
-            local isOccupied = cellData and cellData.beeType and cellData.beeType ~= "Empty" and cellData.beeType ~= "" and cellData.faceTexture ~= "rbxassetid://1471882621"
+            local isOccupied = cellData and cellData.beeType and cellData.beeType ~= "Empty" and cellData.beeType ~= ""
 
             local tile = Instance.new("TextButton")
             tile.Name = slotKey
@@ -8229,27 +8689,104 @@ end
 local function ssaGetGiftedDiscoveredMap()
     local discovered = {}
     local data = getStatData()
+    local idMap = ssaBuildBeeIdMap()
 
-    if data and type(data) == "table" then
-        local idMap = ssaBuildBeeIdMap()
+    -- Resolve one entry: bee id, index, name ("Basic Bee"/"Basic Bee - Gifted")
+    -- or a small table that wraps the value.
+    local function idToName(key)
+        local n = tonumber(key)
+        if not n then return nil end
+        if idMap[n] then return idMap[n] end
+        -- Some caches key gifted types by egg index (112, 115, ...), not bee id.
+        if n >= 112 and n <= 249 and (n - 112) % 3 == 0 then
+            return idMap[math.floor((n - 112) / 3) + 1]
+        end
+        return nil
+    end
 
-        local giftTable = data.DiscGiftTypes or data.GiftedTypes or data.DiscoveredGiftTypes
-        if type(giftTable) == "table" then
-            for _, val in pairs(giftTable) do
-                local matchedName = nil
-                if type(val) == "number" then
-                    matchedName = idMap[val]
-                elseif type(val) == "string" then
-                    local nId = tonumber(val)
-                    if nId and idMap[nId] then
-                        matchedName = idMap[nId]
-                    else
-                        matchedName = ssaExtractBeeName(val)
+    local function addValue(val, depth)
+        if val == nil or (depth or 0) > 2 then return end
+        local matchedName = nil
+        if type(val) == "number" then
+            matchedName = idToName(val)
+        elseif type(val) == "string" then
+            local nId = tonumber(val)
+            matchedName = (nId and idToName(nId)) or ssaExtractBeeName(val)
+        elseif type(val) == "table" then
+            addValue(val.Name or val.Bee or val.Type or val.Id or val.id, (depth or 0) + 1)
+            return
+        end
+        if matchedName then discovered[matchedName] = true end
+    end
+
+    -- Gifted discovery is a map (name -> true/count), an array of names/ids, or
+    -- a nested list. Accept every shape; unknown keys simply resolve to nil.
+    local function addContainer(tbl, depth)
+        if type(tbl) ~= "table" or depth > 2 then return end
+        for k, v in pairs(tbl) do
+            local truthy = type(v) ~= "table" and v ~= nil and v ~= false and v ~= 0 and tostring(v) ~= ""
+            if type(k) == "string" then
+                local name = ssaExtractBeeName(k)
+                if name and truthy then discovered[name] = true end
+            elseif type(k) == "number" and (v == true or v == 1) then
+                -- Boolean map keyed by bee id / egg index: {[3] = true}.
+                local name = idToName(k)
+                if name then discovered[name] = true end
+            end
+            if type(v) == "table" then
+                local wrapped = v.Name or v.Bee or v.Type or v.Id or v.id
+                if wrapped ~= nil then
+                    addValue(wrapped, 0)
+                else
+                    -- Nested list/map (e.g. {Gifted = {...}}). Gift tables are
+                    -- small, so one more level is safe and catches shape changes.
+                    addContainer(v, depth + 1)
+                end
+            else
+                local vk = type(k) == "string" and k:lower() or ""
+                local looksBeeKey = vk:find("bee", 1, true) or vk == "id" or vk == "type"
+                    or vk == "name" or vk == "value" or vk == "index" or vk == "item"
+                if type(k) == "number" or looksBeeKey then
+                    addValue(v, 0)
+                elseif type(v) == "string" then
+                    -- Plain list value under an unknown key: only accept strings
+                    -- that actually name a bee, so metadata like Amount = "5"
+                    -- is not mistaken for bee id 5.
+                    local name = ssaExtractBeeName(v)
+                    if name then discovered[name] = true end
+                end
+            end
+        end
+    end
+
+    if type(data) == "table" then
+        -- The cache key is not stable across updates, so scan any table-valued
+        -- key containing "gift" (and one nested level for Discoveries.Gifted).
+        for k, v in pairs(data) do
+            if type(v) == "table" then
+                if tostring(k):lower():find("gift", 1, true) then
+                    addContainer(v, 0)
+                else
+                    for k2, v2 in pairs(v) do
+                        if type(v2) == "table" and tostring(k2):lower():find("gift", 1, true) then
+                            addContainer(v2, 0)
+                        end
                     end
                 end
-                if matchedName then
-                    discovered[matchedName] = true
-                end
+            end
+        end
+    end
+
+    -- A gifted bee currently in the hive is always a discovered gifted type.
+    -- This also keeps SSA progress correct when the stat key is unknown.
+    local grid = (readHiveGrid and readHiveGrid()) or {}
+    for r = 1, 10 do
+        for c = 1, 5 do
+            local cell = grid[r] and grid[r][c]
+            if cell and cell.gifted and cell.beeType then
+                local bee = beeMapById[cell.beeType]
+                local name = bee and bee.name or ssaExtractBeeName(cell.beeType)
+                if name then discovered[name] = true end
             end
         end
     end
@@ -8275,7 +8812,8 @@ local ssaMissingLabel = HiveTab:Paragraph({
 })
 
 function refreshSsaStatus()
-    local disc = ssaGetGiftedDiscoveredMap()
+    local discOk, disc = pcall(ssaGetGiftedDiscoveredMap)
+    if not discOk or type(disc) ~= "table" then disc = {} end
     local giftedCount, missingCount = 0, 0
     local rarityDiscovered = { Common = 0, Rare = 0, Epic = 0, Legendary = 0, Mythic = 0, Event = 0 }
     local missingByRarity = { Event = {}, Mythic = {}, Legendary = {}, Epic = {}, Rare = {}, Common = {} }
@@ -8319,7 +8857,7 @@ function refreshSsaStatus()
         rarityDiscovered.Legendary, rarityDiscovered.Mythic, rarityDiscovered.Event)
 
     if ssaStatusLabel then
-        ssaStatusLabel:SetTitle(string.format("SSA: %d / 40 (%d%%) - %s", giftedCount, ssaPct, tierStr))
+        ssaStatusLabel:SetTitle(string.format("SSA: %d / 40 (%d%%) - %s", math.min(giftedCount, 40), ssaPct, tierStr))
         ssaStatusLabel:SetDesc(string.format("%s\n%s", neededStr, rarityDesc))
     end
 
@@ -8357,7 +8895,8 @@ function refreshSsaStatus()
 end
 
 local function copySsaMissingReport()
-    local disc = ssaGetGiftedDiscoveredMap()
+    local discOk, disc = pcall(ssaGetGiftedDiscoveredMap)
+    if not discOk or type(disc) ~= "table" then disc = {} end
     local missingByRarity = {}
     local totalMissing = 0
     local totalGifted = 0
@@ -8375,7 +8914,7 @@ local function copySsaMissingReport()
     end
 
     local lines = {}
-    table.insert(lines, string.format("=== SSA Missing Gifted Bees (%d/40 SSA Progress | %d Missing) ===", totalGifted, totalMissing))
+    table.insert(lines, string.format("=== SSA Missing Gifted Bees (%d/40 SSA Progress | %d Missing) ===", math.min(totalGifted, 40), totalMissing))
     local order = { "Event", "Mythic", "Legendary", "Epic", "Rare", "Common" }
     for _, rar in ipairs(order) do
         local list = missingByRarity[rar]
@@ -9848,10 +10387,16 @@ getgenv().IvyisDiscordBridge = (function()
     end
 
     local function buildState()
-        local data = getStatData and getStatData() or nil
+        local dataOk, data = pcall(function()
+            return getStatData and getStatData() or nil
+        end)
+        if not dataOk then data = nil end
         local hive = {}
         local beesInHive = 0
-        local grid = (readHiveGrid and readHiveGrid()) or {}
+        local gridOk, grid = pcall(function()
+            return (readHiveGrid and readHiveGrid()) or {}
+        end)
+        if not gridOk or type(grid) ~= "table" then grid = {} end
         for r = 1, 10 do
             for c = 1, 5 do
                 local cell = grid[r] and grid[r][c]
@@ -9867,8 +10412,8 @@ getgenv().IvyisDiscordBridge = (function()
 
         local gifted = {}
         if ssaGetGiftedDiscoveredMap then
-            local map = ssaGetGiftedDiscoveredMap()
-            if type(map) == "table" then
+            local mapOk, map = pcall(ssaGetGiftedDiscoveredMap)
+            if mapOk and type(map) == "table" then
                 for name, value in pairs(map) do
                     if value then gifted[tostring(name)] = true end
                 end
@@ -9984,8 +10529,8 @@ getgenv().IvyisDiscordBridge = (function()
     local function discoveredIdSet()
         local set = {}
         if not ssaGetGiftedDiscoveredMap then return set end
-        local map = ssaGetGiftedDiscoveredMap()
-        if type(map) ~= "table" then return set end
+        local mapOk, map = pcall(ssaGetGiftedDiscoveredMap)
+        if not mapOk or type(map) ~= "table" then return set end
         for _, bee in ipairs(ALL_BEES or {}) do
             if map[bee.name] then set[bee.id] = true end
         end
@@ -10695,7 +11240,7 @@ if UserInputService then
     end
 end
 
-IvyisUI:Notify({ Title = "Ivyis's Tool", Content = "Ready", Duration = 3 })
+IvyisUI:Notify({ Title = "Ivyis BSS", Content = "Ready", Duration = 3 })
 
 if getgenv then
     getgenv()._AutoFeedCleanup = function()
