@@ -250,10 +250,13 @@ local function trackConn(c)
     return c
 end
 
--- Only remove GUIs that belong to this script. A ScreenGui named "WindUI" is
+-- Only remove GUIs that belong to this script. A ScreenGui named "IvyisUI" is
 -- shared by other scripts too, so check the window title before deleting it.
-local function isOurWindUI(child)
-    if not child or child.Name ~= "WindUI" then return false end
+-- "WindUI" is the old name: keep removing it so an upgrade does not leave the
+-- previous version's window on screen.
+local function isOurIvyisUI(child)
+    if not child then return false end
+    if child.Name ~= "IvyisUI" and child.Name ~= "WindUI" then return false end
     local ok, ours = pcall(function()
         for _, d in ipairs(child:GetDescendants()) do
             if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text == "Ivyis's Tool" then
@@ -269,7 +272,7 @@ local function destroyOldGuis(parent)
     if not parent then return end
     for _, child in ipairs(parent:GetChildren()) do
         local name = tostring(child.Name or "")
-        if name:find("AutoFeed") or name:find("AutoTreat") or name:find("AutoProg") or isOurWindUI(child) then
+        if name:find("AutoFeed") or name:find("AutoTreat") or name:find("AutoProg") or isOurIvyisUI(child) then
             pcall(function() child:Destroy() end)
         end
     end
@@ -278,19 +281,1574 @@ destroyOldGuis(CoreGui)
 if gethui then destroyOldGuis(gethui()) end
 destroyOldGuis(player.PlayerGui)
 
-local WindUI = nil
-pcall(function()
-    if isfile and isfile("ui-libraries/windui.lua") then
-        WindUI = loadfile("ui-libraries/windui.lua")()
+
+-- =====================================================================================
+--  IvyisUI: thu vien giao dien phong cach Atlas, do truc tiep tu UI Atlas that.
+--  Dat inline de script chi con mot file, khong phu thuoc WindUI nua.
+-- =====================================================================================
+--[[
+=====================================================================================
+ IvyisUI - thu vien UI phong cach ATLAS  (ban demo de kiem chung)
+-------------------------------------------------------------------------------------
+ Toan bo thong so duoi day duoc DO TRUC TIEP tu UI Atlas that dang chay trong client
+ (dump property tung doi tuong + anh chup man hinh), khong phai phong doan:
+
+   Window        : 450x280, pos (0,5),(0,100), bg #151617, UICorner 0/5, clip
+   Bar (title)   : cao 25, bg #294A7A, UICorner 0/5
+     Title       : (0.5,-10)x25 tai (0,10),(0,0), ts14 trang, GothamBold, trai
+     Indicator   : 20x20 tai (1,-25),(0,2) - mui ten thu gon cua so
+     Frame       : (1,0)x4 tai y=0.85 - vet nhan mau
+   Rail TabButtons: rong 90, (0,90)x(1,-25) tai (0,0),(0,25)
+     ScrollingFrame: le 5, UIPadding bottom 10 right 10, UIListLayout pad (0,4)
+     SearchBox   : cao 23, #FFFFFF@0.96, corner 4, chu ts11 #EDEDED, icon 12x12
+     Divider     : (1,0)x2, #383838
+     Tab         : cao 23, #FFFFFF@0.96 (dang chon @0.85), corner 4,
+                   chu = 8 dau cach + ten, ts11 #EDEDED GothamBold, icon 12x12 tai (0,5),(0,5)
+   Tab (noi dung): (1,-95)x(1,-30) tai (0,95),(0,30), UIPadding bottom 5
+     Frame       : (1,-5)x(1,0), UIListLayout pad (0,5)
+   Section (the) : header (1,0)x23 #2A2A2A corner 4, chu "   " + tieu de ts13 #C8C8C8 GothamBold
+                   caret 20x20 tai (1,-25),(0,1), rotation 90 (mo) / 180 (thu gon)
+                   body (1,0)x(1,-21) tai (0,21), #FFFFFF@0.96 corner 4,
+                   UIListLayout pad (0,4), UIPadding top 12 left 10 bottom 0 right 0
+                   separator (1,0)x5 #2A2A2A tai y=18 (bi header che, giong Atlas)
+                   thu gon: folder cao dung 23 (chi con header), body an
+   Label         : (1,0)x17, ts13 #FFFFFF GothamMedium, trai
+   Switch        : hang (1,-20)x20, o tick 20x20 #294A7A LUON @0.4, corner 4,
+                   chu "✓" (U+2713) ts18 trang SourceSans khi bat, rong khi tat;
+                   Title ts13 #C8C8C8 GothamMedium nam ngay phai o tick (x = 1.2 cua o tick)
+   Slider        : (1,-15)x20 #343538 corner 4; Title (0,0)x20 can le trai, chu "   "+tieu de
+                   ts13 GothamBold #C8C8C8; phan da keo "Indicator" #414347 corner 4;
+                   Value (0,45)x20 tai (1,-45) ts13 GothamBold #C8C8C8 giua
+   Dropdown      : rong 200px (Atlas: 22/24 cai la 200, 2 cai 250), header cao 20
+                   #343538 corner 4, chu "   " + tieu de + ": " + gia tri ts13 GothamBold #C8C8C8
+                   caret 15x15 tai (1,-20),(0,3) rot -90
+                   Box #343538 corner 4 tai (0,0),(0,24) -> ScrollingFrame "Objects" UIListLayout pad (0,0)
+                   option (1,0)x20 #294A7A @1.0 (trong suot), chu 7 dau cach + gia tri ts14 GothamBold
+   Input         : (1,-15)x20 #343538, TextBox (1,-10)x(1,0) tai (0,10),(0,0)
+                   ts13 GothamBold #C8C8C8, placeholder = tieu de
+   Button        : cao 20, #294A7A corner 4, ts13 #FFFFFF GothamBold giua, tu gian theo chu
+                   (Atlas do duoc 86 / 100 / 130px), co the ep rong bang Width
+   Floating btn  : 44x44 tai (0.5,-22),(0,12), iconBase + logo 28x28
+   Font          : GothamBold (tieu de/nut/tab), GothamMedium (hang/nhan)
+
+ API tuong thich voi cac call site Ivyis dang dung (WindUI):
+   IvyisUI:CreateWindow{...} / :Notify{...} / :SetTheme / :GetCurrentTheme / :GetThemes
+   :AddTheme / :OnThemeChange / :SetFont
+   Window:Tab{Title,Icon} / :SetUIScale / :DisableTopbarButtons / :Open / :Destroy / :OnClose
+   Tab:Section{Title} / :Paragraph / :Toggle / :Slider / :Dropdown / :Input / :Button / :Select
+   Doi tuong con: Paragraph:SetTitle/SetDesc, Toggle:Set, Dropdown:SetValues
+
+ Chay file nay trong executor la ra UI demo. Chay lai se xoa ban cu.
+=====================================================================================
+]]
+
+local IvyisUI
+do
+    local TweenService = game:GetService("TweenService")
+    local UserInputService = game:GetService("UserInputService")
+    local TextService = game:GetService("TextService")
+
+    -- ================== 1. HANG SO / ICON (Lucide - cung bo Atlas dung) ==================
+    local ICON = {
+        search = "rbxassetid://121018724060431",
+        cookie = "rbxassetid://73159504540002",
+        grid = "rbxassetid://81344910161871",
+        route = "rbxassetid://89968303228953",
+        backpack = "rbxassetid://140420225386018",
+        settings = "rbxassetid://80758916183665",
+        sparkles = "rbxassetid://138635884129147",
+        chevronDown = "rbxassetid://134243273101015",
+        chevronRight = "rbxassetid://92473583511724",
+        x = "rbxassetid://110786993356448",
+    }
+    -- Hai asset caret dung dung nhu Atlas (thay o dump property).
+    local CARET_TRIANGLE = "https://www.roblox.com/Thumbs/Asset.ashx?width=420&height=420&assetId=4731371541"
+    local CARET_DROPDOWN = "https://www.roblox.com/Thumbs/Asset.ashx?width=420&height=420&assetId=4744658743"
+    local FLOAT_BASE = "rbxasset://textures/ui/TopBar/iconBase.png"
+
+    local FONT_BOLD = Enum.Font.GothamBold
+    local FONT_MEDIUM = Enum.Font.GothamMedium
+
+    local function hex(s) return Color3.fromHex(s) end
+
+    -- ================== 2. BANG MAU (nhieu theme, giu key kieu WindUI) ==================
+    local THEMES = {
+        ["Atlas"] = {
+            Name = "Atlas",
+            Background = "#151617",
+            PanelBackground = "#1E1F20", PanelBackgroundTransparency = 0,
+            ElementBackground = "#FFFFFF", ElementBackgroundTransparency = 0.96,
+            LabelBackground = "#FFFFFF", LabelBackgroundTransparency = 0.96,
+            Text = "#FFFFFF",
+            Placeholder = "#7D858B",
+            Icon = "#C8C8C8",
+            Outline = "#383838",
+            Accent = "#294A7A",
+            Button = "#2A2A2A",
+            Primary = "#294A7A",
+            Toggle = "#294A7A",
+            Checkbox = "#294A7A",
+            Slider = "#414347",
+            SliderIcon = "#414347",
+            Dialog = "#151617",
+            TabBackground = "#1E1F20", TabBackgroundTransparency = 0,
+            TabBackgroundHover = "#26282A", TabBackgroundHoverTransparency = 0,
+            TabBackgroundActive = "#393B3D", TabBackgroundActiveTransparency = 0,
+            TabText = "#EDEDED",
+            DropdownTabBackground = "#343538",
+            DropdownBackground = "#343538",
+        },
+        ["Atlas Light"] = {
+            Name = "Atlas Light",
+            Background = "#F1F2F4",
+            PanelBackground = "#FFFFFF", PanelBackgroundTransparency = 0,
+            ElementBackground = "#FFFFFF", ElementBackgroundTransparency = 0,
+            LabelBackground = "#FFFFFF", LabelBackgroundTransparency = 0,
+            Text = "#151617",
+            Placeholder = "#8A9099",
+            Icon = "#4A5057",
+            Outline = "#D9DCE1",
+            Accent = "#294A7A",
+            Button = "#E4E6EA",
+            Primary = "#294A7A",
+            Toggle = "#294A7A",
+            Checkbox = "#294A7A",
+            Slider = "#294A7A",
+            SliderIcon = "#C3C7CE",
+            Dialog = "#FFFFFF",
+            TabBackground = "#FFFFFF", TabBackgroundTransparency = 0,
+            TabBackgroundHover = "#EDEFF2", TabBackgroundHoverTransparency = 0,
+            TabBackgroundActive = "#DDE1E7", TabBackgroundActiveTransparency = 0,
+            TabText = "#3A4048",
+            DropdownTabBackground = "#E8EAEE",
+            DropdownBackground = "#E8EAEE",
+        },
+        ["Atlas Midnight"] = {
+            Name = "Atlas Midnight",
+            Background = "#0D0E10",
+            PanelBackground = "#141517", PanelBackgroundTransparency = 0,
+            ElementBackground = "#FFFFFF", ElementBackgroundTransparency = 0.965,
+            LabelBackground = "#FFFFFF", LabelBackgroundTransparency = 0.965,
+            Text = "#FFFFFF",
+            Placeholder = "#6D747C",
+            Icon = "#B9BEC5",
+            Outline = "#26282B",
+            Accent = "#1F3A63",
+            Button = "#1D1E21",
+            Primary = "#1F3A63",
+            Toggle = "#1F3A63",
+            Checkbox = "#1F3A63",
+            Slider = "#333639",
+            SliderIcon = "#333639",
+            Dialog = "#0D0E10",
+            TabBackground = "#151618", TabBackgroundTransparency = 0,
+            TabBackgroundHover = "#1B1D20", TabBackgroundHoverTransparency = 0,
+            TabBackgroundActive = "#2B2E31", TabBackgroundActiveTransparency = 0,
+            TabText = "#E4E7EA",
+            DropdownTabBackground = "#282A2D",
+            DropdownBackground = "#282A2D",
+        },
+    }
+
+    local function normalizePalette(pal)
+        local out = {}
+        for k, v in pairs(pal) do
+            if type(v) == "string" and v:sub(1, 1) == "#" then
+                out[k] = hex(v)
+            else
+                out[k] = v
+            end
+        end
+        -- alias noi bo (clone doc truc tiep)
+        out.windowBg = out.Background
+        out.bar = out.Accent
+        out.sectionHead = out.Button
+        out.card = out.ElementBackground
+        out.cardTr = out.ElementBackgroundTransparency or 0
+        out.field = out.DropdownBackground
+        out.fieldText = out.Icon
+        out.sliderTrack = out.DropdownBackground
+        out.sliderFill = out.Slider
+        out.checkOn = out.Checkbox or out.Toggle
+        out.checkOffTr = 0.4
+        out.rowText = out.Icon
+        out.valueText = out.Text
+        out.muted = out.Placeholder
+        out.divider = out.Outline
+        out.tabText = out.TabText or out.Text
+        return out
     end
-end)
-if not WindUI then
-    WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
-end
-if WindUI then
-    pcall(function()
-        WindUI:SetFont("rbxasset://fonts/families/FredokaOne.json")
-    end)
+
+    local S = normalizePalette(THEMES["Atlas"])
+    local currentTheme = "Atlas"
+    local themeListeners = {}
+    local PAINT = {}
+    local PAINT_TABS = {}
+    local GLOBAL_CONNS = {}
+
+    local function trackConn(c)
+        GLOBAL_CONNS[#GLOBAL_CONNS + 1] = c
+        return c
+    end
+
+    local function paint(inst, prop, key)
+        local v = S[key]
+        if v ~= nil then inst[prop] = v end
+        PAINT[#PAINT + 1] = { inst = inst, prop = prop, key = key }
+        return inst
+    end
+
+    local function repaint()
+        for i = #PAINT, 1, -1 do
+            local e = PAINT[i]
+            if e.inst and e.inst.Parent then
+                local v = S[e.key]
+                if v ~= nil then e.inst[e.prop] = v end
+            else
+                table.remove(PAINT, i)
+            end
+        end
+        for _, e in ipairs(PAINT_TABS) do
+            if e.btn and e.btn.Parent then
+                e.btn.BackgroundColor3 = S.TabBackground
+                e.btn.BackgroundTransparency = e.isActive() and (S.TabBackgroundActiveTransparency or 0) or (S.TabBackgroundTransparency or 0)
+                if e.isActive() then e.btn.BackgroundColor3 = S.TabBackgroundActive end
+            end
+        end
+    end
+
+    -- ================== 3. HELPER DUNG INSTANCE ==================
+    local function mk(class, props, parent)
+        local o = Instance.new(class)
+        if props then
+            for k, v in pairs(props) do o[k] = v end
+        end
+        if parent then o.Parent = parent end
+        return o
+    end
+
+    local function rounded(inst, px)
+        return mk("UICorner", { CornerRadius = UDim.new(0, px) }, inst)
+    end
+
+    local function pad(inst, t, b, l, r)
+        return mk("UIPadding", {
+            PaddingTop = UDim.new(0, t or 0),
+            PaddingBottom = UDim.new(0, b or 0),
+            PaddingLeft = UDim.new(0, l or 0),
+            PaddingRight = UDim.new(0, r or 0),
+        }, inst)
+    end
+
+    local function vlist(inst, padY)
+        return mk("UIListLayout", {
+            Padding = UDim.new(0, padY or 0),
+            FillDirection = Enum.FillDirection.Vertical,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+        }, inst)
+    end
+
+    local function scroll(props, parent)
+        local sf = mk("ScrollingFrame", props, parent)
+        sf.BackgroundTransparency = props and props.BackgroundTransparency or 1
+        sf.BorderSizePixel = 0
+        sf.CanvasSize = UDim2.new()
+        sf.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        sf.ScrollBarThickness = props and props.ScrollBarThickness or 2
+        sf.ScrollBarImageColor3 = Color3.fromRGB(80, 84, 88)
+        return sf
+    end
+
+    local function textLabel(props, parent)
+        local l = mk("TextLabel", props, parent)
+        l.BackgroundTransparency = 1
+        if props and props["Font"] == nil then l.Font = FONT_MEDIUM end
+        if props and props["TextSize"] == nil then l.TextSize = 13 end
+        return l
+    end
+
+    -- ================== 4. API CHUNG ==================
+    local API = {}
+    IvyisUI = API
+
+    local notifyFolder = nil
+    local notifyLayout = nil
+
+    function API:GetThemes()
+        return THEMES
+    end
+
+    function API:GetThemeNames()
+        local names = {}
+        for name in pairs(THEMES) do names[#names + 1] = name end
+        table.sort(names)
+        return names
+    end
+
+    function API:GetCurrentTheme()
+        return currentTheme
+    end
+
+    function API:SetTheme(name)
+        local pal = THEMES[name]
+        if not pal then return end
+        currentTheme = name
+        local norm = normalizePalette(pal)
+        for k in pairs(S) do S[k] = nil end
+        for k, v in pairs(norm) do S[k] = v end
+        repaint()
+        for _, fn in ipairs(themeListeners) do pcall(fn, name) end
+    end
+
+    function API:AddTheme(pal)
+        if type(pal) ~= "table" or not pal.Name then return end
+        THEMES[pal.Name] = pal
+    end
+
+    function API:OnThemeChange(fn)
+        if type(fn) == "function" then
+            themeListeners[#themeListeners + 1] = fn
+            pcall(fn, currentTheme)
+        end
+    end
+
+    -- Atlas dung font rieng cua no; giu nguyen de giong Atlas, khong doi theo tham so.
+    function API:SetFont(_) end
+
+    function API:Notify(o)
+        o = o or {}
+        local parent = (gethui and gethui()) or game:GetService("CoreGui")
+        if not notifyFolder or not notifyFolder.Parent then
+            -- don the thong bao cu (ke ca ban chay truoc do)
+            for _, child in ipairs(parent:GetChildren()) do
+                if child:IsA("ScreenGui") and child.Name == "IvyisUI_Notifications" then
+                    pcall(function() child:Destroy() end)
+                end
+            end
+            local holder = mk("ScreenGui", {
+                Name = "IvyisUI_Notifications",
+                ResetOnSpawn = false,
+                ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+                IgnoreGuiInset = true,
+                DisplayOrder = 100,
+            }, parent)
+            notifyFolder = holder
+            local gv = getgenv and getgenv() or _G
+            if gv.__IvyisUINotifyGui and gv.__IvyisUINotifyGui ~= holder then
+                pcall(function() gv.__IvyisUINotifyGui:Destroy() end)
+            end
+            gv.__IvyisUINotifyGui = holder
+            -- Khung chua thong bao: neo goc phai tren, chay xuong. Khong dung
+            -- AutomaticSize cho chinh khung nay (tranh lech vi tri khi rong).
+            local col = mk("Frame", {
+                Name = "Stack",
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, -12, 0, 0),
+                Size = UDim2.new(0, 268, 1, 0),
+                BackgroundTransparency = 1,
+            }, holder)
+            vlist(col, 6)
+            pad(col, 12, 12, 0, 0)
+            notifyLayout = col
+        end
+
+        local duration = tonumber(o.Duration) or 3
+        local card = mk("Frame", {
+            Name = "Notify",
+            Size = UDim2.new(1, 0, 0, 0),
+            BackgroundColor3 = S.sectionHead,
+            BorderSizePixel = 0,
+        }, notifyLayout)
+        card.AutomaticSize = Enum.AutomaticSize.Y
+        rounded(card, 4)
+        paint(card, "BackgroundColor3", "sectionHead")
+
+        local strip = mk("Frame", {
+            Name = "Accent",
+            Size = UDim2.new(0, 3, 1, 0),
+            BackgroundColor3 = S.bar,
+            BorderSizePixel = 0,
+        }, card)
+        paint(strip, "BackgroundColor3", "bar")
+        rounded(strip, 4)
+
+        local body = mk("Frame", {
+            Name = "Body",
+            Size = UDim2.new(1, -8, 0, 0),
+            Position = UDim2.new(0, 8, 0, 0),
+            BackgroundTransparency = 1,
+        }, card)
+        body.AutomaticSize = Enum.AutomaticSize.Y
+        vlist(body, 1)
+        pad(body, 8, 8, 5, 6)
+
+        local title = textLabel({
+            Name = "Title",
+            Size = UDim2.new(1, 0, 0, 15),
+            Text = tostring(o.Title or ""),
+            TextSize = 13,
+            Font = FONT_BOLD,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, body)
+        paint(title, "TextColor3", "valueText")
+
+        local content = nil
+        if o.Content and tostring(o.Content) ~= "" then
+            content = textLabel({
+                Name = "Content",
+                Size = UDim2.new(1, 0, 0, 14),
+                Text = tostring(o.Content),
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextWrapped = true,
+            }, body)
+            content.AutomaticSize = Enum.AutomaticSize.Y
+            paint(content, "TextColor3", "muted")
+        end
+
+        local scale = mk("UIScale", { Scale = 0.92 }, card)
+        card.BackgroundTransparency = 1
+        if strip then strip.BackgroundTransparency = 1 end
+        title.TextTransparency = 1
+        if content then content.TextTransparency = 1 end
+
+        local tweenInfo = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        TweenService:Create(scale, tweenInfo, { Scale = 1 }):Play()
+        TweenService:Create(card, tweenInfo, { BackgroundTransparency = 0 }):Play()
+        TweenService:Create(strip, tweenInfo, { BackgroundTransparency = 0 }):Play()
+        TweenService:Create(title, tweenInfo, { TextTransparency = 0 }):Play()
+        if content then
+            TweenService:Create(content, tweenInfo, { TextTransparency = 0 }):Play()
+        end
+
+        task.delay(duration, function()
+            if not card.Parent then return end
+            local out = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            TweenService:Create(card, out, { BackgroundTransparency = 1 }):Play()
+            TweenService:Create(strip, out, { BackgroundTransparency = 1 }):Play()
+            TweenService:Create(title, out, { TextTransparency = 1 }):Play()
+            if content then TweenService:Create(content, out, { TextTransparency = 1 }):Play() end
+            task.delay(0.25, function()
+                pcall(function() card:Destroy() end)
+            end)
+        end)
+        return card
+    end
+
+    -- ================== 5. CUA SO ==================
+    function API:CreateWindow(cfg)
+        cfg = cfg or {}
+        local gv = getgenv and getgenv() or _G
+        if gv.__IvyisUIScreenGui then
+            pcall(function() gv.__IvyisUIScreenGui:Destroy() end)
+        end
+        if gv.__IvyisUINotifyGui then
+            pcall(function() gv.__IvyisUINotifyGui:Destroy() end)
+            gv.__IvyisUINotifyGui = nil
+            notifyFolder, notifyLayout = nil, nil
+        end
+        -- Don sach moi ScreenGui cua ban chay truoc (khong phu thuoc getgenv)
+        local huiParent = (gethui and gethui()) or game:GetService("CoreGui")
+        for _, child in ipairs(huiParent:GetChildren()) do
+            if child:IsA("ScreenGui") and (child.Name == "IvyisUI" or child.Name == "IvyisUI_Notifications") then
+                pcall(function() child:Destroy() end)
+            end
+        end
+        for _, c in ipairs(GLOBAL_CONNS) do pcall(function() c:Disconnect() end) end
+        GLOBAL_CONNS = {}
+        PAINT = {}
+        PAINT_TABS = {}
+
+        local parent = (gethui and gethui()) or game:GetService("CoreGui")
+        local screen = mk("ScreenGui", {
+            Name = "IvyisUI",
+            ResetOnSpawn = false,
+            ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+            IgnoreGuiInset = true,
+        }, parent)
+        gv.__IvyisUIScreenGui = screen
+
+        local size = cfg.Size or UDim2.fromOffset(450, 280)
+        local window = mk("Frame", {
+            Name = "Window",
+            Size = size,
+            Position = UDim2.new(0, 5, 0, 100),
+            BackgroundColor3 = S.windowBg,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+        }, screen)
+        paint(window, "BackgroundColor3", "windowBg")
+        rounded(window, 5)
+
+        local uiScale = mk("UIScale", { Scale = 1 }, window)
+        local winScale = 1
+
+        -- ---- Bar ----
+        local bar = mk("Frame", {
+            Name = "Bar",
+            Size = UDim2.new(1, 0, 0, 25),
+            BackgroundColor3 = S.bar,
+            BorderSizePixel = 0,
+        }, window)
+        paint(bar, "BackgroundColor3", "bar")
+        rounded(bar, 5)
+
+        local titleLbl = textLabel({
+            Name = "Title",
+            Size = UDim2.new(0.5, -10, 0, 25),
+            Position = UDim2.new(0, 10, 0, 0),
+            Text = tostring(cfg.Title or "Ivyis's Tool"),
+            TextSize = 14,
+            Font = FONT_BOLD,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, bar)
+        titleLbl.TextColor3 = Color3.new(1, 1, 1)
+
+        mk("Frame", {
+            Name = "Accent",
+            Size = UDim2.new(1, 0, 0, 4),
+            Position = UDim2.new(0, 0, 0.85, 0),
+            BackgroundColor3 = S.bar,
+            BorderSizePixel = 0,
+        }, bar)
+
+        -- nut thu gon cua so (giong Atlas: tam giac trang quay 90 do o goc phai thanh tieu de)
+        local collapse = mk("ImageButton", {
+            Name = "Indicator",
+            Size = UDim2.fromOffset(20, 20),
+            Position = UDim2.new(1, -25, 0, 2),
+            BackgroundTransparency = 1,
+            Image = CARET_TRIANGLE,
+            ImageColor3 = Color3.new(1, 1, 1),
+            Rotation = 90,
+            AutoButtonColor = false,
+        }, bar)
+
+        -- ---- Rail ----
+        local rail = mk("Frame", {
+            Name = "TabButtons",
+            Size = UDim2.new(0, 90, 1, -25),
+            Position = UDim2.new(0, 0, 0, 25),
+            BackgroundTransparency = 1,
+        }, window)
+
+        local railScroll = scroll({
+            Name = "ScrollingFrame",
+            Size = UDim2.new(1, 0, 1, 0),
+            Position = UDim2.fromOffset(5, 5),
+            BackgroundTransparency = 1,
+        }, rail)
+        pad(railScroll, 0, 10, 0, 10)
+        vlist(railScroll, 4)
+
+        local searchBox = mk("Frame", {
+            Name = "SearchBox",
+            Size = UDim2.new(1, 0, 0, 23),
+            BackgroundColor3 = S.TabBackground,
+            BorderSizePixel = 0,
+        }, railScroll)
+        paint(searchBox, "BackgroundColor3", "TabBackground")
+        rounded(searchBox, 4)
+
+        local searchInput = mk("TextBox", {
+            Name = "Input",
+            Size = UDim2.new(1, 0, 0, 23),
+            BackgroundTransparency = 1,
+            Text = "",
+            PlaceholderText = "Search",
+            TextSize = 11,
+            Font = FONT_BOLD,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            ClearTextOnFocus = false,
+        }, searchBox)
+        paint(searchInput, "TextColor3", "tabText")
+        paint(searchInput, "PlaceholderColor3", "tabText")
+
+        local searchIcon = mk("ImageLabel", {
+            Name = "SearchIcon",
+            Size = UDim2.fromOffset(12, 12),
+            Position = UDim2.fromOffset(5, 5),
+            BackgroundTransparency = 1,
+            Image = ICON.search,
+            ImageColor3 = S.tabText,
+        }, searchBox)
+        paint(searchIcon, "ImageColor3", "tabText")
+
+        local divider = mk("Frame", {
+            Name = "Divider",
+            Size = UDim2.new(1, 0, 0, 2),
+            BackgroundColor3 = S.divider,
+            BorderSizePixel = 0,
+        }, railScroll)
+        paint(divider, "BackgroundColor3", "divider")
+
+        -- ---- Vung noi dung (moi tab 1 ScrollingFrame rieng) ----
+        local tabButtons = {}
+        local pages = {}
+        local activeIndex = 0
+
+        local Window = {}
+        Window.ScreenGui = screen
+        Window.Frame = window
+        Window.Tabs = {}
+
+        local onCloseListeners = {}
+        local function fireClose()
+            for _, fn in ipairs(onCloseListeners) do pcall(fn) end
+        end
+
+        local allRailButtons = {}
+
+        local function applySearch()
+            local q = string.lower(searchInput.Text or "")
+            for _, entry in ipairs(allRailButtons) do
+                local label = string.lower(entry.label or "")
+                entry.btn.Visible = (q == "") or (string.find(label, q, 1, true) ~= nil)
+            end
+        end
+
+        local function setActive(index)
+            activeIndex = index
+            for i, entry in ipairs(allRailButtons) do
+                local isActive = (i == index)
+                entry.isActive = isActive
+                entry.btn.BackgroundColor3 = isActive and S.TabBackgroundActive or S.TabBackground
+                entry.btn.BackgroundTransparency = isActive and (S.TabBackgroundActiveTransparency or 0) or (S.TabBackgroundTransparency or 0)
+                entry.labelLbl.TextColor3 = S.tabText
+                if entry.page then entry.page.Visible = isActive end
+            end
+        end
+
+        function Window:SelectTab(index)
+            if type(index) == "string" then
+                for i, entry in ipairs(allRailButtons) do
+                    if entry.label == index then index = i break end
+                end
+            end
+            index = tonumber(index)
+            if not index or index < 1 or index > #allRailButtons then return end
+            setActive(index)
+        end
+
+        function Window:SetUIScale(n)
+            winScale = tonumber(n) or 1
+            uiScale.Scale = winScale
+        end
+
+        function Window:DisableTopbarButtons(_) end
+
+        function Window:Open()
+            window.Visible = true
+        end
+
+        function Window:Hide()
+            window.Visible = false
+            fireClose()
+        end
+
+        function Window:OnClose(fn)
+            if type(fn) == "function" then onCloseListeners[#onCloseListeners + 1] = fn end
+        end
+
+        function Window:Destroy()
+            screen:Destroy()
+            for _, c in ipairs(GLOBAL_CONNS) do pcall(function() c:Disconnect() end) end
+            GLOBAL_CONNS = {}
+        end
+
+        -- ---- keo cua so bang thanh tieu de ----
+        do
+            local dragging, dragStart, startPos = false, nil, nil
+            bar.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = true
+                    dragStart = input.Position
+                    startPos = window.Position
+                end
+            end)
+            trackConn(UserInputService.InputChanged:Connect(function(input)
+                if not dragging then return end
+                if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                    local d = (input.Position - dragStart) / winScale
+                    window.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+                end
+            end))
+            trackConn(UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = false
+                end
+            end))
+        end
+
+        -- ---- keo goc duoi phai de doi kich thuoc (giong o Resize cua Atlas) ----
+        do
+            local handle = mk("TextButton", {
+                Name = "Resize",
+                Size = UDim2.fromOffset(20, 20),
+                Position = UDim2.new(1, -20, 1, -20),
+                BackgroundTransparency = 1,
+                Text = "",
+                AutoButtonColor = false,
+            }, window)
+            local resizing, rStart, rSize = false, nil, nil
+            handle.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    resizing = true
+                    rStart = input.Position
+                    rSize = window.Size
+                end
+            end)
+            trackConn(UserInputService.InputChanged:Connect(function(input)
+                if not resizing then return end
+                if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                    local d = (input.Position - rStart) / winScale
+                    window.Size = UDim2.new(
+                        rSize.X.Scale, math.max(320, rSize.X.Offset + d.X),
+                        rSize.Y.Scale, math.max(200, rSize.Y.Offset + d.Y)
+                    )
+                end
+            end))
+            trackConn(UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    resizing = false
+                end
+            end))
+        end
+
+        -- ---- nut noi (kieu Atlas) ----
+        local floating = nil
+        if cfg.FloatingButton ~= false then
+            floating = mk("ImageButton", {
+                Name = "Button",
+                Size = UDim2.fromOffset(44, 44),
+                Position = UDim2.new(0.5, -22, 0, 12),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Image = FLOAT_BASE,
+                AutoButtonColor = false,
+                ZIndex = 5,
+            }, screen)
+            rounded(floating, 6)
+            local logo = mk("ImageLabel", {
+                Name = "Logo",
+                Size = UDim2.fromOffset(28, 28),
+                Position = UDim2.fromOffset(8, 8),
+                BackgroundTransparency = 1,
+                Image = cfg.FloatingIcon or "rbxassetid://4503856569",
+            }, floating)
+            floating.MouseButton1Click:Connect(function()
+                window.Visible = not window.Visible
+                if not window.Visible then fireClose() end
+            end)
+        end
+
+        collapse.MouseButton1Click:Connect(function()
+            window.Visible = false
+            fireClose()
+        end)
+
+        searchInput:GetPropertyChangedSignal("Text"):Connect(applySearch)
+        searchInput.Focused:Connect(function() end)
+
+        -- ---- Tab ----
+        function Window:Tab(o)
+            o = o or {}
+            local index = #allRailButtons + 1
+
+            local btn = mk("TextButton", {
+                Name = "TextButton",
+                Size = UDim2.new(1, 0, 0, 23),
+                BackgroundColor3 = S.TabBackground,
+                BackgroundTransparency = S.TabBackgroundTransparency or 0,
+                BorderSizePixel = 0,
+                Text = string.rep(" ", 8) .. tostring(o.Title or ("Tab " .. index)),
+                TextSize = 11,
+                Font = FONT_BOLD,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                AutoButtonColor = false,
+                LayoutOrder = index,
+            }, railScroll)
+            paint(btn, "TextColor3", "tabText")
+            rounded(btn, 4)
+
+            local icon = mk("ImageLabel", {
+                Name = "TabIcon",
+                Size = UDim2.fromOffset(12, 12),
+                Position = UDim2.fromOffset(5, 5),
+                BackgroundTransparency = 1,
+                Image = ICON[o.Icon] or (type(o.Icon) == "string" and o.Icon:match("^rbxasset") and o.Icon) or ICON.sparkles,
+                ImageColor3 = S.tabText,
+            }, btn)
+            paint(icon, "ImageColor3", "tabText")
+
+            local scroller = scroll({
+                Name = "Tab",
+                Size = UDim2.new(1, -95, 1, -30),
+                Position = UDim2.new(0, 95, 0, 30),
+                BackgroundTransparency = 1,
+                Visible = false,
+            }, window)
+            pad(scroller, 0, 5, 0, 0)
+
+            local page = mk("Frame", {
+                Name = "Frame",
+                Size = UDim2.new(1, -5, 0, 0),
+                BackgroundTransparency = 1,
+            }, scroller)
+            page.AutomaticSize = Enum.AutomaticSize.Y
+            vlist(page, 5)
+
+            local entry = {
+                btn = btn,
+                label = tostring(o.Title or ("Tab " .. index)),
+                page = scroller,
+                isActive = false,
+                labelLbl = btn,
+            }
+            allRailButtons[#allRailButtons + 1] = entry
+            PAINT_TABS[#PAINT_TABS + 1] = { btn = btn, isActive = function() return entry.isActive end }
+
+            local Tab = {}
+            Tab.Page = page
+            Tab.Scroller = scroller
+            -- Tuong thich WindUI: code cu chen GUI tu ve vao tab qua
+            -- tab.UIElements.ContainerFrame (gear list). Luon tro vao the dang mo.
+            Tab.UIElements = { ContainerFrame = page, Main = scroller }
+            Tab.__currentCard = nil
+            Tab.__index = index
+            Tab.__cards = {}
+
+            local function nextOrder(card)
+                card.__order = (card.__order or 0) + 1
+                return card.__order
+            end
+
+            local function setCollapsed(card, value)
+                card.collapsed = value
+                if card.box then card.box.Visible = not value end
+                if card.caret then card.caret.Rotation = value and 180 or 90 end
+                if card.folder then
+                    if value then
+                        card.folder.AutomaticSize = Enum.AutomaticSize.None
+                        card.folder.Size = UDim2.new(1, 0, 0, card.head and 23 or 0)
+                    else
+                        card.folder.AutomaticSize = Enum.AutomaticSize.Y
+                        card.folder.Size = UDim2.new(1, 0, 0, 0)
+                    end
+                end
+            end
+
+            local function newCard(title)
+                local folder = mk("Frame", {
+                    Name = "Folder",
+                    Size = UDim2.new(1, 0, 0, 0),
+                    BackgroundTransparency = 1,
+                    LayoutOrder = 1000 + #Tab.__cards,
+                }, page)
+                folder.AutomaticSize = Enum.AutomaticSize.Y
+
+                local card = { folder = folder }
+                local boxY = 0
+
+                if title and tostring(title) ~= "" then
+                    local head = mk("TextButton", {
+                        Name = "TextButton",
+                        Size = UDim2.new(1, 0, 0, 23),
+                        BackgroundColor3 = S.sectionHead,
+                        BorderSizePixel = 0,
+                        Text = "   " .. tostring(title),
+                        TextSize = 13,
+                        Font = FONT_BOLD,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        AutoButtonColor = false,
+                        LayoutOrder = 0,
+                    }, folder)
+                    paint(head, "BackgroundColor3", "sectionHead")
+                    paint(head, "TextColor3", "rowText")
+                    rounded(head, 4)
+
+                    local caret = mk("ImageLabel", {
+                        Name = "Indicator",
+                        Size = UDim2.fromOffset(20, 20),
+                        Position = UDim2.new(1, -25, 0, 1),
+                        BackgroundTransparency = 1,
+                        Image = CARET_TRIANGLE,
+                        Rotation = 90,
+                    }, head)
+                    card.head, card.caret = head, caret
+                    boxY = 21
+                    head.MouseButton1Click:Connect(function()
+                        setCollapsed(card, not card.collapsed)
+                    end)
+                end
+
+                local box = mk("Frame", {
+                    Name = "Box",
+                    Size = UDim2.new(1, 0, 0, 0),
+                    Position = UDim2.new(0, 0, 0, boxY),
+                    BackgroundColor3 = S.card,
+                    BackgroundTransparency = S.cardTr,
+                    BorderSizePixel = 0,
+                }, folder)
+                paint(box, "BackgroundColor3", "card")
+                paint(box, "BackgroundTransparency", "cardTr")
+                box.AutomaticSize = Enum.AutomaticSize.Y
+                rounded(box, 4)
+                -- Atlas do duoc top=12 bottom=0 left=10 right=0, nhung de bottom=0 thi
+                -- nut / dropdown / o input nam cuoi the bi cham vao vien duoi. Them 10px
+                -- duoi cho can voi khoang trong o tren.
+                pad(box, 12, 10, 10, 0)
+                vlist(box, 4)
+                card.box = box
+                if Tab.UIElements then Tab.UIElements.ContainerFrame = box end
+
+                -- Atlas cung dat mot thanh 5px mau #2A2A2A ngay duoi header (y=18) nen bi
+                -- header che khuat, khong anh huong bo cuc. Giu lai cho giong cay UI Atlas.
+                local sep = mk("Frame", {
+                    Name = "Frame",
+                    Size = UDim2.new(1, 0, 0, 5),
+                    Position = UDim2.new(0, 0, 0, 18),
+                    BackgroundColor3 = S.sectionHead,
+                    BorderSizePixel = 0,
+                }, folder)
+                paint(sep, "BackgroundColor3", "sectionHead")
+
+                Tab.__cards[#Tab.__cards + 1] = card
+                Tab.__currentCard = card
+                return card
+            end
+
+            local function currentCard()
+                if Tab.__currentCard then return Tab.__currentCard end
+                return newCard(nil)
+            end
+
+            -- ===== cac loai element =====
+            function Tab:Section(o)
+                return newCard(o and o.Title or "")
+            end
+
+            function Tab:Paragraph(o)
+                o = o or {}
+                local card = currentCard()
+                local order = nextOrder(card)
+                local titleLbl = textLabel({
+                    Name = "Label",
+                    Size = UDim2.new(1, 0, 0, 17),
+                    Text = tostring(o.Title or ""),
+                    TextSize = 13,
+                    Font = FONT_MEDIUM,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    LayoutOrder = order,
+                }, card.box)
+                paint(titleLbl, "TextColor3", "valueText")
+
+                local descLbl = nil
+                if o.Desc and tostring(o.Desc) ~= "" then
+                    descLbl = textLabel({
+                        Name = "Desc",
+                        Size = UDim2.new(1, 0, 0, 14),
+                        Text = tostring(o.Desc),
+                        TextSize = 12,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        TextWrapped = true,
+                        LayoutOrder = order + 1,
+                    }, card.box)
+                    descLbl.AutomaticSize = Enum.AutomaticSize.Y
+                    paint(descLbl, "TextColor3", "muted")
+                    card.__order = order + 1
+                end
+
+                local obj = {}
+                function obj:SetTitle(v)
+                    titleLbl.Text = tostring(v or "")
+                end
+                function obj:SetDesc(v)
+                    if descLbl then
+                        descLbl.Text = tostring(v or "")
+                    elseif v and tostring(v) ~= "" then
+                        descLbl = textLabel({
+                            Name = "Desc",
+                            Size = UDim2.new(1, 0, 0, 14),
+                            Text = tostring(v),
+                            TextSize = 12,
+                            TextXAlignment = Enum.TextXAlignment.Left,
+                            TextWrapped = true,
+                            LayoutOrder = order + 1,
+                        }, card.box)
+                        descLbl.AutomaticSize = Enum.AutomaticSize.Y
+                        paint(descLbl, "TextColor3", "muted")
+                        -- Giu cho LayoutOrder cua cac element sau khong bi trung.
+                        card.__order = order + 1
+                    end
+                end
+                obj.Label = titleLbl
+                return obj
+            end
+
+            function Tab:Label(o)
+                return Tab:Paragraph(o)
+            end
+
+            function Tab:Toggle(o)
+                o = o or {}
+                local card = currentCard()
+                local order = nextOrder(card)
+                local hasDesc = o.Desc and tostring(o.Desc) ~= ""
+
+                local row = mk("Frame", {
+                    Name = "Switch",
+                    Size = UDim2.new(1, -20, 0, hasDesc and 32 or 20),
+                    BackgroundTransparency = 1,
+                    LayoutOrder = order,
+                }, card.box)
+
+                local check = mk("TextButton", {
+                    Name = "Switch",
+                    Size = UDim2.fromOffset(20, 20),
+                    Position = UDim2.fromOffset(0, 0),
+                    BackgroundColor3 = S.checkOn,
+                    BorderSizePixel = 0,
+                    Text = "",
+                    TextSize = 18,
+                    Font = Enum.Font.SourceSans,
+                    TextColor3 = Color3.new(1, 1, 1),
+                    AutoButtonColor = false,
+                }, row)
+                paint(check, "BackgroundColor3", "checkOn")
+                paint(check, "BackgroundTransparency", "checkOffTr")
+                rounded(check, 4)
+
+                local title = textLabel({
+                    Name = "Title",
+                    Size = UDim2.new(0, 240, 0, 20),
+                    Position = UDim2.new(1.2, 0, 0, 0),
+                    Text = tostring(o.Title or ""),
+                    TextSize = 13,
+                    Font = FONT_MEDIUM,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                }, check)
+                paint(title, "TextColor3", "rowText")
+
+                local desc = nil
+                if hasDesc then
+                    desc = textLabel({
+                        Name = "Desc",
+                        Size = UDim2.new(0, 240, 0, 14),
+                        Position = UDim2.new(1.2, 0, 0, 15),
+                        Text = tostring(o.Desc),
+                        TextSize = 12,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                    }, check)
+                    paint(desc, "TextColor3", "muted")
+                end
+
+                local value = o.Value and true or false
+                local obj = { Value = value }
+
+                local function apply(v, fire)
+                    value = v and true or false
+                    obj.Value = value
+                    -- Atlas: o tick LUON giu do mo 0.40, chi khac nhau o dau "✓" khi bat
+                    check.Text = value and "✓" or ""
+                    check.BackgroundTransparency = S.checkOffTr or 0.4
+                    if fire and type(o.Callback) == "function" then
+                        task.spawn(o.Callback, value)
+                    end
+                end
+
+                function obj:Set(v)
+                    apply(v, false)
+                end
+
+                check.MouseButton1Click:Connect(function()
+                    apply(not value, true)
+                end)
+
+                apply(value, false)
+                return obj
+            end
+
+            function Tab:Slider(o)
+                o = o or {}
+                local card = currentCard()
+                local order = nextOrder(card)
+
+                local minV = tonumber(o.Min) or (type(o.Value) == "table" and tonumber(o.Value.Min)) or 0
+                local maxV = tonumber(o.Max) or (type(o.Value) == "table" and tonumber(o.Value.Max)) or 100
+                local curV = (type(o.Value) == "table" and tonumber(o.Value.Default))
+                    or (type(o.Value) == "number" and tonumber(o.Value))
+                    or minV
+                local step = tonumber(o.Step) or 0
+                if maxV <= minV then maxV = minV + 1 end
+
+                local row = mk("Frame", {
+                    Name = "Slider",
+                    Size = UDim2.new(1, -15, 0, 20),
+                    BackgroundColor3 = S.sliderTrack,
+                    BorderSizePixel = 0,
+                    LayoutOrder = order,
+                }, card.box)
+                paint(row, "BackgroundColor3", "sliderTrack")
+                rounded(row, 4)
+
+                local fill = mk("Frame", {
+                    Name = "Indicator",
+                    Size = UDim2.new(0, 0, 1, 0),
+                    BackgroundColor3 = S.sliderFill,
+                    BorderSizePixel = 0,
+                    ZIndex = 2,
+                }, row)
+                paint(fill, "BackgroundColor3", "sliderFill")
+                rounded(fill, 4)
+
+                local title = textLabel({
+                    Name = "Title",
+                    Size = UDim2.new(0, 0, 0, 20),
+                    Position = UDim2.new(0, 0, 0.5, -10),
+                    Text = "   " .. tostring(o.Title or ""),
+                    TextSize = 13,
+                    Font = FONT_BOLD,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    ZIndex = 3,
+                }, row)
+                paint(title, "TextColor3", "rowText")
+
+                local valueLbl = textLabel({
+                    Name = "Value",
+                    Size = UDim2.new(0, 45, 0, 20),
+                    Position = UDim2.new(1, -45, 0.5, -10),
+                    Text = "",
+                    TextSize = 13,
+                    Font = FONT_BOLD,
+                    TextXAlignment = Enum.TextXAlignment.Center,
+                    ZIndex = 3,
+                }, row)
+                paint(valueLbl, "TextColor3", "rowText")
+
+                -- Atlas dat ten nut keo nay la "Button" (ts8 Legacy) de trong suot.
+                local drag = mk("TextButton", {
+                    Name = "Button",
+                    Size = UDim2.new(1, 0, 1, 0),
+                    BackgroundTransparency = 1,
+                    Text = "",
+                    TextSize = 8,
+                    Font = Enum.Font.Legacy,
+                    TextColor3 = Color3.fromRGB(27, 42, 53),
+                    ZIndex = 4,
+                }, row)
+
+                local value = math.clamp(curV, minV, maxV)
+
+                local function refreshText()
+                    if type(o.Format) == "function" then
+                        valueLbl.Text = tostring(o.Format(value))
+                    elseif step >= 1 then
+                        valueLbl.Text = tostring(math.floor(value + 0.5))
+                    else
+                        valueLbl.Text = tostring(math.floor(value * 100 + 0.5) / 100)
+                    end
+                end
+
+                local function setValue(v, fire)
+                    v = math.clamp(tonumber(v) or minV, minV, maxV)
+                    if step > 0 then v = minV + math.floor((v - minV) / step + 0.5) * step end
+                    value = v
+                    fill.Size = UDim2.new((value - minV) / (maxV - minV), 0, 1, 0)
+                    refreshText()
+                    if fire and type(o.Callback) == "function" then
+                        task.spawn(o.Callback, value)
+                    end
+                end
+
+                local dragging = false
+                local function fromX(x)
+                    local rel = math.clamp((x - row.AbsolutePosition.X) / math.max(row.AbsoluteSize.X, 1), 0, 1)
+                    setValue(minV + (maxV - minV) * rel, true)
+                end
+
+                drag.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        dragging = true
+                        fromX(input.Position.X)
+                    end
+                end)
+                trackConn(UserInputService.InputChanged:Connect(function(input)
+                    if not dragging then return end
+                    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                        fromX(input.Position.X)
+                    end
+                end))
+                trackConn(UserInputService.InputEnded:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        dragging = false
+                    end
+                end))
+
+                local obj = {}
+                function obj:Set(v) setValue(v, false) end
+                function obj:Get() return value end
+                setValue(value, false)
+                return obj
+            end
+
+            function Tab:Dropdown(o)
+                o = o or {}
+                local card = currentCard()
+                local order = nextOrder(card)
+                local values = {}
+                for _, v in ipairs(o.Values or {}) do values[#values + 1] = tostring(v) end
+                local multi = o.Multi == true
+                -- Atlas: dropdown mac dinh rong 200px (22/24 cai trong UI Atlas), co the doi bang o.Width
+                local rowX
+                if o.Width == "full" then
+                    rowX = UDim.new(1, 0)
+                elseif type(o.Width) == "number" then
+                    rowX = UDim.new(0, o.Width)
+                else
+                    rowX = UDim.new(0, 200)
+                end
+
+                local row = mk("Frame", {
+                    Name = "Dropdown",
+                    Size = UDim2.new(rowX.Scale, rowX.Offset, 0, 20),
+                    BackgroundTransparency = 1,
+                    LayoutOrder = order,
+                }, card.box)
+
+                local head = mk("TextButton", {
+                    Name = "TextButton",
+                    Size = UDim2.new(1, 0, 0, 20),
+                    BackgroundColor3 = S.field,
+                    BorderSizePixel = 0,
+                    Text = "",
+                    TextSize = 13,
+                    Font = FONT_BOLD,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    AutoButtonColor = false,
+                }, row)
+                paint(head, "BackgroundColor3", "field")
+                paint(head, "TextColor3", "fieldText")
+                rounded(head, 4)
+
+                local caret = mk("ImageLabel", {
+                    Name = "Indicator",
+                    Size = UDim2.fromOffset(15, 15),
+                    Position = UDim2.new(1, -20, 0, 3),
+                    BackgroundTransparency = 1,
+                    Image = CARET_DROPDOWN,
+                    Rotation = -90,
+                }, head)
+
+                local dropdownBox = mk("Frame", {
+                    Name = "Box",
+                    Size = UDim2.new(1, 0, 0, 0),
+                    Position = UDim2.new(0, 0, 0, 24),
+                    BackgroundColor3 = S.field,
+                    BorderSizePixel = 0,
+                    Visible = false,
+                    ClipsDescendants = true,
+                    ZIndex = 3,
+                }, row)
+                paint(dropdownBox, "BackgroundColor3", "field")
+                rounded(dropdownBox, 4)
+
+                local objects = scroll({
+                    Name = "Objects",
+                    Size = UDim2.new(1, 0, 1, 0),
+                    BackgroundTransparency = 1,
+                    ZIndex = 3,
+                }, dropdownBox)
+                vlist(objects, 0)
+                rounded(objects, 4)
+
+                local selected = o.Value
+                local selectedSet = {}
+                if type(selected) == "table" then
+                    for _, v in ipairs(selected) do selectedSet[tostring(v)] = true end
+                elseif selected ~= nil and tostring(selected) ~= "" then
+                    selectedSet[tostring(selected)] = true
+                end
+
+                local obj = { Value = selected, Values = values }
+
+                local function headerText()
+                    local titleTxt = tostring(o.Title or "")
+                    if multi then
+                        local picked = {}
+                        for _, v in ipairs(values) do
+                            if selectedSet[v] then picked[#picked + 1] = v end
+                        end
+                        local tail = (#picked == 0) and "" or (": " .. (#picked <= 2 and table.concat(picked, ", ") or (#picked .. " selected")))
+                        return "   " .. titleTxt .. tail
+                    end
+                    local first = nil
+                    for _, v in ipairs(values) do
+                        if selectedSet[v] then first = v break end
+                    end
+                    if not first and type(obj.Value) == "string" then first = obj.Value end
+                    return "   " .. titleTxt .. (first and (": " .. first) or "")
+                end
+
+                local open = false
+                local function applyOpen()
+                    -- Do tu Atlas that: box = min(so lua chon * 20, 155); dropdown = box + 25
+                    -- (header 20 + khe 4 + 1px duoi cung) -> luon thua 5px truoc element ke tiep.
+                    local height = math.min(#values * 20, 155)
+                    if open then
+                        dropdownBox.Visible = true
+                        dropdownBox.Size = UDim2.new(1, 0, 1, -25)
+                        row.Size = UDim2.new(rowX.Scale, rowX.Offset, 0, math.max(height, 20) + 25)
+                        caret.Rotation = 90
+                    else
+                        dropdownBox.Visible = false
+                        dropdownBox.Size = UDim2.new(1, 0, 1, -20)
+                        row.Size = UDim2.new(rowX.Scale, rowX.Offset, 0, 20)
+                        caret.Rotation = -90
+                    end
+                    head.Text = headerText()
+                end
+
+                local optionButtons = {}
+
+                local function rebuild()
+                    for _, b in ipairs(optionButtons) do
+                        pcall(function() b:Destroy() end)
+                    end
+                    optionButtons = {}
+                    for i, v in ipairs(values) do
+                        local opt = mk("TextButton", {
+                            Name = "DropdownButton",
+                            Size = UDim2.new(1, 0, 0, 20),
+                            BackgroundColor3 = S.bar,
+                            BackgroundTransparency = 1,
+                            BorderSizePixel = 0,
+                            Text = "       " .. v,
+                            TextSize = 14,
+                            Font = FONT_BOLD,
+                            TextXAlignment = Enum.TextXAlignment.Left,
+                            AutoButtonColor = false,
+                            LayoutOrder = i,
+                            ZIndex = 3,
+                        }, objects)
+                        paint(opt, "TextColor3", "fieldText")
+                        rounded(opt, 4)
+                        opt.MouseEnter:Connect(function()
+                            opt.BackgroundTransparency = 0.85
+                        end)
+                        opt.MouseLeave:Connect(function()
+                            opt.BackgroundTransparency = 1
+                        end)
+                        opt.MouseButton1Click:Connect(function()
+                            local changed = false
+                            if multi then
+                                if selectedSet[v] then
+                                    selectedSet[v] = nil
+                                else
+                                    selectedSet[v] = true
+                                end
+                                local list = {}
+                                for _, x in ipairs(values) do
+                                    if selectedSet[x] then list[#list + 1] = x end
+                                end
+                                obj.Value = list
+                                changed = true
+                                opt.Text = (selectedSet[v] and "   ✓   " or "       ") .. v
+                            else
+                                selectedSet = { [v] = true }
+                                obj.Value = v
+                                changed = true
+                                open = false
+                                applyOpen()
+                            end
+                            head.Text = headerText()
+                            if changed and type(o.Callback) == "function" then
+                                task.spawn(o.Callback, obj.Value)
+                            end
+                        end)
+                        if multi and selectedSet[v] then opt.Text = "   ✓   " .. v end
+                        optionButtons[#optionButtons + 1] = opt
+                    end
+                    local n = #values
+                    objects.CanvasSize = UDim2.new(0, 0, 0, n * 20)
+                    if open then applyOpen() end
+                end
+
+                function obj:SetValues(list)
+                    values = {}
+                    for _, v in ipairs(list or {}) do values[#values + 1] = tostring(v) end
+                    obj.Values = values
+                    -- Lua chon cu co the da bi xoa khoi danh sach moi: bo chon va cap
+                    -- nhat lai dong header, neu khong header se hien gia tri cu.
+                    local stillThere = false
+                    for _, v in ipairs(values) do
+                        if selectedSet[v] then stillThere = true break end
+                    end
+                    if not stillThere then
+                        selectedSet = {}
+                        obj.Value = nil
+                    end
+                    rebuild()
+                    head.Text = headerText()
+                end
+
+                function obj:Set(v)
+                    if type(v) == "table" then
+                        selectedSet = {}
+                        for _, x in ipairs(v) do selectedSet[tostring(x)] = true end
+                        obj.Value = v
+                    elseif v ~= nil then
+                        selectedSet = { [tostring(v)] = true }
+                        obj.Value = tostring(v)
+                    end
+                    rebuild()
+                    head.Text = headerText()
+                end
+
+                head.MouseButton1Click:Connect(function()
+                    open = not open
+                    applyOpen()
+                end)
+
+                rebuild()
+                head.Text = headerText()
+                return obj
+            end
+
+            function Tab:Input(o)
+                o = o or {}
+                local card = currentCard()
+                local order = nextOrder(card)
+
+                local rowSize
+                if type(o.Width) == "number" then
+                    rowSize = UDim2.fromOffset(o.Width, 20)
+                elseif o.Width == "full" then
+                    rowSize = UDim2.new(1, -15, 0, 20)
+                else
+                    -- Atlas: o nhap lieu thuong la (1,-15) full chieu rong, co cai (0,200)
+                    rowSize = UDim2.new(1, -15, 0, 20)
+                end
+
+                local row = mk("Frame", {
+                    Name = "TextBox",
+                    Size = rowSize,
+                    BackgroundColor3 = S.field,
+                    BorderSizePixel = 0,
+                    LayoutOrder = order,
+                }, card.box)
+                paint(row, "BackgroundColor3", "field")
+                rounded(row, 4)
+
+                local tb = mk("TextBox", {
+                    Name = "TextBox",
+                    Size = UDim2.new(1, -10, 1, 0),
+                    Position = UDim2.fromOffset(10, 0),
+                    BackgroundTransparency = 1,
+                    Text = tostring(o.Value or ""),
+                    PlaceholderText = tostring(o.Placeholder or o.Title or ""),
+                    TextSize = 13,
+                    Font = FONT_BOLD,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    ClearTextOnFocus = false,
+                }, row)
+                paint(tb, "TextColor3", "fieldText")
+                paint(tb, "PlaceholderColor3", "muted")
+
+                local obj = { Value = o.Value }
+                local function commit()
+                    obj.Value = tb.Text
+                    if type(o.Callback) == "function" then
+                        task.spawn(o.Callback, tb.Text)
+                    end
+                end
+                tb.FocusLost:Connect(commit)
+
+                function obj:Set(v)
+                    tb.Text = tostring(v or "")
+                    obj.Value = tb.Text
+                end
+                function obj:Get() return tb.Text end
+                obj.TextBox = tb
+                return obj
+            end
+
+            function Tab:Button(o)
+                o = o or {}
+                local card = currentCard()
+                local order = nextOrder(card)
+
+                local btn = mk("TextButton", {
+                    Name = "Button",
+                    Size = UDim2.fromOffset(130, 20),
+                    BackgroundColor3 = S.bar,
+                    BorderSizePixel = 0,
+                    Text = tostring(o.Title or "Button"),
+                    TextSize = 13,
+                    Font = FONT_BOLD,
+                    TextXAlignment = Enum.TextXAlignment.Center,
+                    AutoButtonColor = false,
+                    ClipsDescendants = true,
+                    LayoutOrder = order,
+                }, card.box)
+                paint(btn, "BackgroundColor3", "bar")
+                rounded(btn, 4)
+                btn.TextColor3 = Color3.new(1, 1, 1)
+
+                -- Atlas: nut tu co gian theo do dai chu (do duoc 86 / 100 / 130px)
+                local function fitWidth()
+                    if type(o.Width) == "number" then
+                        btn.Size = UDim2.fromOffset(o.Width, 20)
+                    elseif o.Width == "full" then
+                        btn.Size = UDim2.new(1, 0, 0, 20)
+                    else
+                        local measured = TextService:GetTextSize(btn.Text, btn.TextSize, btn.Font, Vector2.new(1000, 20))
+                        btn.Size = UDim2.fromOffset(math.max(86, math.ceil(measured.X) + 25), 20)
+                    end
+                end
+                fitWidth()
+                btn:GetPropertyChangedSignal("Text"):Connect(fitWidth)
+                btn.MouseButton1Click:Connect(function()
+                    if type(o.Callback) == "function" then task.spawn(o.Callback) end
+                end)
+
+                local obj = {}
+                function obj:SetTitle(v) btn.Text = tostring(v or "") end
+                obj.Button = btn
+                return obj
+            end
+
+            function Tab:Divider()
+                local card = currentCard()
+                local order = nextOrder(card)
+                local d = mk("Frame", {
+                    Name = "Divider",
+                    Size = UDim2.new(1, 0, 0, 1),
+                    BackgroundColor3 = S.divider,
+                    BorderSizePixel = 0,
+                    LayoutOrder = order,
+                }, card.box)
+                paint(d, "BackgroundColor3", "divider")
+                return d
+            end
+
+            function Tab:Select()
+                Window:SelectTab(index)
+                return Tab
+            end
+
+            Window.Tabs[#Window.Tabs + 1] = Tab
+            btn.MouseButton1Click:Connect(function()
+                setActive(index)
+            end)
+            return Tab
+        end
+
+        task.defer(function()
+            if #allRailButtons > 0 then setActive(1) end
+        end)
+        return Window
+    end
 end
 
 local Events = RS:FindFirstChild("Events") or RS:WaitForChild("Events", 5)
@@ -1409,8 +2967,56 @@ local function ownsPlanter(cleanName, rawClean, canonical, data)
         end
     end
 
-    if ownedPlanterCache[cleanName] or (canonical and ownedPlanterCache[canonical:lower()]) then
-        return true
+    -- Planter vinh vien (mua 1 lan, dung lai vo han; thu hoach xong quay lai tui).
+    -- Ghim "da so huu" theo tai khoan de khong bao "da mua" lai va khong farm lai
+    -- trong luc planter dang duoc trong duoi dat (khong con nam trong Backpack).
+    local isPermanent = rootPlanter == "plastic" or rootPlanter == "candy"
+        or rootPlanter == "redclay" or rootPlanter == "blueclay" or rootPlanter == "tacky"
+        or rootPlanter == "pesticide" or rootPlanter == "heattreated"
+        or rootPlanter == "hydroponic" or rootPlanter == "petal"
+        or (rootPlanter:find("plenty", 1, true) ~= nil)
+
+    local planterStore = _G.__IvyisOwnedPlanters
+    if type(planterStore) ~= "table" then
+        planterStore = {
+            loaded = false,
+            dirty = false,
+            owned = {},
+            path = "AutoFeedBSS/planters_" .. tostring(player.Name):gsub("[^%w_%-]", "_") .. ".json",
+        }
+        _G.__IvyisOwnedPlanters = planterStore
+    end
+    if not planterStore.loaded then
+        planterStore.loaded = true
+        pcall(function()
+            if not (readfile and isfile and isfile(planterStore.path)) then return end
+            local decoded = HttpService:JSONDecode(readfile(planterStore.path))
+            if type(decoded) == "table" then
+                for k, v in pairs(decoded) do
+                    if v == true and type(k) == "string" then planterStore.owned[k] = true end
+                end
+            end
+        end)
+    end
+
+    if isPermanent then
+        if planterStore.owned[cleanName] or ownedPlanterCache[cleanName]
+            or (canonical and ownedPlanterCache[canonical:lower()]) then
+            if not planterStore.owned[cleanName] then
+                planterStore.owned[cleanName] = true
+                if not planterStore.dirty and writefile then
+                    planterStore.dirty = true
+                    task.delay(2, function()
+                        planterStore.dirty = false
+                        pcall(function()
+                            if makefolder and isfolder and not isfolder("AutoFeedBSS") then makefolder("AutoFeedBSS") end
+                            writefile(planterStore.path, HttpService:JSONEncode(planterStore.owned))
+                        end)
+                    end)
+                end
+            end
+            return true
+        end
     end
 
     local function matches(s)
@@ -1461,7 +3067,9 @@ local function ownsPlanter(cleanName, rawClean, canonical, data)
         local pTables = {
             data.Planters,
             data.PlanterTypes,
-            data.PurchasedPlanters,
+            -- PurchasedPlanters la so ghi "tung mua": voi planter dung-1-lan (Paper/
+            -- Ticket/Festive/Sticker) no bao sai sau khi thu hoach, nen chi tin voi planter vinh vien.
+            (isPermanent and data.PurchasedPlanters or nil),
             data.PlanterInventory,
             data.ActivePlanters,
             data.PlantedPlanters,
@@ -1514,6 +3122,7 @@ local function ownsPlanter(cleanName, rawClean, canonical, data)
         end
     end
 
+    local guiScanHit = false
     pcall(function()
         if not (getgenv and getgenv().AutoProgPlanterGuiScan == true) then return end
         if player:FindFirstChild("PlayerGui") then
@@ -1529,13 +3138,16 @@ local function ownsPlanter(cleanName, rawClean, canonical, data)
                     end
                     if not isShop then
                         ownedPlanterCache[cleanName] = true
+                        guiScanHit = true
                         return
                     end
                 end
             end
         end
     end)
-    if ownedPlanterCache[cleanName] then return true end
+    -- Cache chi con y nghia "dinh" voi planter vinh vien; planter dung-1-lan phai
+    -- duoc kiem tra lai tu Backpack/du lieu song de con mua lai sau khi thu hoach.
+    if guiScanHit or (isPermanent and ownedPlanterCache[cleanName]) then return true end
 
     local pName = player.Name:lower()
     local pUserId = tostring(player.UserId)
@@ -3014,17 +4626,17 @@ local function scanAtlasConfigs()
             c.score = c.score + 10000; c.reasons[#c.reasons + 1] = "user override (AtlasConfigPath)"
         end
         if liveProfileKey and c.key == liveProfileKey then
-            c.score = c.score + 1000; c.reasons[#c.reasons + 1] = "ten trung profile dang chay: " .. tostring(liveProfile)
+            c.score = c.score + 1000; c.reasons[#c.reasons + 1] = "matches the live profile name: " .. tostring(liveProfile)
         end
         if pointers[c.key] then
-            c.score = c.score + 600; c.reasons[#c.reasons + 1] = "duoc tro toi boi key '" .. pointers[c.key] .. "'"
+            c.score = c.score + 600; c.reasons[#c.reasons + 1] = "pointed to by key '" .. pointers[c.key] .. "'"
         end
         if liveSettings then
             local same, total = similarityToLive(c.decoded, liveSettings)
             if total >= 3 then
                 local ratio = same / total
                 c.score = c.score + math.floor(ratio * 300)
-                c.reasons[#c.reasons + 1] = string.format("khop settings dang chay %d/%d", same, total)
+                c.reasons[#c.reasons + 1] = string.format("matches live settings %d/%d", same, total)
             end
         end
         if c.key == "default" then c.score = c.score - 500 end
@@ -3137,10 +4749,10 @@ local function readRouteFile()
 
             local diag
             if not route then
-                if not content then diag = "readfile loi"
-                elseif #content == 0 then diag = "file rong"
-                elseif not decoded then diag = string.format("JSON loi/dang ghi do (len=%d, dau=%q)", #content, content:sub(1, 40))
-                else diag = "JSON ok nhung khong thay route" end
+                if not content then diag = "readfile failed"
+                elseif #content == 0 then diag = "file is empty"
+                elseif not decoded then diag = string.format("bad / half-written JSON (len=%d, head=%q)", #content, content:sub(1, 40))
+                else diag = "JSON ok but no route found" end
             end
 
             -- Atlas co the dang ghi file, giu route cu va thu lai
@@ -3148,7 +4760,7 @@ local function readRouteFile()
                 configState.failCount = (configState.failCount or 0) + 1
                 configState.lastFail = diag
                 lastRouteFile = presetPath
-                warn(string.format("[Auto Prog] Doc preset loi tam thoi (%s) - dung route cu, lan %d/3", diag, configState.failCount))
+                warn(string.format("[Auto Prog] Temporary preset read error (%s) - keeping the previous route, attempt %d/3", diag, configState.failCount))
                 return configState.route
             end
             configState.failCount = route and 0 or ((configState.failCount or 0) + 1)
@@ -3157,12 +4769,12 @@ local function readRouteFile()
             configState.viaPointer = true
             configState.path, configState.content = presetPath, content
             configState.route, configState.routeN, configState.routePath = route, n or 0, rpath
-            configState.reasons = { "file con tro " .. ptrPath .. " -> " .. tostring(presetName) }
+            configState.reasons = { "pointer file " .. ptrPath .. " -> " .. tostring(presetName) }
             configState.candidates = {}
             configState.ambiguous = ptrAmb == true
             lastRouteFile = presetPath
             if changed then
-                print(string.format("[Auto Prog] Preset Atlas dang dung: %s (qua %s)", presetPath, ptrPath))
+                print(string.format("[Auto Prog] Atlas preset in use: %s (via %s)", presetPath, ptrPath))
             end
             if route then
                 if changed then print(string.format("[Auto Prog] Route @ %s (%d step)", tostring(rpath), tonumber(n) or 0)) end
@@ -3170,11 +4782,11 @@ local function readRouteFile()
             end
             if warnedNoRoute ~= presetPath then
                 warnedNoRoute = presetPath
-                warn("[Auto Prog] Preset dang dung khong co route nhan dien duoc: " .. presetPath .. " (" .. tostring(diag) .. ")")
+                warn("[Auto Prog] Active preset has no recognizable route: " .. presetPath .. " (" .. tostring(diag) .. ")")
             end
             return nil
         end
-        warn("[Auto Prog] File con tro tro toi preset khong ton tai: " .. tostring(presetName))
+        warn("[Auto Prog] Pointer file points to a missing preset: " .. tostring(presetName))
     end
     configState.viaPointer = false
 
@@ -3210,9 +4822,9 @@ local function readRouteFile()
     lastRouteFile = top.path
 
     if changed then
-        print(string.format("[Auto Prog] Config Atlas dang dung: %s (route @ %s, %d step)", tostring(top.path), tostring(top.routePath), tonumber(top.routeN) or 0))
+        print(string.format("[Auto Prog] Active Atlas config: %s (route @ %s, %d steps)", tostring(top.path), tostring(top.routePath), tonumber(top.routeN) or 0))
         if ambiguous then
-            warn("[Auto Prog] Nhieu config co route va khong phan biet duoc cai dang dung. Dat getgenv().AtlasConfigPath = \"duong/dan/file.json\" de chon tay.")
+            warn("[Auto Prog] Several configs have routes and the active one is ambiguous. Set getgenv().AtlasConfigPath = \"path/to/file.json\" to pick one manually.")
         end
     end
     return top.route
@@ -3343,10 +4955,10 @@ local nextItemCache = { at = 0, val = nil, raw = nil }
 local function isOwnUI(obj)
     if not obj then return false end
     local name = tostring(obj.Name or "")
-    if name == "AutoProg_HUD" or name == "AutoProg_RouteFlowModal" or name == "WindUI" or name == "AutoProg" then
+    if name == "AutoProg_HUD" or name == "AutoProg_RouteFlowModal" or name == "IvyisUI" or name == "AutoProg" then
         return true
     end
-    if obj:FindFirstAncestor("WindUI") or obj:FindFirstAncestor("AutoProg_HUD") or obj:FindFirstAncestor("AutoProg_RouteFlowModal") then
+    if obj:FindFirstAncestor("IvyisUI") or obj:FindFirstAncestor("AutoProg_HUD") or obj:FindFirstAncestor("AutoProg_RouteFlowModal") then
         return true
     end
     return false
@@ -3521,7 +5133,7 @@ local function getLiveTarget()
 
     local uiNext = readNextItemLabel()
     if uiNext then
-        targetSource = "ui: nhan 'Next item' cua Atlas"
+        targetSource = "ui: Atlas 'Next item' label"
         return uiNext
     end
 
@@ -4467,7 +6079,7 @@ local function applyStagePreset(stageInfo)
         end
     end
 
-    print(string.format("[Auto Config] Chuyen thanh cong sang %s (%s)", stageInfo.Name, fileName))
+    print(string.format("[Auto Config] Switched to %s (%s)", stageInfo.Name, fileName))
     return true
 end
 
@@ -4476,9 +6088,9 @@ local function sendStageWebhook(oldStage, newStageInfo, beeCount, minLvl)
     local webhookUrl = getWebhookSettings()
     if not webhookUrl or not getHttpRequest() then return end
 
-    local title = "Auto Change Config - Thăng cấp Giai đoạn!"
+    local title = "Auto Change Config - Stage Up!"
     local bodyText = string.format(
-        "**Giai đoạn mới:** %s\n**File Config:** `%s`\n**Số ong:** %d\n**Min Level:** %d",
+        "**New stage:** %s\n**Config file:** `%s`\n**Bees:** %d\n**Min Level:** %d",
         tostring(newStageInfo.Name), tostring(newStageInfo.FileName), tonumber(beeCount) or 0, tonumber(minLvl) or 0
     )
     postWebhook(webhookUrl,
@@ -4515,8 +6127,8 @@ local function checkConfigStage(data, beeCount, minLvl)
             pendingStage = targetStageIdx
             pendingStageTime = tick()
             local debounce = (getgenv and tonumber(getgenv().AutoChangeConfigDebounce)) or 15
-            task.spawn(sendEventWebhook, "config", "Đủ điều kiện đổi config",
-                string.format("**Sắp chuyển:** %s\n**Số ong:** %d (cần %d)\n**Min Level:** %d (cần %d)\nSẽ đổi sau khoảng %d giây nếu vẫn đủ điều kiện.",
+            task.spawn(sendEventWebhook, "config", "Eligible for config change",
+                string.format("**Switching to:** %s\n**Bees:** %d (need %d)\n**Min Level:** %d (need %d)\nWill switch in about %d seconds if still eligible.",
                     tostring(targetStage.Name), tonumber(beeCount) or 0, targetStage.MinBees, tonumber(minLvl) or 0, targetStage.MinLevel, debounce),
                 16776960)
             return
@@ -4582,10 +6194,10 @@ _G.AutoProgDebug = printDebug
         done = Color3.fromHex("#33C759"),
         accent = Color3.fromHex("#0091FF"),
     }
-    local MAP_FONT = Enum.Font.FredokaOne
-    local MAIN_FONT_FACE = Font.new("rbxasset://fonts/families/FredokaOne.json", Enum.FontWeight.Medium)
+    -- Cung ho font Gotham voi giao dien Atlas: moi chu trong tool deu dong nhat.
+    local MAP_FONT = Enum.Font.GothamMedium
 
-    -- Mau cua gear tile bam theo theme WindUI dang dung. Theme co the doi luc
+    -- Mau cua gear tile bam theo theme IvyisUI dang dung. Theme co the doi luc
     -- chay qua Settings > UI Theme, nen khong hard-code mau toi nua.
     -- Gom state + helper vao mot table de khong vuot gioi han local cua Luau.
     local routeCountLabel = nil
@@ -4617,10 +6229,10 @@ _G.AutoProgDebug = printDebug
     end
 
     function gearVisual.refresh()
-        if not WindUI or not WindUI.GetCurrentTheme or not WindUI.GetThemes then return end
-        local ok, themeName = pcall(function() return WindUI:GetCurrentTheme() end)
+        if not IvyisUI or not IvyisUI.GetCurrentTheme or not IvyisUI.GetThemes then return end
+        local ok, themeName = pcall(function() return IvyisUI:GetCurrentTheme() end)
         if not ok or not themeName then return end
-        local themes = WindUI:GetThemes()
+        local themes = IvyisUI:GetThemes()
         local theme = type(themes) == "table" and themes[themeName] or nil
         if type(theme) ~= "table" then return end
 
@@ -4724,7 +6336,6 @@ _G.AutoProgDebug = printDebug
         lbl.BackgroundTransparency = 1
         lbl.BorderSizePixel = 0
         lbl.Font = MAP_FONT
-        lbl.FontFace = MAIN_FONT_FACE
         lbl.TextColor3 = MAP_COLORS.text
         for k, v in pairs(props) do lbl[k] = v end
         lbl.Parent = parent
@@ -4737,7 +6348,7 @@ _G.AutoProgDebug = printDebug
         return getRouteIcon(key) or ""
     end
 
-    -- Build the gear list inside a WindUI tab, so it uses the same window,
+    -- Build the gear list inside a IvyisUI tab, so it uses the same window,
     -- theme, font and scrolling behaviour as the main tabs.
     local function buildGearList(tab, progressLabel)
         if gearListMounted then return end
@@ -4964,8 +6575,11 @@ _G.AutoProgDebug = printDebug
                 total = total + 1
                 if ownsItem(name, "Gear", char, p.data) then
                     ownedCount = ownedCount + 1
+                    -- Planter vinh vien thu hoach xong quay lai tui, khong phai "mua moi":
+                    -- ghi nho luon va khong bao webhook "Da mua xong do moi".
+                    local isPlanterItem = name:lower():find("planter", 1, true) ~= nil
                     if not WebhookState.owned[name] then
-                        if firstRun then
+                        if firstRun or isPlanterItem then
                             WebhookState.owned[name] = true
                         else
                             -- phai thay 2 lan lien tiep cho chac, tranh bao nham
@@ -4980,9 +6594,9 @@ _G.AutoProgDebug = printDebug
             end
         end
         if #fresh > 0 then
-            task.spawn(sendEventWebhook, "buy", "Đã mua xong đồ mới",
-                string.format("**Đã có:** %s\n**Tiến độ:** %d/%d món\n**Món tiếp theo:** %s",
-                    table.concat(fresh, ", "), ownedCount, total, tostring(p.targetItem or "xong route")),
+            task.spawn(sendEventWebhook, "buy", "New gear purchased",
+                string.format("**Owned:** %s\n**Progress:** %d/%d items\n**Next item:** %s",
+                    table.concat(fresh, ", "), ownedCount, total, tostring(p.targetItem or "route complete")),
                 5763719)
         end
     end
@@ -5709,46 +7323,22 @@ restoreRollSettings = function()
     end
 end
 
-WindUI:AddTheme({
-    Name = "Pearl",
-    Accent = Color3.fromHex("#18181B"),
-    Dialog = Color3.fromHex("#F4F4F7"),
-    Outline = Color3.fromHex("#D9D9E1"),
-    Text = Color3.fromHex("#18181B"),
-    Placeholder = Color3.fromHex("#85858F"),
-    Background = Color3.fromHex("#F4F4F7"),
-    Button = Color3.fromHex("#E8E8EE"),
-    Icon = Color3.fromHex("#45454F"),
-    Toggle = Color3.fromHex("#18181B"),
-    Slider = Color3.fromHex("#18181B"),
-    Checkbox = Color3.fromHex("#18181B"),
-    PanelBackground = Color3.fromHex("#FFFFFF"),
-    PanelBackgroundTransparency = 0.1,
-    SliderIcon = Color3.fromHex("#45454F"),
-    Primary = Color3.fromHex("#18181B"),
-    LabelBackground = Color3.fromHex("#FFFFFF"),
-    LabelBackgroundTransparency = 0.1,
-    DropdownTabBackground = Color3.fromHex("#E8E8EE"),
-    DropdownBackground = Color3.fromHex("#FFFFFF"),
-    TabBackground = Color3.fromHex("#FFFFFF"),
-    TabBackgroundHover = Color3.fromHex("#E8E8EE"),
-    TabBackgroundHoverTransparency = 0,
-    TabBackgroundActive = Color3.fromHex("#D9D9E1"),
-    TabBackgroundActiveTransparency = 0,
-    ElementBackground = Color3.fromHex("#FFFFFF"),
-    ElementBackgroundTransparency = 0,
-})
+-- IvyisUI chi co 3 theme theo Atlas: "Atlas", "Atlas Light", "Atlas Midnight".
 
 -- ===== In-game UI scale (readable on phones) =====
--- WindUI lays the window out in unscaled units and multiplies every element by
--- WindUI.UIScale. The default 1x is far too small to read on a phone, so the
+-- IvyisUI lays the window out in unscaled units and multiplies every element by
+-- IvyisUI.UIScale. The default 1x is far too small to read on a phone, so the
 -- window grows to fill most of the screen when the device is touch-only.
-local IVYIS_UI_BASE = Vector2.new(560, 350)
-local IVYIS_UI_SCALE_CHOICES = { "Auto", "100%", "125%", "150%", "175%", "200%", "250%", "300%" }
-local ivyisWindow = nil
-local ivyisUiSizeChoice = "Auto"
+-- NOTE: the main chunk of this file is close to Luau's limit of 200 locals per
+-- function, so these helpers all live in one table instead of each taking a
+-- local slot of its own. Keep it that way when editing.
+local IVYIS_UI = {}
+IVYIS_UI.BASE = Vector2.new(560, 350)
+IVYIS_UI.CHOICES = { "Auto", "100%", "125%", "150%", "175%", "200%", "250%", "300%" }
+IVYIS_UI.window = nil
+IVYIS_UI.choice = "Auto"
 
-local function ivyisIsTouchDevice()
+IVYIS_UI.isTouchDevice = function()
     local ok, touch, keyboard = pcall(function()
         return UserInputService.TouchEnabled, UserInputService.KeyboardEnabled
     end)
@@ -5757,7 +7347,7 @@ local function ivyisIsTouchDevice()
     return touch == true and keyboard ~= true
 end
 
-local function ivyisViewport()
+IVYIS_UI.viewport = function()
     local cam = workspace.CurrentCamera
     if cam and cam.ViewportSize and cam.ViewportSize.X > 0 and cam.ViewportSize.Y > 0 then
         return cam.ViewportSize
@@ -5766,18 +7356,18 @@ local function ivyisViewport()
 end
 
 -- How much the base window can grow before it no longer fits on screen.
-local function ivyisFitScale()
-    local vp = ivyisViewport()
-    return math.min((vp.X - 40) / IVYIS_UI_BASE.X, (vp.Y - 40) / IVYIS_UI_BASE.Y)
+IVYIS_UI.fitScale = function()
+    local vp = IVYIS_UI.viewport()
+    return math.min((vp.X - 40) / IVYIS_UI.BASE.X, (vp.Y - 40) / IVYIS_UI.BASE.Y)
 end
 
-local function ivyisScaleForChoice(choice)
+IVYIS_UI.scaleForChoice = function(choice)
     local percent = tostring(choice or "Auto"):match("^(%d+)%%$")
     if percent then
         return math.clamp(tonumber(percent) / 100, 0.5, 4)
     end
-    local fit = ivyisFitScale()
-    if ivyisIsTouchDevice() then
+    local fit = IVYIS_UI.fitScale()
+    if IVYIS_UI.isTouchDevice() then
         -- Fill 70% of the screen (the second number is the floor for tiny screens).
         return math.clamp(fit * 0.70, 0.85, 2.8)
     end
@@ -5787,119 +7377,113 @@ end
 
 -- The script's plain ScreenGuis (status HUD, hive-slot picker, mobile button)
 -- grow with the same setting so the whole in-game UI stays readable together.
-local ivyisScaledGuis = {}
-local ivyisScaleRefreshers = {}
+IVYIS_UI.scaledGuis = {}
+IVYIS_UI.refreshers = {}
 
-local function ivyisPanelScale()
-    return ivyisScaleForChoice(ivyisUiSizeChoice)
+IVYIS_UI.panelScale = function()
+    return IVYIS_UI.scaleForChoice(IVYIS_UI.choice)
 end
 
 -- Same boost as the panel, but never bigger than what still fits on screen.
-local function ivyisGuiScaleFor(designW, designH, maxScale)
-    local vp = ivyisViewport()
+IVYIS_UI.guiScaleFor = function(designW, designH, maxScale)
+    local vp = IVYIS_UI.viewport()
     local fitX = (vp.X * 0.92) / math.max(tonumber(designW) or 1, 1)
     local fitY = (vp.Y * 0.92) / math.max(tonumber(designH) or 1, 1)
-    return math.clamp(math.min(ivyisPanelScale(), math.min(fitX, fitY)), 0.5, maxScale or 2.5)
+    return math.clamp(math.min(IVYIS_UI.panelScale(), math.min(fitX, fitY)), 0.5, maxScale or 2.5)
 end
 
-local function ivyisRegisterGuiScale(screenGui, designW, designH, maxScale)
+IVYIS_UI.registerGuiScale = function(screenGui, designW, designH, maxScale)
     if not screenGui then return end
-    ivyisScaledGuis[#ivyisScaledGuis + 1] = { gui = screenGui, w = designW, h = designH, max = maxScale }
+    IVYIS_UI.scaledGuis[#IVYIS_UI.scaledGuis + 1] = { gui = screenGui, w = designW, h = designH, max = maxScale }
     local uiScale = screenGui:FindFirstChildOfClass("UIScale")
     if not uiScale then
         uiScale = Instance.new("UIScale")
         uiScale.Parent = screenGui
     end
-    uiScale.Scale = ivyisGuiScaleFor(designW, designH, maxScale)
+    uiScale.Scale = IVYIS_UI.guiScaleFor(designW, designH, maxScale)
     return uiScale
 end
 
-local function ivyisRegisterScaleRefresher(fn)
+IVYIS_UI.registerScaleRefresher = function(fn)
     if type(fn) == "function" then
-        ivyisScaleRefreshers[#ivyisScaleRefreshers + 1] = fn
+        IVYIS_UI.refreshers[#IVYIS_UI.refreshers + 1] = fn
         pcall(fn)
     end
 end
 
-local function ivyisRefreshGuiScales()
-    for _, entry in ipairs(ivyisScaledGuis) do
+IVYIS_UI.refreshGuiScales = function()
+    for _, entry in ipairs(IVYIS_UI.scaledGuis) do
         local gui = entry.gui
         if gui and gui.Parent then
             local uiScale = gui:FindFirstChildOfClass("UIScale")
             if uiScale then
-                uiScale.Scale = ivyisGuiScaleFor(entry.w, entry.h, entry.max)
+                uiScale.Scale = IVYIS_UI.guiScaleFor(entry.w, entry.h, entry.max)
             end
         end
     end
-    for _, fn in ipairs(ivyisScaleRefreshers) do
+    for _, fn in ipairs(IVYIS_UI.refreshers) do
         pcall(fn)
     end
 end
 
-local function ivyisApplyUiScale(choice)
-    if choice ~= nil then ivyisUiSizeChoice = choice end
-    if not ivyisWindow then return end
-    local scale = ivyisScaleForChoice(ivyisUiSizeChoice)
-    pcall(function() ivyisWindow:SetUIScale(scale) end)
-    pcall(ivyisRefreshGuiScales)
-    if getgenv then
-        pcall(function() getgenv().IvyisUiScale = scale end)
-    end
+IVYIS_UI.apply = function(choice)
+    if choice ~= nil then IVYIS_UI.choice = choice end
+    if not IVYIS_UI.window then return end
+    pcall(function()
+        local scale = IVYIS_UI.scaleForChoice(IVYIS_UI.choice)
+        pcall(function() IVYIS_UI.window:SetUIScale(scale) end)
+        pcall(IVYIS_UI.refreshGuiScales)
+        if getgenv then
+            pcall(function() getgenv().IvyisUiScale = scale end)
+        end
+    end)
 end
 
-local Window = WindUI:CreateWindow({
+local Window = IvyisUI:CreateWindow({
     Title = "Ivyis's Tool",
-    Icon = "sparkles",
-    Author = "by ivyis",
-    Folder = "AutoFeedBSS",
-    Size = UDim2.fromOffset(IVYIS_UI_BASE.X, IVYIS_UI_BASE.Y),
-    Transparent = true,
-    Theme = "Dark",
-    SideBarWidth = 180,
-    HasOutline = true,
-    Resizable = false,
-    AutoScale = false
+    Size = UDim2.fromOffset(IVYIS_UI.BASE.X, IVYIS_UI.BASE.Y),
+    -- Ivyis da co nut bee rieng (AutoFeed_MobileToggle) nen khong dung nut noi cua Atlas
+    FloatingButton = false
 })
 
 -- Set the scale before the tabs are built so every element is laid out with it.
-ivyisWindow = Window
-ivyisApplyUiScale(ivyisUiSizeChoice)
+IVYIS_UI.window = Window
+pcall(IVYIS_UI.apply, IVYIS_UI.choice)
 
--- The status HUD lives in its own ScreenGui (built earlier); keep it readable too.
-ivyisRegisterGuiScale(hudGui, 600, 20, 2.5)
-
-pcall(function()
-    WindUI:SetTheme("Dark")
-end)
-
-pcall(function()
-    WindUI:SetFont("rbxasset://fonts/families/FredokaOne.json")
-end)
-
--- bo nut dong / thu nho / phong to cua WindUI, chi mo dong bang nut mobile hoac RightControl
-pcall(function() Window:DisableTopbarButtons({ "Close", "Minimize", "Fullscreen" }) end)
-task.spawn(function()
-    local hideNames = { close = true, minimize = true, fullscreen = true, maximize = true }
-    local root = (gethui and gethui()) or game:GetService("CoreGui")
-    for _ = 1, 40 do
-        task.wait(0.25)
-        local gui = root:FindFirstChild("WindUI")
-        local win = gui and gui:FindFirstChild("Window")
-        if win then
-            local found = false
-            for _, d in ipairs(win:GetDescendants()) do
-                if d:IsA("GuiObject") and hideNames[d.Name:lower()] then
-                    d.Visible = false
-                    found = true
-                end
-            end
-            if found then break end
+-- The status HUD lives in its own ScreenGui, created earlier inside another scope,
+-- so it is looked up by name instead of by local variable.
+IVYIS_UI.findHudGui = function()
+    local ok, found = pcall(function()
+        local roots = {}
+        if gethui then
+            local okHui, huiRoot = pcall(gethui)
+            if okHui and huiRoot then roots[#roots + 1] = huiRoot end
         end
+        roots[#roots + 1] = CoreGui
+        roots[#roots + 1] = Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
+        for _, root in ipairs(roots) do
+            local hud = root and root:FindFirstChild("AutoProg_HUD")
+            if hud and hud:IsA("ScreenGui") then return hud end
+        end
+        return nil
+    end)
+    if ok then return found end
+    return nil
+end
+
+-- Keep the HUD readable too (it is a separate ScreenGui made in another scope).
+do
+    local hudGuiForScale = IVYIS_UI.findHudGui()
+    if hudGuiForScale then
+        pcall(IVYIS_UI.registerGuiScale, hudGuiForScale, 600, 20, 2.5)
     end
-end)
+end
+
+-- IvyisUI: theme mac dinh la Atlas; khong co nut close / minimize / fullscreen.
+pcall(function() IvyisUI:SetTheme("Atlas") end)
 
 local FeedTab = Window:Tab({ Title = "Feed", Icon = "cookie" })
-local HiveTab = Window:Tab({ Title = "Hive", Icon = "layout-grid" })
+local HiveTab = Window:Tab({ Title = "Hive", Icon = "grid" })
 local ProgTab = Window:Tab({ Title = "Progress", Icon = "route" })
 local GearTab = Window:Tab({ Title = "Gear", Icon = "backpack" })
 local SettingsTab = Window:Tab({ Title = "Settings", Icon = "settings" })
@@ -6071,10 +7655,10 @@ feedToggle = FeedTab:Toggle({
                 stopAutoRoll(true)
             end
             pauseAtlas(true)
-            WindUI:Notify({ Title = "Auto Feed", Content = "Feeding started", Duration = 3 })
+            IvyisUI:Notify({ Title = "Auto Feed", Content = "Feeding started", Duration = 3 })
         else
             stopAutoFeed()
-            WindUI:Notify({ Title = "Auto Feed", Content = "Feeding stopped", Duration = 3 })
+            IvyisUI:Notify({ Title = "Auto Feed", Content = "Feeding stopped", Duration = 3 })
             refreshTreatStatus()
         end
     end
@@ -6170,11 +7754,11 @@ if hui:FindFirstChild("AutoFeed_MobileToggle") then
     hui:FindFirstChild("AutoFeed_MobileToggle"):Destroy()
 end
 
--- bat/tat cua so ngay lap tuc, khong chay animation cua WindUI
-local function findWindUIGui()
+-- bat/tat cua so ngay lap tuc, khong chay animation cua IvyisUI
+local function findIvyisGui()
     for _, root in ipairs({ (gethui and gethui()) or false, CoreGui, player:FindFirstChild("PlayerGui") }) do
         if root then
-            local g = root:FindFirstChild("WindUI")
+            local g = root:FindFirstChild("IvyisUI")
             if g and g:IsA("ScreenGui") then return g end
         end
     end
@@ -6182,15 +7766,19 @@ local function findWindUIGui()
 end
 
 local function toggleMainWindow()
-    local g = findWindUIGui()
+    local g = findIvyisGui()
     if g then
         g.Enabled = not g.Enabled
         return
     end
-    local winFrame = Window.UIElements and Window.UIElements.Main
+    local winFrame = Window.Frame
     if winFrame then winFrame.Visible = not winFrame.Visible end
 end
 
+-- Mobile toggle button. Wrapped in "do ... end" on purpose: the main chunk of
+-- this script sits at Luau's limit of 200 locals per function and none of these
+-- locals (mobileGui, mobileBtn, ...) are used again further down the file.
+do
 local mobileGui = Instance.new("ScreenGui")
 mobileGui.Name = "AutoFeed_MobileToggle"
 mobileGui.ResetOnSpawn = false
@@ -6225,8 +7813,8 @@ mobileIcon.Parent = mobileBtn
 -- Bigger tap target on phones, following the same "UI size" setting as the
 -- panel. The button keeps plain offset sizes so the drag maths stays in real
 -- screen pixels.
-ivyisRegisterScaleRefresher(function()
-    local s = math.clamp(ivyisPanelScale(), 1, 1.9)
+IVYIS_UI.registerScaleRefresher(function()
+    local s = math.clamp(IVYIS_UI.panelScale(), 1, 1.9)
     local size = math.floor(48 * s + 0.5)
     local icon = math.floor(30 * s + 0.5)
     mobileBtn.Size = UDim2.new(0, size, 0, size)
@@ -6282,10 +7870,14 @@ end))
 pcall(function()
     Window:OnClose(function()
         if mobileGui then mobileGui.Enabled = true end
-        WindUI:Notify({ Title = "Hidden", Content = "Tap the bee button to bring it back", Duration = 3 })
+        IvyisUI:Notify({ Title = "Hidden", Content = "Tap the bee button to bring it back", Duration = 3 })
     end)
 end)
+end -- /mobile toggle button
 
+-- Hive-slot picker modal. Same "do ... end" trick as above: these locals are not
+-- referenced after this block, so their registers are released here (200-local limit).
+do
 local pickerGui = Instance.new("ScreenGui")
 pickerGui.Name = "AutoFeed_HiveModalGui"
 pickerGui.ResetOnSpawn = false
@@ -6294,7 +7886,7 @@ pickerGui.Parent = hui
 
 -- Grow the hive-slot picker with the same "UI size" setting (never past the
 -- screen edges).
-ivyisRegisterGuiScale(pickerGui, 264, 570, 2.5)
+pcall(IVYIS_UI.registerGuiScale, pickerGui, 264, 570, 2.5)
 
 local pickerFrame = Instance.new("Frame")
 pickerFrame.Name = "HiveSelectionModal"
@@ -6324,7 +7916,7 @@ titleLabel.Position = UDim2.new(0, 12, 0, 0)
 titleLabel.BackgroundTransparency = 1
 titleLabel.Text = "Select Hive Slots (0/50)"
 titleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
-titleLabel.Font = Enum.Font.FredokaOne
+titleLabel.Font = Enum.Font.GothamBold
 titleLabel.TextSize = 13
 titleLabel.TextXAlignment = Enum.TextXAlignment.Center
 titleLabel.Parent = headerBar
@@ -6355,7 +7947,7 @@ bottomCloseBtn.BackgroundColor3 = Color3.fromRGB(32, 64, 120)
 bottomCloseBtn.BorderSizePixel = 0
 bottomCloseBtn.Text = "Close"
 bottomCloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-bottomCloseBtn.Font = Enum.Font.FredokaOne
+bottomCloseBtn.Font = Enum.Font.GothamBold
 bottomCloseBtn.TextSize = 12
 bottomCloseBtn.Parent = pickerFrame
 Instance.new("UICorner", bottomCloseBtn).CornerRadius = UDim.new(0, 6)
@@ -6447,7 +8039,7 @@ function refreshHiveGrid()
                 lvlLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
                 lvlLabel.TextStrokeTransparency = 0
                 lvlLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-                lvlLabel.Font = Enum.Font.FredokaOne
+                lvlLabel.Font = Enum.Font.GothamBold
                 lvlLabel.TextSize = 11
                 lvlLabel.TextXAlignment = Enum.TextXAlignment.Left
                 lvlLabel.TextYAlignment = Enum.TextYAlignment.Bottom
@@ -6463,7 +8055,7 @@ function refreshHiveGrid()
             selLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
             selLabel.TextStrokeTransparency = 0
             selLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-            selLabel.Font = Enum.Font.FredokaOne
+            selLabel.Font = Enum.Font.GothamBold
             selLabel.TextSize = 10
             selLabel.TextXAlignment = Enum.TextXAlignment.Right
             selLabel.TextYAlignment = Enum.TextYAlignment.Bottom
@@ -6499,6 +8091,7 @@ HiveTab:Button({
         toggleSlotPicker()
     end
 })
+end -- /hive-slot picker
 
 HiveTab:Button({
     Title = "Copy my hive",
@@ -6528,7 +8121,7 @@ HiveTab:Button({
         refreshHiveGrid()
         refreshBuilderStatus()
         refreshQuotaText()
-        WindUI:Notify({ Title = "Done", Content = "Hive copied into the layout", Duration = 2 })
+        IvyisUI:Notify({ Title = "Done", Content = "Hive copied into the layout", Duration = 2 })
         if refreshSsaStatus then pcall(refreshSsaStatus) end
     end
 })
@@ -6793,10 +8386,10 @@ local function copySsaMissingReport()
     local text = table.concat(lines, "\n")
     local ok = copyToClipboard(text)
     if ok then
-        WindUI:Notify({ Title = "Copied", Content = "Missing gifted bees copied to clipboard!", Duration = 3 })
+        IvyisUI:Notify({ Title = "Copied", Content = "Missing gifted bees copied to clipboard!", Duration = 3 })
     else
         print(text)
-        WindUI:Notify({ Title = "Printed to Console", Content = "Printed missing bees to console (F9)!", Duration = 3 })
+        IvyisUI:Notify({ Title = "Printed to Console", Content = "Printed missing bees to console (F9)!", Duration = 3 })
     end
 end
 
@@ -6805,7 +8398,7 @@ HiveTab:Button({
     Icon = "refresh-cw",
     Callback = function()
         refreshSsaStatus()
-        WindUI:Notify({ Title = "SSA Status", Content = "Gifted bees status refreshed!", Duration = 2 })
+        IvyisUI:Notify({ Title = "SSA Status", Content = "Gifted bees status refreshed!", Duration = 2 })
     end
 })
 
@@ -6891,7 +8484,7 @@ HiveTab:Button({
         hasUserConfiguredTargets = true
         refreshQuotaText()
         local b = beeMapById[selectedBeeId]
-        WindUI:Notify({
+        IvyisUI:Notify({
             Title = "Added",
             Content = string.format("%dx %s (%s)", selectedTargetQty, b and b.name or selectedBeeId, selectedTargetGifted),
             Duration = 2
@@ -6919,7 +8512,7 @@ HiveTab:Button({
     Callback = function()
         compositionTargets = {}
         refreshQuotaText()
-        WindUI:Notify({ Title = "Cleared", Content = "List is empty now", Duration = 2 })
+        IvyisUI:Notify({ Title = "Cleared", Content = "List is empty now", Duration = 2 })
     end
 })
 
@@ -6947,9 +8540,9 @@ HiveTab:Button({
             local path = HIVE_CONFIGS_DIR .. "/" .. name .. ".json"
             local ok, err = pcall(writefile, path, raw)
             if ok then
-                WindUI:Notify({ Title = "Saved", Content = "Saved to " .. path, Duration = 3 })
+                IvyisUI:Notify({ Title = "Saved", Content = "Saved to " .. path, Duration = 3 })
             else
-                WindUI:Notify({ Title = "Could not save", Content = tostring(err), Duration = 3 })
+                IvyisUI:Notify({ Title = "Could not save", Content = tostring(err), Duration = 3 })
             end
         end
     end
@@ -6969,7 +8562,7 @@ HiveTab:Button({
     Icon = "folder-open",
     Callback = function()
         if not selectedSavedConfig or selectedSavedConfig == "None" then
-            WindUI:Notify({ Title = "Load", Content = "Pick a layout first", Duration = 2 })
+            IvyisUI:Notify({ Title = "Load", Content = "Pick a layout first", Duration = 2 })
             return
         end
         local path = HIVE_CONFIGS_DIR .. "/" .. selectedSavedConfig .. ".json"
@@ -6982,12 +8575,12 @@ HiveTab:Button({
                     refreshQuotaText()
                     refreshHiveGrid()
                     refreshBuilderStatus()
-                    WindUI:Notify({ Title = "Loaded", Content = selectedSavedConfig, Duration = 3 })
+                    IvyisUI:Notify({ Title = "Loaded", Content = selectedSavedConfig, Duration = 3 })
                     return
                 end
             end
         end
-        WindUI:Notify({ Title = "Could not load", Content = "Can't read " .. tostring(selectedSavedConfig), Duration = 3 })
+        IvyisUI:Notify({ Title = "Could not load", Content = "Can't read " .. tostring(selectedSavedConfig), Duration = 3 })
     end
 })
 
@@ -6999,7 +8592,7 @@ HiveTab:Button({
         if savedConfigsDropdown and savedConfigsDropdown.SetValues then
             pcall(function() savedConfigsDropdown:SetValues(list) end)
         end
-        WindUI:Notify({ Title = "Layouts", Content = string.format("%d saved", #list), Duration = 2 })
+        IvyisUI:Notify({ Title = "Layouts", Content = string.format("%d saved", #list), Duration = 2 })
     end
 })
 
@@ -7011,10 +8604,10 @@ HiveTab:Button({
         if raw then
             local copied = copyToClipboard(raw)
             if copied then
-                WindUI:Notify({ Title = "Copied", Content = "Layout text is in your clipboard", Duration = 3 })
+                IvyisUI:Notify({ Title = "Copied", Content = "Layout text is in your clipboard", Duration = 3 })
             else
                 print("[HiveBuilder Export]\n" .. raw)
-                WindUI:Notify({ Title = "Printed", Content = "Check the console (F9)", Duration = 4 })
+                IvyisUI:Notify({ Title = "Printed", Content = "Check the console (F9)", Duration = 4 })
             end
         end
     end
@@ -7035,7 +8628,7 @@ HiveTab:Button({
     Callback = function()
         local text = importJsonInput
         if not text or text == "" then
-            WindUI:Notify({ Title = "Nothing pasted", Content = "Paste the layout text first", Duration = 3 })
+            IvyisUI:Notify({ Title = "Nothing pasted", Content = "Paste the layout text first", Duration = 3 })
             return
         end
         local ok, decoded = pcall(function() return HttpService:JSONDecode(text) end)
@@ -7044,9 +8637,9 @@ HiveTab:Button({
             refreshQuotaText()
             refreshHiveGrid()
             refreshBuilderStatus()
-            WindUI:Notify({ Title = "Imported", Content = tostring(decoded.name or "layout"), Duration = 3 })
+            IvyisUI:Notify({ Title = "Imported", Content = tostring(decoded.name or "layout"), Duration = 3 })
         else
-            WindUI:Notify({ Title = "Bad text", Content = "That is not a valid layout", Duration = 3 })
+            IvyisUI:Notify({ Title = "Bad text", Content = "That is not a valid layout", Duration = 3 })
         end
     end
 })
@@ -7088,10 +8681,10 @@ rollToggle = HiveTab:Toggle({
         if rollRunning then
             if feedRunning then stopAutoFeed(true) end
             pauseAtlas(true)
-            WindUI:Notify({ Title = "Auto Roll", Content = "On (" .. currentBuildMode .. ")", Duration = 2 })
+            IvyisUI:Notify({ Title = "Auto Roll", Content = "On (" .. currentBuildMode .. ")", Duration = 2 })
         else
             stopAutoRoll()
-            WindUI:Notify({ Title = "Auto Roll", Content = "Off", Duration = 2 })
+            IvyisUI:Notify({ Title = "Auto Roll", Content = "Off", Duration = 2 })
         end
     end
 })
@@ -7144,7 +8737,7 @@ ProgTab:Button({
     Title = "Scan route again",
     Callback = function()
         Progression.rescanProgression()
-        WindUI:Notify({
+        IvyisUI:Notify({
             Title = "Auto Progression",
             Content = "Scanned again",
             Duration = 3
@@ -7154,7 +8747,7 @@ ProgTab:Button({
 
 Progression.setTargetLabel(progTargetLabel)
 
--- Gear list lives in a normal WindUI tab now, instead of a separate raw GUI.
+-- Gear list lives in a normal IvyisUI tab now, instead of a separate raw GUI.
 -- This keeps the same theme, font, sidebar and scrolling as the main tabs.
 GearTab:Section({ Title = "Collection" })
 local gearProgressLabel = GearTab:Paragraph({
@@ -7170,8 +8763,8 @@ GearTab:Toggle({
 })
 Progression.mountGearList(GearTab, gearProgressLabel)
 pcall(function()
-    if WindUI.OnThemeChange then
-        WindUI:OnThemeChange(function()
+    if IvyisUI.OnThemeChange then
+        IvyisUI:OnThemeChange(function()
             Progression.applyGearTheme()
         end)
     end
@@ -7372,20 +8965,20 @@ SettingsTab:Toggle({
 
 SettingsTab:Dropdown({
     Title = "UI Theme",
-    Values = { "Dark", "Pearl", "Rose", "Aqua", "Emerald", "Midnight" },
-    Value = "Dark",
+    Values = IvyisUI:GetThemeNames(),
+    Value = IvyisUI:GetCurrentTheme(),
     Callback = function(theme)
-        pcall(function() WindUI:SetTheme(theme) end)
+        pcall(function() IvyisUI:SetTheme(theme) end)
     end
 })
 
 SettingsTab:Dropdown({
     Title = "UI size",
     Desc = "bigger in-game menu (useful on phones)",
-    Values = IVYIS_UI_SCALE_CHOICES,
-    Value = ivyisUiSizeChoice,
+    Values = IVYIS_UI.CHOICES,
+    Value = IVYIS_UI.choice,
     Callback = function(choice)
-        ivyisApplyUiScale(choice)
+        pcall(IVYIS_UI.apply, choice)
     end
 })
 
@@ -7401,7 +8994,7 @@ SettingsTab:Input({
             Progression.setWebhookUrl(v)
         else
             Progression.setWebhookUrl("")
-            WindUI:Notify({ Title = "Webhook", Content = "That doesn't look like a Discord webhook link", Duration = 3 })
+            IvyisUI:Notify({ Title = "Webhook", Content = "That doesn't look like a Discord webhook link", Duration = 3 })
         end
     end
 })
@@ -7431,7 +9024,7 @@ SettingsTab:Button({
     Callback = function()
         task.spawn(function()
             local ok, why = Progression.sendTestWebhook()
-            WindUI:Notify({
+            IvyisUI:Notify({
                 Title = "Webhook",
                 Content = ok and "Test message sent" or ("Not sent: " .. tostring(why)),
                 Duration = 3,
@@ -7487,12 +9080,12 @@ SettingsTab:Button({
     Callback = function()
         local bridge = getgenv().IvyisDiscordBridge
         if not bridge then
-            WindUI:Notify({ Title = "Discord", Content = "Bridge is still loading", Duration = 3 })
+            IvyisUI:Notify({ Title = "Discord", Content = "Bridge is still loading", Duration = 3 })
             return
         end
         task.spawn(function()
             local ok, why = bridge.connect(getgenv().IvyisDiscordCodeInput)
-            WindUI:Notify({
+            IvyisUI:Notify({
                 Title = "Discord",
                 Content = ok and "Linked" or ("Failed: " .. tostring(why or "unknown")),
                 Duration = 4,
@@ -7508,7 +9101,7 @@ SettingsTab:Button({
         local bridge = getgenv().IvyisDiscordBridge
         if not bridge then return end
         bridge.disconnect()
-        WindUI:Notify({ Title = "Discord", Content = "Disconnected", Duration = 3 })
+        IvyisUI:Notify({ Title = "Discord", Content = "Disconnected", Duration = 3 })
     end
 })
 
@@ -7553,7 +9146,7 @@ SettingsTab:Input({
         if bridge and bridge.sendState then
             task.spawn(function() pcall(bridge.sendState) end)
         end
-        WindUI:Notify({
+        IvyisUI:Notify({
             Title = "Executor",
             Content = "Name set to " .. tostring(EXECUTOR_NAME or "Unknown"),
             Duration = 3,
@@ -7611,7 +9204,7 @@ task.spawn(function()
                 if needToUpgrade <= 0 or #candidates == 0 then
                     treatStatusLabel:SetDesc(string.format("All %d bees reached Lvl %d! Done.", effectiveTarget, targetLevel))
                     stopAutoFeed()
-                    WindUI:Notify({
+                    IvyisUI:Notify({
                         Title = "Feeding done",
                         Content = string.format("%d bees reached level %d", effectiveTarget, targetLevel),
                         Duration = 5
@@ -7638,7 +9231,7 @@ task.spawn(function()
                 if ownedTreats == 0 and honey < TREAT_COST then
                     stopAutoFeed()
                     treatStatusLabel:SetDesc(string.format("Out of Honey! Needs %s | Stopped.", formatNum(totalHoney)))
-                    WindUI:Notify({
+                    IvyisUI:Notify({
                         Title = "Feeding stopped",
                         Content = "Not enough honey for treats",
                         Duration = 5
@@ -7686,7 +9279,7 @@ task.spawn(function()
                 elseif not autoBuyEnabled and ownedTreats == 0 then
                     stopAutoFeed()
                     treatStatusLabel:SetDesc("Out of Treats (Auto-Buy is OFF) | Stopped.")
-                    WindUI:Notify({
+                    IvyisUI:Notify({
                         Title = "Feeding stopped",
                         Content = "No treats left and auto buy is off",
                         Duration = 5
@@ -7751,7 +9344,7 @@ task.spawn(function()
                     if #incompleteExact == 0 then
                         rollStatusLabel:SetDesc(string.format("All %d exact slots completed 100%! Stopped.", totalExact))
                         stopAutoRoll()
-                        WindUI:Notify({ Title = "Hive done", Content = "Every slot matches", Duration = 5 })
+                        IvyisUI:Notify({ Title = "Hive done", Content = "Every slot matches", Duration = 5 })
                         return
                     end
 
@@ -7816,7 +9409,7 @@ task.spawn(function()
                     if sumRemaining <= 0 then
                         rollStatusLabel:SetDesc("All composition quota targets satisfied! Stopped.")
                         stopAutoRoll()
-                        WindUI:Notify({ Title = "Hive done", Content = "Got every bee on the list", Duration = 5 })
+                        IvyisUI:Notify({ Title = "Hive done", Content = "Got every bee on the list", Duration = 5 })
                         return
                     end
 
@@ -7983,7 +9576,7 @@ task.spawn(function()
 
                 if currentBuildMode == "Exact" then
                     if cellMatches(newCell, currentTargetObj) then
-                        WindUI:Notify({
+                        IvyisUI:Notify({
                             Title = "Slot done",
                             Content = string.format("slot %s: %s (%s)", tostring(nextTargetSlot.key), tostring(newType), (newCell and newCell.gifted) and "Gifted" or "Normal"),
                             Duration = 4
@@ -7993,7 +9586,7 @@ task.spawn(function()
                 else
                     for _, item in ipairs(compositionTargets) do
                         if cellMatches(newCell, item) then
-                            WindUI:Notify({
+                            IvyisUI:Notify({
                                 Title = "Got one",
                                 Content = string.format("%s (%s) in slot %s", tostring(newType), (newCell and newCell.gifted) and "Gifted" or "Normal", tostring(nextTargetSlot.key)),
                                 Duration = 4
@@ -8436,7 +10029,7 @@ getgenv().IvyisDiscordBridge = (function()
             pcall(function() rollStatusLabel:SetDesc(label) end)
         end
         pcall(function()
-            WindUI:Notify({
+            IvyisUI:Notify({
                 Title = "Discord roll",
                 Content = label,
                 Duration = 6,
@@ -9102,7 +10695,7 @@ if UserInputService then
     end
 end
 
-WindUI:Notify({ Title = "Ivyis's Tool", Content = "Ready", Duration = 3 })
+IvyisUI:Notify({ Title = "Ivyis's Tool", Content = "Ready", Duration = 3 })
 
 if getgenv then
     getgenv()._AutoFeedCleanup = function()
