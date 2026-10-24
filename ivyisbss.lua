@@ -10463,22 +10463,29 @@ task.spawn(function()
 
                 if currentBuildMode == "Exact" then
                     if cellMatches(newCell, currentTargetObj) then
-                        IvyisUI:Notify({
-                            Title = "Slot done",
-                            Content = string.format("slot %s: %s (%s)", tostring(nextTargetSlot.key), tostring(newType), (newCell and newCell.gifted) and "Gifted" or "Normal"),
-                            Duration = 4
-                        })
-                        refreshHiveGrid()
+                        -- Some executors resume this coroutine after InvokeServer
+                        -- without Plugin capability. Notifications/grid rebuilds
+                        -- are cosmetic, so never let them abort a good hatch.
+                        pcall(function()
+                            IvyisUI:Notify({
+                                Title = "Slot done",
+                                Content = string.format("slot %s: %s (%s)", tostring(nextTargetSlot.key), tostring(newType), (newCell and newCell.gifted) and "Gifted" or "Normal"),
+                                Duration = 4
+                            })
+                        end)
+                        pcall(refreshHiveGrid)
                     end
                 else
                     for _, item in ipairs(compositionTargets) do
                         if cellMatches(newCell, item) then
-                            IvyisUI:Notify({
-                                Title = "Got one",
-                                Content = string.format("%s (%s) in slot %s", tostring(newType), (newCell and newCell.gifted) and "Gifted" or "Normal", tostring(nextTargetSlot.key)),
-                                Duration = 4
-                            })
-                            refreshHiveGrid()
+                            pcall(function()
+                                IvyisUI:Notify({
+                                    Title = "Got one",
+                                    Content = string.format("%s (%s) in slot %s", tostring(newType), (newCell and newCell.gifted) and "Gifted" or "Normal", tostring(nextTargetSlot.key)),
+                                    Duration = 4
+                                })
+                            end)
+                            pcall(refreshHiveGrid)
                             break
                         end
                     end
