@@ -7516,10 +7516,14 @@ function pauseAtlas(enable)
     if not autoPauseAtlas then return false end
     if lastPauseState == enable then return true end
 
-    if enable and userPauseState == nil then
-        if atlasPauseObj then
-            userPauseState = rawget(atlasPauseObj, "Value") or rawget(atlasPauseObj, "State")
-        end
+    -- A stop/cleanup call must never resume a pause the user set before we
+    -- ever paused Atlas.
+    if not enable and lastPauseState ~= true and userPauseState == nil then
+        return true
+    end
+
+    if enable and userPauseState == nil and atlasPauseObj then
+        userPauseState = rawget(atlasPauseObj, "Value") or rawget(atlasPauseObj, "State")
     end
 
     local targetState = enable
@@ -7527,20 +7531,41 @@ function pauseAtlas(enable)
         targetState = true
     end
 
-    if not enable then
-        userPauseState = nil
-    end
-
     if atlasPauseObj then
+        local currentState = rawget(atlasPauseObj, "Value") or rawget(atlasPauseObj, "State")
+        if currentState == targetState then
+            lastPauseState = enable and true or false
+            if not enable then userPauseState = nil end
+            return true
+        end
         if type(rawget(atlasPauseObj, "Set")) == "function" then
             local ok = pcall(function() atlasPauseObj:Set(targetState) end)
-            if ok then lastPauseState = targetState return true end
+            if ok then
+                lastPauseState = enable and true or false
+                if not enable then userPauseState = nil end
+                return true
+            end
         elseif type(rawget(atlasPauseObj, "Callback")) == "function" then
             local ok = pcall(function() atlasPauseObj.Callback(targetState) end)
-            if ok then lastPauseState = targetState return true end
+            if ok then
+                lastPauseState = enable and true or false
+                if not enable then userPauseState = nil end
+                return true
+            end
         end
     end
 
+    -- A tab switch can repurpose the shared switch control, so only trust a
+    -- cached button while its label still says "Stop Everything".
+    if atlasPauseBtn then
+        local title = atlasPauseBtn.Parent and atlasPauseBtn:FindFirstChild("Title")
+        if not atlasPauseBtn.Parent or not title or not tostring(title.Text or ""):lower():find("stop everything", 1, true) then
+            atlasPauseBtn = nil
+            lastPauseSearch = 0
+        end
+    end
+
+    local restoreAtlasTab = nil
     if not atlasPauseObj and not atlasPauseBtn then
         if os.clock() - lastPauseSearch < 10 then
             return false
@@ -7556,19 +7581,29 @@ function pauseAtlas(enable)
                         if type(name) == "string" and name:lower():find("stop everything") and not name:lower():find("auto pause") then
                             if type(rawget(obj, "Set")) == "function" then
                                 atlasPauseObj = obj
+                                local currentState = rawget(obj, "Value") or rawget(obj, "State")
                                 if enable and userPauseState == nil then
-                                    userPauseState = rawget(obj, "Value") or rawget(obj, "State")
+                                    userPauseState = currentState
                                 end
-                                pcall(function() obj:Set(targetState) end)
-                                lastPauseState = targetState
+                                local target = enable and true or (userPauseState == true)
+                                if currentState ~= target then
+                                    pcall(function() obj:Set(target) end)
+                                end
+                                lastPauseState = enable and true or false
+                                if not enable then userPauseState = nil end
                                 return true
                             elseif type(rawget(obj, "Callback")) == "function" then
                                 atlasPauseObj = obj
+                                local currentState = rawget(obj, "Value") or rawget(obj, "State")
                                 if enable and userPauseState == nil then
-                                    userPauseState = rawget(obj, "Value") or rawget(obj, "State")
+                                    userPauseState = currentState
                                 end
-                                pcall(function() obj.Callback(targetState) end)
-                                lastPauseState = targetState
+                                local target = enable and true or (userPauseState == true)
+                                if currentState ~= target then
+                                    pcall(function() obj.Callback(target) end)
+                                end
+                                lastPauseState = enable and true or false
+                                if not enable then userPauseState = nil end
                                 return true
                             end
                         end
@@ -7585,24 +7620,138 @@ function pauseAtlas(enable)
             roots[#roots + 1] = playerGui
         end
 
-        for _, root in ipairs(roots) do
-            for _, desc in ipairs(root:GetDescendants()) do
-                if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-                    local text = tostring(desc.Text or ""):lower()
-                    if text:find("stop everything", 1, true) and not text:find("auto pause", 1, true) then
-                        local btn = desc:IsA("GuiButton") and desc or desc.Parent:FindFirstChildWhichIsA("GuiButton", true)
-                        if btn then
-                            atlasPauseBtn = btn
-                            break
+        local function findStopButton()
+            for _, root in ipairs(roots) do
+                for _, desc in ipairs(root:GetDescendants()) do
+                    if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+                        local text = tostring(desc.Text or ""):lower()
+                        if text:find("stop everything", 1, true) and not text:find("auto pause", 1, true) then
+                            -- Atlas puts the label inside the switch button;
+                            -- the button itself is the parent, not a child.
+                            local btn = nil
+                            if desc:IsA("GuiButton") then
+                                btn = desc
+                            elseif desc.Parent and desc.Parent:IsA("GuiButton") then
+                                btn = desc.Parent
+                            elseif desc.Parent then
+                                btn = desc.Parent:FindFirstChildWhichIsA("GuiButton", true)
+                            end
+                            if btn then return btn end
                         end
                     end
                 end
             end
-            if atlasPauseBtn then break end
+            return nil
+        end
+
+        -- The Atlas pause switch only exists while its Home tab is selected.
+        -- Switch there briefly and remember the tab to restore afterwards.
+        local function switchAtlasToHome()
+            if not firesignal then return nil, false end
+            local atlasRoot = nil
+            for _, root in ipairs(roots) do
+                for _, desc in ipairs(root:GetDescendants()) do
+                    if desc:IsA("TextLabel") and tostring(desc.Text or ""):find("Atlas v", 1, true) then
+                        atlasRoot = desc:FindFirstAncestorOfClass("ScreenGui")
+                        break
+                    end
+                end
+                if atlasRoot then break end
+            end
+            if not atlasRoot then return nil, false end
+            local window = atlasRoot:FindFirstChild("Window")
+            local tabButtons = window and window:FindFirstChild("TabButtons")
+            local bar = tabButtons and tabButtons:FindFirstChild("ScrollingFrame")
+            if not bar then return nil, false end
+
+            local homeBtn = nil
+            local activeBtn = nil
+            local lowest = 2
+            for _, b in ipairs(bar:GetChildren()) do
+                if b:IsA("TextButton") then
+                    local label = tostring(b.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                    if label == "Home" then homeBtn = b end
+                    local trans = tonumber(b.BackgroundTransparency) or 1
+                    if trans < lowest then
+                        lowest = trans
+                        activeBtn = b
+                    end
+                end
+            end
+            if not homeBtn or activeBtn == homeBtn then return nil, false end
+            local ok = pcall(firesignal, homeBtn.MouseButton1Click)
+            if not ok then return nil, false end
+            return activeBtn, true
+        end
+
+        atlasPauseBtn = findStopButton()
+        if not atlasPauseBtn then
+            local activeBtn, switched = switchAtlasToHome()
+            if switched then
+                restoreAtlasTab = activeBtn
+                atlasPauseBtn = findStopButton()
+                if not atlasPauseBtn then
+                    if restoreAtlasTab and restoreAtlasTab.Parent then
+                        pcall(firesignal, restoreAtlasTab.MouseButton1Click)
+                    end
+                    restoreAtlasTab = nil
+                end
+            end
         end
     end
 
     if atlasPauseBtn and firesignal then
+        -- Atlas v1.0 marks the active "Stop Everything" switch with a check
+        -- mark. Other builds may keep the switch value inside the click
+        -- callback, so use that only when the text does not tell us the state.
+        local function buttonState(btn)
+            if not btn then return nil end
+            local text = tostring(btn.Text or "")
+            if text:find("✓", 1, true) then return true end
+            if text ~= "" then return true end
+            if getconnections and debug and type(debug.getupvalues) == "function" then
+                local ok, list = pcall(getconnections, btn.MouseButton1Click)
+                if ok and type(list) == "table" then
+                    for _, conn in ipairs(list) do
+                        local okState, ups = pcall(debug.getupvalues, conn.Function)
+                        if okState and type(ups) == "table" then
+                            local state = ups[1]
+                            if type(state) == "table" and type(state[1]) == "boolean" then
+                                return state[1]
+                            end
+                        end
+                    end
+                end
+            end
+            return false
+        end
+        local function restoreAtlasTabs()
+            if restoreAtlasTab then
+                if restoreAtlasTab.Parent then
+                    pcall(firesignal, restoreAtlasTab.MouseButton1Click)
+                end
+                restoreAtlasTab = nil
+                atlasPauseBtn = nil
+                lastPauseSearch = 0
+            end
+        end
+
+        local currentState = buttonState(atlasPauseBtn)
+        if enable and userPauseState == nil then
+            userPauseState = currentState
+        end
+        if not enable then
+            targetState = (userPauseState == true)
+        end
+
+        -- If Atlas is already in the requested state, do not click the toggle.
+        if currentState ~= nil and currentState == targetState then
+            lastPauseState = enable and true or false
+            if not enable then userPauseState = nil end
+            restoreAtlasTabs()
+            return true
+        end
+
         -- Atlas versions differ: some connect "Activated", some connect
         -- "MouseButton1Click". Firing both can toggle twice (pause then resume)
         -- on versions that connect both signals, so fire only the one that is
@@ -7632,9 +7781,12 @@ function pauseAtlas(enable)
             fired = pcall(firesignal, signal)
         end
         if fired then
-            lastPauseState = targetState
+            lastPauseState = enable and true or false
+            if not enable then userPauseState = nil end
+            restoreAtlasTabs()
             return true
         end
+        restoreAtlasTabs()
     end
 
     return false
