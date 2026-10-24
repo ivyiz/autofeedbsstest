@@ -2455,10 +2455,11 @@ local DEFAULT_ROUTE = {
     { Bees = 35, Name = "Petal Wand", Type = "Tool", Honey = 1500000000, Ingredients = { { Item = "Enzymes", Amount = 75 }, { Item = "Glitter", Amount = 25 }, { Item = "Star Jelly", Amount = 10 }, { Item = "Spirit Petal", Amount = 1 } } }
 }
 
--- Kept on Progression instead of top-level locals to save registers in the
--- main chunk (Luau has a 200-local limit).
-Progression._serverStats = nil
-Progression._serverStatsTime = 0
+-- Kept on a getgenv table instead of top-level locals to save registers in the
+-- main chunk (Luau has a 200-local limit). It cannot live on Progression: this
+-- initializer runs before the Progression local is assigned, so indexing it
+-- here would crash the whole script with "attempt to index nil".
+getgenv().IvyisStatCache = getgenv().IvyisStatCache or { stats = nil, time = 0 }
 
 local function getStatData()
     local data = nil
@@ -2480,21 +2481,21 @@ local function getStatData()
     end)
 
     if not (data and (data.Collector or data.Bag or data.Boots or data.Equipped)) then
-        if not Progression._serverStats or (tick() - Progression._serverStatsTime > 25) then
+        if not getgenv().IvyisStatCache.stats or (tick() - getgenv().IvyisStatCache.time > 25) then
             local events = RS:FindFirstChild("Events")
             if events and events:FindFirstChild("RetrievePlayerStats") then
                 local ok, res = pcall(function() return events.RetrievePlayerStats:InvokeServer() end)
                 if ok and type(res) == "table" then
-                    Progression._serverStats = res
-                    Progression._serverStatsTime = tick()
+                    getgenv().IvyisStatCache.stats = res
+                    getgenv().IvyisStatCache.time = tick()
                 end
             end
         end
-        if Progression._serverStats then
+        if getgenv().IvyisStatCache.stats then
             if not data then
-                data = Progression._serverStats
+                data = getgenv().IvyisStatCache.stats
             else
-                for k, v in pairs(Progression._serverStats) do
+                for k, v in pairs(getgenv().IvyisStatCache.stats) do
                     if data[k] == nil then data[k] = v end
                 end
             end
@@ -4364,7 +4365,13 @@ end
 -- (Codes / Field / Event Bee / Purchase) thay vi chi lay gear.
 -- Gom vao 1 bang de khong vuot gioi han 200 local cua chunk chinh.
 -- ---------------------------------------------------------------------------
-local RouteSteps = { cache = {} }
+-- Global on purpose: this block is inside the Progression IIFE, but the roll
+-- loop and event-jelly helpers below run at chunk scope and need the same table.
+RouteSteps = { cache = {} }
+-- countItem/getStatData are locals of this Progression IIFE, but the event
+-- jelly helpers below run at chunk scope. Expose the two they need.
+RouteSteps.countItem = countItem
+RouteSteps.getStatData = getStatData
 
 RouteSteps.kindByType = {
     codes = "Code", code = "Code",
@@ -9998,8 +10005,8 @@ end
 function RouteSteps.getEventJellyCount(beeId, data)
     local info = RouteSteps.getEventJellyInfo(beeId)
     if not info then return nil end
-    data = data or getStatData()
-    local n = countItem(info.display, data)
+    data = data or RouteSteps.getStatData()
+    local n = RouteSteps.countItem(info.display, data)
     return tonumber(n) or 0
 end
 
