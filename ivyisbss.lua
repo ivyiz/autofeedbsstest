@@ -2124,39 +2124,42 @@ local function getCumulativeBond(lvl)
 end
 
 
-local B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-local B64_LOOKUP = {}
-for i = 1, #B64_ALPHABET do B64_LOOKUP[B64_ALPHABET:byte(i)] = i - 1 end
+local decodeBase64
+do
+    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    local lookup = {}
+    for i = 1, #alphabet do lookup[alphabet:byte(i)] = i - 1 end
 
-local function decodeBase64(text)
-    if crypt and crypt.base64decode then
-        local ok, res = pcall(crypt.base64decode, text)
-        if ok and res then return res end
-    end
-    if base64_decode then
-        local ok, res = pcall(base64_decode, text)
-        if ok and res then return res end
-    end
-    local synCrypt = syn and syn.crypt and syn.crypt.base64 and syn.crypt.base64.decode
-    if synCrypt then
-        local ok, res = pcall(synCrypt, text)
-        if ok and res then return res end
-    end
-    local out, buffer, bits = {}, 0, 0
-    for i = 1, #text do
-        local v = B64_LOOKUP[text:byte(i)]
-        if v then
-            buffer = buffer * 64 + v
-            bits = bits + 6
-            if bits >= 8 then
-                bits = bits - 8
-                local divisor = 2 ^ bits
-                out[#out + 1] = string.char(math.floor(buffer / divisor) % 256)
-                buffer = buffer % divisor
+    decodeBase64 = function(text)
+        if crypt and crypt.base64decode then
+            local ok, res = pcall(crypt.base64decode, text)
+            if ok and res then return res end
+        end
+        if base64_decode then
+            local ok, res = pcall(base64_decode, text)
+            if ok and res then return res end
+        end
+        local synCrypt = syn and syn.crypt and syn.crypt.base64 and syn.crypt.base64.decode
+        if synCrypt then
+            local ok, res = pcall(synCrypt, text)
+            if ok and res then return res end
+        end
+        local out, buffer, bits = {}, 0, 0
+        for i = 1, #text do
+            local v = lookup[text:byte(i)]
+            if v then
+                buffer = buffer * 64 + v
+                bits = bits + 6
+                if bits >= 8 then
+                    bits = bits - 8
+                    local divisor = 2 ^ bits
+                    out[#out + 1] = string.char(math.floor(buffer / divisor) % 256)
+                    buffer = buffer % divisor
+                end
             end
         end
+        return table.concat(out)
     end
-    return table.concat(out)
 end
 
 local ROUTE_ICON_B64 = {
@@ -2452,8 +2455,10 @@ local DEFAULT_ROUTE = {
     { Bees = 35, Name = "Petal Wand", Type = "Tool", Honey = 1500000000, Ingredients = { { Item = "Enzymes", Amount = 75 }, { Item = "Glitter", Amount = 25 }, { Item = "Star Jelly", Amount = 10 }, { Item = "Spirit Petal", Amount = 1 } } }
 }
 
-local serverStats = nil
-local serverStatsTime = 0
+-- Kept on Progression instead of top-level locals to save registers in the
+-- main chunk (Luau has a 200-local limit).
+Progression._serverStats = nil
+Progression._serverStatsTime = 0
 
 local function getStatData()
     local data = nil
@@ -2475,21 +2480,21 @@ local function getStatData()
     end)
 
     if not (data and (data.Collector or data.Bag or data.Boots or data.Equipped)) then
-        if not serverStats or (tick() - serverStatsTime > 25) then
+        if not Progression._serverStats or (tick() - Progression._serverStatsTime > 25) then
             local events = RS:FindFirstChild("Events")
             if events and events:FindFirstChild("RetrievePlayerStats") then
                 local ok, res = pcall(function() return events.RetrievePlayerStats:InvokeServer() end)
                 if ok and type(res) == "table" then
-                    serverStats = res
-                    serverStatsTime = tick()
+                    Progression._serverStats = res
+                    Progression._serverStatsTime = tick()
                 end
             end
         end
-        if serverStats then
+        if Progression._serverStats then
             if not data then
-                data = serverStats
+                data = Progression._serverStats
             else
-                for k, v in pairs(serverStats) do
+                for k, v in pairs(Progression._serverStats) do
                     if data[k] == nil then data[k] = v end
                 end
             end
@@ -3444,11 +3449,6 @@ local function getFarmField(material, beeCount)
 end
 
 
-local VirtualInput = nil
-pcall(function() VirtualInput = game:GetService("VirtualInputManager") end)
-local GuiService = nil
-pcall(function() GuiService = game:GetService("GuiService") end)
-
 local function fireConnections(sig)
     local n = 0
     if not sig then return n end
@@ -3553,18 +3553,19 @@ local function clickElement(gui, forceTap)
     local pos = clickable.AbsolutePosition
     local sg = clickable:FindFirstAncestorWhichIsA("ScreenGui")
     local inset = Vector2.new(0, 0)
-    if GuiService and not (sg and sg.IgnoreGuiInset) then
-        local okI, v = pcall(function() return GuiService:GetGuiInset() end)
+    if not (sg and sg.IgnoreGuiInset) then
+        local okI, v = pcall(function() return game:GetService("GuiService"):GetGuiInset() end)
         if okI and v then inset = v end
     end
     local x = pos.X + size.X / 2 + inset.X
     local y = pos.Y + size.Y / 2 + inset.Y
 
-    if VirtualInput then
+    local okVirtualInput, virtualInput = pcall(function() return game:GetService("VirtualInputManager") end)
+    if okVirtualInput and virtualInput then
         local ok = pcall(function()
-            VirtualInput:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            virtualInput:SendMouseButtonEvent(x, y, 0, true, game, 0)
             task.wait(0.03)
-            VirtualInput:SendMouseButtonEvent(x, y, 0, false, game, 0)
+            virtualInput:SendMouseButtonEvent(x, y, 0, false, game, 0)
         end)
         if ok then return true end
     end
@@ -6055,10 +6056,12 @@ local function printDebug()
         bootElapsed, tostring(bootState.min), tostring(bootState.max),
         tostring(not bootReadyFn or bootReadyFn())))
     print("Atlas Tab Press:", tostring(lastPressMethod))
+    local hasVirtualInput = false
+    pcall(function() hasVirtualInput = game:GetService("VirtualInputManager") ~= nil end)
     print("Peek Backend:", (getconnections and "getconnections" or "no getconnections"),
         "| firesignal:", tostring(firesignal ~= nil),
         "| VirtualUser:", tostring(VirtualUser ~= nil),
-        "| VirtualInput:", tostring(VirtualInput ~= nil))
+        "| VirtualInput:", tostring(hasVirtualInput))
     print("Route Source:", tostring(routeSourceName))
     print("Atlas Route Steps (all types):", #RouteSteps.cache)
     for i = 1, math.min(#RouteSteps.cache, 30) do
