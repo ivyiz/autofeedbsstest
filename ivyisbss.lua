@@ -257,6 +257,12 @@ if getgenv and getgenv()._AutoFeedCleanup then
     pcall(getgenv()._AutoFeedCleanup)
     getgenv()._AutoFeedCleanup = nil
 end
+-- Reset Atlas scan throttles left by a previous instance. A stale future
+-- timestamp would otherwise suppress Atlas detection for a long time.
+if getgenv then
+    getgenv()._IvyisAtlasWindowMissAt = nil
+    getgenv()._IvyisUiNextScanAt = nil
+end
 
 local scriptAlive = true
 local scriptConnections = {}
@@ -1952,6 +1958,9 @@ local walkSpeed = 60
 local autoBuyEnabled = true
 local returnHiveEnabled = true
 local autoPauseAtlas = true
+-- Auto Change Config is opt-in. Reset every execution so a stale getgenv value
+-- from a previous run cannot turn it on; the saved Settings toggle restores it.
+if getgenv then getgenv().AutoChangeConfigEnabled = false end
 local activeTween = nil
 local feedToggle = nil
 local rollToggle = nil
@@ -2550,6 +2559,7 @@ local function getStatData()
 
     return data
 end
+if getgenv then getgenv().IvyisGetStatData = getStatData end
 
 local function getBeeCount(data)
     local count = 0
@@ -2659,6 +2669,141 @@ local function countItemInGui(variants)
         end
     end)
     return count
+end
+
+-- Blender state is kept in one table so the main chunk does not add many
+-- top-level locals (Luau has a 200-local limit in the main chunk).
+-- Deliberately global: the main chunk is already at Luau's 200-local limit.
+BlenderProg = { cache = { at = 0, state = nil } }
+if getgenv then getgenv().IvyisBlenderProg = BlenderProg end
+
+function BlenderProg.findGui()
+    if not player then return nil end
+    local pg = player:FindFirstChild("PlayerGui")
+    if not pg then return nil end
+    local sg = pg:FindFirstChild("ScreenGui")
+    local gui = sg and sg:FindFirstChild("Blender")
+    if not gui then
+        gui = pg:FindFirstChild("Blender", true)
+    end
+    return gui
+end
+
+function BlenderProg.cleanItem(raw)
+    local s = tostring(raw or "")
+    s = s:gsub("<br%s*/?>", " "):gsub("<[^>]+>", " ")
+    s = s:gsub("^%s*[Cc]rafting%s+", "")
+    s = s:gsub("^%s*[Cc]ollect%s+", "")
+    s = s:gsub("^%s*[Rr]eady%s+", "")
+    s = s:gsub("%s*%.%.%.%s*$", "")
+    s = s:gsub("^%s*%-+%s*", ""):gsub("%s*%-+%s*$", "")
+    s = s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    return s
+end
+
+function BlenderProg.sameItem(a, b)
+    if not a or not b or tostring(a) == "" or tostring(b) == "" then return false end
+    local va = nameVariants(tostring(a))
+    local vb = nameVariants(tostring(b))
+    for k in pairs(va) do
+        if vb[k] then return true end
+    end
+    return false
+end
+
+function BlenderProg.parseSeconds(text)
+    local s = tostring(text or "")
+    local h, m, sec = s:match("(%d+):(%d+):(%d+)")
+    if h then return tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(sec) end
+    local mm, ss = s:match("(%d+):(%d+)")
+    if mm then return tonumber(mm) * 60 + tonumber(ss) end
+    return nil
+end
+
+-- Reads the live Blender GUI. RecipeProgress is often Visible=false while the
+-- window is closed, but its labels still contain the active craft, so this
+-- deliberately does not require the window itself to be visible.
+function BlenderProg.read()
+    local now = tick()
+    local c = BlenderProg.cache
+    if c.state and now - (c.at or 0) < 0.4 then return c.state end
+
+    local gui = BlenderProg.findGui()
+    if not gui then
+        c.state, c.at = nil, now
+        return nil
+    end
+
+    local box = gui:FindFirstChild("Box") or gui:FindFirstChild("Box", true)
+    local info = box and box:FindFirstChild("RecipeInfo")
+    local prog = box and box:FindFirstChild("RecipeProgress")
+    if not box or not info or not prog then
+        c.state, c.at = nil, now
+        return nil
+    end
+
+    local recipeLbl = info:FindFirstChild("RecipeName")
+    local actionLbl = prog:FindFirstChild("ActionLabel")
+    local bar = prog:FindFirstChild("ProgressBar")
+    local timeLbl = bar and bar:FindFirstChild("TimeLabel")
+    local itemBox = prog:FindFirstChild("Item")
+    local amountLbl = itemBox and itemBox:FindFirstChild("AmountLabel")
+
+    local recipeText = tostring(recipeLbl and recipeLbl.Text or "")
+    local actionText = tostring(actionLbl and actionLbl.Text or "")
+    local timeText = tostring(timeLbl and timeLbl.Text or "")
+    local amountText = tostring(amountLbl and amountLbl.Text or "")
+
+    local actionItem = actionText:match("^%s*[Cc]rafting%s+(.-)%s*%.%.%.")
+    local item = BlenderProg.cleanItem(actionItem or "")
+    if item == "" then item = BlenderProg.cleanItem(recipeText) end
+
+    local made, total = amountText:match("(%d+)%s*/%s*(%d+)")
+    made, total = tonumber(made), tonumber(total)
+    local seconds = BlenderProg.parseSeconds(timeText)
+    local lowAction = actionText:lower()
+    local crafting = lowAction:find("crafting", 1, true) ~= nil
+    local ready = lowAction:find("collect", 1, true) ~= nil
+        or lowAction:find("ready", 1, true) ~= nil
+    local complete = (total ~= nil and made ~= nil and total > 0 and made >= total)
+        or (seconds ~= nil and seconds <= 0)
+    local active = (crafting or ready) and item ~= ""
+        and (total == nil or total > 0) and not complete
+
+    local state = {
+        active = active,
+        ready = ready,
+        complete = complete,
+        item = item,
+        made = made,
+        total = total,
+        seconds = seconds,
+        timeText = timeText,
+        actionText = actionText,
+        recipeText = recipeText,
+    }
+    c.state, c.at = state, now
+    return state
+end
+
+function BlenderProg.pending(item)
+    local st = BlenderProg.read()
+    if not st or not (st.active or st.ready) or not st.item then return 0 end
+    if not BlenderProg.sameItem(st.item, item) then return 0 end
+    return tonumber(st.total) or 1
+end
+
+function BlenderProg.describe(st)
+    if not st or not st.item or st.item == "" then return nil end
+    local amount = ""
+    if st.total then
+        amount = string.format(" (%d/%d)", tonumber(st.made) or 0, tonumber(st.total) or 0)
+    end
+    local time = ""
+    if st.seconds and st.seconds > 0 and st.timeText ~= "" then
+        time = " • " .. st.timeText .. " left"
+    end
+    return tostring(st.item) .. amount .. time
 end
 
 local function countItem(item, data)
@@ -3558,16 +3703,14 @@ local function clickElement(gui, forceTap)
 
     -- forceTap = bo qua connection, tap thang vao toa do (Android: handler "la")
     if clickable:IsA("GuiButton") and not forceTap then
-        local fired = false
+        -- Only fire one signal type. Firing both makes Atlas toggle a section
+        -- twice (open then closed immediately).
         if getconnections then
-            for _, sigName in ipairs({ "MouseButton1Click", "Activated" }) do
-                local ok, cnt = pcall(function() return fireConnections(clickable[sigName]) end)
-                if ok and cnt and cnt > 0 then
-                    fired = true
-                end
-            end
+            local nClick = fireConnections(clickable.MouseButton1Click)
+            if nClick > 0 then return true end
+            local nAct = fireConnections(clickable.Activated)
+            if nAct > 0 then return true end
         end
-        if fired then return true end
 
         if firesignal then
             for _, sigName in ipairs({ "MouseButton1Click", "Activated" }) do
@@ -3589,22 +3732,60 @@ local function clickElement(gui, forceTap)
     local x = pos.X + size.X / 2 + inset.X
     local y = pos.Y + size.Y / 2 + inset.Y
 
+    -- Executor-level taps are the most reliable fallback on Android, where
+    -- VirtualInputManager may exist but mouse events do not reach GuiButtons.
+    local function executorTap()
+        if mousemoveabs then pcall(mousemoveabs, x, y) end
+        if mouse1click then
+            if pcall(mouse1click, x, y) then return true end
+        end
+        if syn and type(syn) == "table" then
+            if syn.mouse_move then pcall(syn.mouse_move, x, y) end
+            if syn.mouse1click then
+                if pcall(syn.mouse1click) then return true end
+            end
+            if syn.mouse_click then
+                if pcall(syn.mouse_click, x, y) then return true end
+            end
+        end
+        if fluxus and type(fluxus) == "table" and fluxus.mouse1click then
+            if pcall(fluxus.mouse1click, x, y) then return true end
+        end
+        return false
+    end
+
+    local isMobile = false
+    pcall(function()
+        local uis = game:GetService("UserInputService")
+        isMobile = uis.TouchEnabled and not uis.MouseEnabled
+    end)
+
     local okVirtualInput, virtualInput = pcall(function() return game:GetService("VirtualInputManager") end)
-    if okVirtualInput and virtualInput then
-        local ok = pcall(function()
+    local function virtualInputTap()
+        if not (okVirtualInput and virtualInput) then return false end
+        return pcall(function()
             virtualInput:SendMouseButtonEvent(x, y, 0, true, game, 0)
             task.wait(0.03)
             virtualInput:SendMouseButtonEvent(x, y, 0, false, game, 0)
         end)
-        if ok then return true end
     end
-    if VirtualUser then
-        local ok = pcall(function()
+    local function virtualUserTap()
+        if not VirtualUser then return false end
+        return pcall(function()
             VirtualUser:Button1Down(Vector2.new(x, y))
             task.wait(0.02)
             VirtualUser:Button1Up(Vector2.new(x, y))
         end)
-        if ok then return true end
+    end
+
+    if isMobile then
+        if executorTap() then return true end
+        if virtualUserTap() then return true end
+        if virtualInputTap() then return true end
+    else
+        if virtualInputTap() then return true end
+        if virtualUserTap() then return true end
+        if executorTap() then return true end
     end
     return false
 end
@@ -3800,21 +3981,22 @@ local configState = {
 
 local function triggerButtonHeadless(btn)
     if not btn or not btn:IsA("GuiButton") then return false end
-    local fired = false
+    -- Only fire one signal type. Firing both MouseButton1Click and Activated
+    -- makes Atlas toggle sections twice (open then immediately closed).
     if getconnections then
         for _, sigName in ipairs({ "MouseButton1Click", "Activated" }) do
             if btn[sigName] then
                 local n = fireConnections(btn[sigName])
-                if n > 0 then fired = true end
+                if n > 0 then return true end
             end
         end
     end
-    if not fired and firesignal then
+    if firesignal then
         for _, sigName in ipairs({ "MouseButton1Click", "Activated" }) do
-            if pcall(firesignal, btn[sigName]) then fired = true break end
+            if pcall(firesignal, btn[sigName]) then return true end
         end
     end
-    return fired
+    return false
 end
 
 local lastFileSync = { field = nil, vicious = false, at = 0 }
@@ -4238,7 +4420,10 @@ local function needsStinger(targetItem, data)
 end
 
 local function findMissingMaterial(item, neededAmount, data, beeCount)
-    local invCount = countItem(item, data)
+    -- Count an item that the Blender is already producing. Without this the
+    -- bot sees 0 Gumdrops while a 100 Gumdrops craft is running and keeps
+    -- reporting/farming it as missing.
+    local invCount = countItem(item, data) + BlenderProg.pending(item)
     local deficit = neededAmount - invCount
     if deficit <= 0 then return nil end
 
@@ -5150,16 +5335,29 @@ end
 
 local function scanNextItemIn(root)
     if not root then return nil end
-    local okD, descs = pcall(function() return root:GetDescendants() end)
-    if not okD or type(descs) ~= "table" then return nil end
-    for _, d in ipairs(descs) do
-        if not isOwnUI(d) then
-            local okC, isText = pcall(function()
-                return d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox")
-            end)
-            if okC and isText then
-                local okT, rawTxt = pcall(function() return d.Text end)
-                if okT and type(rawTxt) == "string" and rawTxt ~= "" and #rawTxt < 2000 then
+    -- Whole-root scans are a last resort. A full server can have 100k+
+    -- instances; building one GetDescendants table for that freezes Android
+    -- clients. Walk in small batches instead and stop early.
+    local started = tick()
+    local queue = { root }
+    local head = 1
+    local seen = 0
+    while head <= #queue do
+        local d = queue[head]
+        head = head + 1
+        seen = seen + 1
+        if seen > 20000 or (seen % 250 == 0 and tick() - started > 0.75) then break end
+
+        local okC, isText = pcall(function()
+            return d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox")
+        end)
+        if okC and isText and not isOwnUI(d) then
+            local okT, rawTxt = pcall(function() return d.Text end)
+            if okT and type(rawTxt) == "string" and rawTxt ~= "" and #rawTxt < 2000 then
+                local low = rawTxt:lower()
+                -- Cheap prefilter before the route/alias matching below.
+                if low:find("next item", 1, true) or low:find("event bee", 1, true)
+                    or low:find("code:", 1, true) or low:find("field:", 1, true) then
                     local txt = rawTxt:gsub("<br%s*/?>", "\n"):gsub("<[^>]+>", " ")
                     for line in txt:gmatch("[^\r\n]+") do
                         local res, m, nonGear = parseNextItemLine(line)
@@ -5168,6 +5366,11 @@ local function scanNextItemIn(root)
                     end
                 end
             end
+        end
+
+        local okK, kids = pcall(function() return d:GetChildren() end)
+        if okK and type(kids) == "table" then
+            for _, k in ipairs(kids) do queue[#queue + 1] = k end
         end
     end
     return nil
@@ -5184,21 +5387,71 @@ end
 -- cua so Atlas: Frame co TabButtons + Tab (noi dung chi duoc dung khi mo tab)
 local atlasWindowCache = nil
 local function findAtlasWindow()
-    if atlasWindowCache and atlasWindowCache.Parent then return atlasWindowCache end
+    if atlasWindowCache and atlasWindowCache.Parent then
+        local okV, vis = pcall(function() return atlasWindowCache.Visible end)
+        if not okV or vis ~= false then return atlasWindowCache end
+    end
     atlasWindowCache = nil
+
+    -- Do not rescan the whole GUI every frame while Atlas is closed/loading.
+    local g = getgenv and getgenv()
+    local missAt = tonumber(g and g._IvyisAtlasWindowMissAt) or 0
+    if tick() - missAt < 1.5 then return nil end
+    if g then g._IvyisAtlasWindowMissAt = tick() end
+
     for _, root in ipairs(getUiRoots()) do
-        local okD, descs = pcall(function() return root:GetDescendants() end)
-        if okD then
-            for _, d in ipairs(descs) do
-                if d.Name == "TabButtons" and d.Parent and d.Parent:FindFirstChild("Tab") and not isOwnUI(d) then
-                    atlasWindowCache = d.Parent
+        if root then
+            -- Fast path: recursive name lookup is done in C and does not build
+            -- a Lua table with every descendant.
+            local okF, holder = pcall(function() return root:FindFirstChild("TabButtons", true) end)
+            local parent = okF and holder and holder.Parent
+            -- Atlas is the window that has both TabButtons and Tab. Previously
+            -- we also required a visible "Toys" label, but Android builds can
+            -- use image-only tab buttons, which forced an expensive full scan.
+            local hiddenAtlas = false
+            if parent and parent:FindFirstChild("Tab") and not isOwnUI(holder) then
+                local okV, vis = pcall(function() return parent.Visible end)
+                if not okV or vis ~= false then
+                    atlasWindowCache = parent
                     return atlasWindowCache
+                end
+                -- This is the Atlas window, but the user closed/minimized it.
+                -- Do not scan the whole GUI looking for another one.
+                hiddenAtlas = true
+            end
+
+            -- Only pay for a full scan when a TabButtons container exists but
+            -- was not accepted above (Atlas builds with several containers).
+            -- With Atlas closed there is no TabButtons, so skip the 100k-node
+            -- GetDescendants entirely.
+            if okF and holder and not hiddenAtlas then
+                local started = tick()
+                local queue = { root }
+                local head = 1
+                local seen = 0
+                while head <= #queue do
+                    local d = queue[head]
+                    head = head + 1
+                    seen = seen + 1
+                    if seen > 20000 or (seen % 250 == 0 and tick() - started > 0.5) then break end
+                    if d.Name == "TabButtons" and d.Parent and d.Parent:FindFirstChild("Tab") and not isOwnUI(d) then
+                        local okV, vis = pcall(function() return d.Parent.Visible end)
+                        if not okV or vis ~= false then
+                            atlasWindowCache = d.Parent
+                            return atlasWindowCache
+                        end
+                    end
+                    local okK, kids = pcall(function() return d:GetChildren() end)
+                    if okK and type(kids) == "table" then
+                        for _, k in ipairs(kids) do queue[#queue + 1] = k end
+                    end
                 end
             end
         end
     end
     return nil
 end
+if getgenv then getgenv().IvyisFindAtlasWindow = findAtlasWindow end
 
 local function atlasTabButtons(win)
     local list = {}
@@ -5244,15 +5497,20 @@ local function pressAtlasButton(btn)
         lastPressMethod = "boot delay: " .. tostring(wt and wt() or "waiting for Atlas")
         return false
     end
-    -- ban ca 2 signal: co ban Atlas chi connect Activated, co ban chi MouseButton1Click
+    -- Chi ban mot signal truoc: ban Atlas nao cung connect ca 2 ma ban ca 2
+    -- se toggle section 2 lan (mo roi dong ngay).
     local nClick = fireConnections(btn.MouseButton1Click)
+    if nClick > 0 then
+        lastPressMethod = "MouseButton1Click connections"
+        return true
+    end
     local nAct = fireConnections(btn.Activated)
-    if nClick + nAct > 0 then
-        lastPressMethod = nClick > 0 and "MouseButton1Click connections" or "Activated connections"
+    if nAct > 0 then
+        lastPressMethod = "Activated connections"
         return true
     end
     if triggerButtonHeadless(btn) then
-        lastPressMethod = "Activated/firesignal"
+        lastPressMethod = "fired connection/Activated"
         return true
     end
     -- Android / executor khong co getconnections: tap that vao toa do nut
@@ -5263,6 +5521,161 @@ local function pressAtlasButton(btn)
     lastPressMethod = "failed (no click backend)"
     return false
 end
+
+-- Atlas keeps the "Next item" label inside the collapsible Progression
+-- section of the Toys tab. The section starts collapsed (Indicator rotation
+-- 180); clicking it expands the box and makes Atlas refresh the label.
+-- Global for the same 200-local reason as BlenderProg above.
+AtlasToysUI = {}
+
+function AtlasToysUI.cleanText(t)
+    return tostring(t or ""):gsub("<br%s*/?>", "\n"):gsub("<[^>]+>", " ")
+        :gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+function AtlasToysUI.findProgression(win)
+    if not win then return nil end
+    -- Keep the last good header/box: ensureOpen() asks for them several times
+    -- per peek, and scanning the whole Toys tab each time is expensive.
+    if AtlasToysUI._win == win and AtlasToysUI._header and AtlasToysUI._header.Parent
+        and AtlasToysUI._box and AtlasToysUI._box.Parent then
+        return AtlasToysUI._header, AtlasToysUI._box
+    end
+    AtlasToysUI._win, AtlasToysUI._header, AtlasToysUI._box, AtlasToysUI._label = win, nil, nil, nil
+    local tab = win:FindFirstChild("Tab") or win
+
+    -- Fast path for the known layout: Tab.Frame.Folder.TextButton.
+    -- This avoids GetDescendants() over every tab, which can freeze the client
+    -- on a full server (100k+ instances).
+    local frame = tab:FindFirstChild("Frame")
+    if frame then
+        for _, sec in ipairs(frame:GetChildren()) do
+            local btn = sec:FindFirstChild("TextButton")
+            if btn and btn:IsA("TextButton") then
+                local txt = AtlasToysUI.cleanText(getGuiText(btn)):lower()
+                if txt == "progression" then
+                    local box = sec:FindFirstChild("Box")
+                    if box then
+                        AtlasToysUI._header, AtlasToysUI._box = btn, box
+                        return btn, box
+                    end
+                end
+            end
+        end
+    end
+
+    -- Bounded fallback for other Atlas layouts.
+    local started = tick()
+    local queue = { tab }
+    local head = 1
+    local seen = 0
+    while head <= #queue do
+        local d = queue[head]
+        head = head + 1
+        seen = seen + 1
+        if seen > 5000 or (seen % 250 == 0 and tick() - started > 0.5) then break end
+        if d:IsA("TextButton") and not isOwnUI(d) then
+            local txt = AtlasToysUI.cleanText(getGuiText(d)):lower()
+            if txt == "progression" then
+                local folder = d.Parent
+                local box = folder and folder:FindFirstChild("Box")
+                if box then
+                    AtlasToysUI._header, AtlasToysUI._box = d, box
+                    return d, box
+                end
+            end
+        end
+        local okK, kids = pcall(function() return d:GetChildren() end)
+        if okK and type(kids) == "table" then
+            for _, k in ipairs(kids) do queue[#queue + 1] = k end
+        end
+    end
+    return nil
+end
+
+function AtlasToysUI.isOpen(header, box)
+    local ind = header and header:FindFirstChild("Indicator")
+    if ind and ind:IsA("ImageLabel") then
+        local rot = tonumber(ind.Rotation) or 0
+        return math.abs(rot - 90) < 20
+    end
+    return box ~= nil and box.Visible and box.AbsoluteSize.Y > 8
+end
+
+function AtlasToysUI.readLabel(box)
+    if not box then return nil end
+    -- Once the label is known, read its Text directly. It is refreshed by
+    -- Atlas when Progression is open, so no full subtree scan is needed.
+    local cached = AtlasToysUI._label
+    if cached and cached.Parent then
+        local txt = AtlasToysUI.cleanText(cached.Text)
+        for line in txt:gmatch("[^\r\n]+") do
+            local res, m, nonGear = parseNextItemLine(line)
+            if res then return res, m, false end
+            if nonGear then return nil, m, true end
+        end
+    end
+    AtlasToysUI._label = nil
+
+    -- Fast path: the known label is Box.Label.
+    local direct = box:FindFirstChild("Label")
+    if direct and direct:IsA("TextLabel") and not isOwnUI(direct) then
+        local txt = AtlasToysUI.cleanText(direct.Text)
+        for line in txt:gmatch("[^\r\n]+") do
+            local res, m, nonGear = parseNextItemLine(line)
+            if res or nonGear then
+                AtlasToysUI._label = direct
+                return res, m, nonGear
+            end
+        end
+    end
+
+    -- Bounded fallback for other Atlas layouts.
+    local started = tick()
+    local queue = { box }
+    local head = 1
+    local seen = 0
+    while head <= #queue do
+        local d = queue[head]
+        head = head + 1
+        seen = seen + 1
+        if seen > 2000 or (seen % 250 == 0 and tick() - started > 0.3) then break end
+        if d:IsA("TextLabel") and not isOwnUI(d) then
+            local txt = AtlasToysUI.cleanText(d.Text)
+            for line in txt:gmatch("[^\r\n]+") do
+                local res, m, nonGear = parseNextItemLine(line)
+                if res or nonGear then
+                    AtlasToysUI._label = d
+                    return res, m, nonGear
+                end
+            end
+        end
+        local okK, kids = pcall(function() return d:GetChildren() end)
+        if okK and type(kids) == "table" then
+            for _, k in ipairs(kids) do queue[#queue + 1] = k end
+        end
+    end
+    return nil
+end
+
+function AtlasToysUI.ensureOpen(win)
+    local header, box = AtlasToysUI.findProgression(win)
+    if not header then return false, nil end
+    if AtlasToysUI.isOpen(header, box) then return true, box end
+    if pressAtlasButton(header) then
+        task.wait(0.4)
+        local h2, b2 = AtlasToysUI.findProgression(win)
+        if AtlasToysUI.isOpen(h2, b2) then return true, b2 end
+        -- headless connection/Activated may not run Atlas's toggle on Android.
+        if clickElement(h2 or header, true) then
+            task.wait(0.4)
+            local h3, b3 = AtlasToysUI.findProgression(win)
+            if AtlasToysUI.isOpen(h3, b3) then return true, b3 end
+        end
+    end
+    return false, box
+end
+if getgenv then getgenv().IvyisAtlasToysUI = AtlasToysUI end
 
 -- Atlas chi dung muc "Progression" (nhan Next item) khi tab Toys dang mo.
 -- Mo Toys 1 chut, doc nhan roi tra lai tab cu.
@@ -5307,15 +5720,40 @@ local function peekNextItemFromToysTab()
             return nil
         end
         pressUsed = lastPressMethod
-        task.wait(0.5)
+        task.wait(0.65)
     end
-    local res, raw, nonGear = scanNextItemIn(win)
 
-    -- At-lan 2: neu chua thay nhan thi tap toa do that (bo qua connection)
-    if switched and not res and not nonGear then
+    local res, raw, nonGear = nil, nil, false
+    local opened = false
+    for attempt = 1, 3 do
+        local okOpen, box = AtlasToysUI.ensureOpen(win)
+        if okOpen then opened = true end
+        if box then
+            local r, m, ng = AtlasToysUI.readLabel(box)
+            if r or ng then res, raw, nonGear = r, m, ng end
+        end
+        if res or nonGear then break end
+        if attempt < 3 then task.wait(0.3) end
+    end
+
+    if not res and not nonGear and (opened or not AtlasToysUI.findProgression(win)) then
+        res, raw, nonGear = scanNextItemIn(win)
+    end
+
+    -- Neu active-tab detection sai (Android rail khong doi BackgroundTransparency),
+    -- tap thang vao Toys mot lan nua de Atlas dung lai tab content roi doc lai.
+    if not switched and not res and not nonGear then
         if clickElement(toysBtn, true) then
-            task.wait(0.6)
-            res, raw, nonGear = scanNextItemIn(win)
+            task.wait(0.65)
+            local okOpen, box = AtlasToysUI.ensureOpen(win)
+            if okOpen then opened = true end
+            if box then
+                local r, m, ng = AtlasToysUI.readLabel(box)
+                if r or ng then res, raw, nonGear = r, m, ng end
+            end
+            if not res and not nonGear and (opened or not AtlasToysUI.findProgression(win)) then
+                res, raw, nonGear = scanNextItemIn(win)
+            end
             if res or nonGear then pressUsed = "retry: synthetic tap" end
         end
     end
@@ -5326,11 +5764,11 @@ local function peekNextItemFromToysTab()
     end
     lastPressMethod = pressUsed
     if res then
-        lastPeekInfo = "read gear: " .. tostring(res)
+        lastPeekInfo = "read gear: " .. tostring(res) .. (opened and " (progression open)" or "")
     elseif nonGear then
-        lastPeekInfo = "read route step (not gear): " .. tostring(raw)
+        lastPeekInfo = "read route step (not gear): " .. tostring(raw) .. (opened and " (progression open)" or "")
     else
-        lastPeekInfo = "label empty after switching to Toys"
+        lastPeekInfo = "label empty after opening Toys/Progression"
     end
     return res, raw, nonGear
 end
@@ -5342,19 +5780,50 @@ local function readNextItemLabel()
     -- nap route Atlas truoc de nhan dien ten gear trong route
     if #RouteSteps.cache == 0 then pcall(getRoute) end
 
-    -- 1) nhan dang hien san tren man hinh (tab Toys dang mo)
-    for _, root in ipairs(getUiRoots()) do
-        local res, raw, nonGear = scanNextItemIn(root)
-        if res then
-            nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = res, raw, false
-            lastGoodNext = { val = res, raw = raw, nonGear = false, at = tick() }
-            return res, false
-        elseif nonGear then
-            nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = nil, raw, true
-            -- Remember "non-gear" too (not just gear): a later fallback must not
-            -- resurrect an old gear target while Atlas is still on a code/field.
-            lastGoodNext = { val = nil, raw = raw, nonGear = true, at = tick() }
-            return nil, true
+    -- 1) chi tin nhan "Next item" khi section Progression dang mo. Khi section
+    -- bi thu gon, Atlas van giu TextLabel cu trong cay UI; doc mu quet se tra
+    -- lai item cu va khong bao gio bam mo Toys/Progression.
+    local win = findAtlasWindow()
+    if win then
+        local header, box = AtlasToysUI.findProgression(win)
+        if header and AtlasToysUI.isOpen(header, box) then
+            local res, raw, nonGear = AtlasToysUI.readLabel(box)
+            if res then
+                nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = res, raw, false
+                lastGoodNext = { val = res, raw = raw, nonGear = false, at = tick() }
+                return res, false
+            elseif nonGear then
+                nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = nil, raw, true
+                lastGoodNext = { val = nil, raw = raw, nonGear = true, at = tick() }
+                return nil, true
+            end
+        end
+    else
+        -- Fallback cho ban Atlas khac khong co Window/Tab quen thuoc. Chi quet
+        -- khi that su co dau hieu Atlas da nap; neu khong, viec quet toan bo
+        -- PlayerGui/CoreGui moi 2 giay se lam treo client (dac biet Android).
+        local g = getgenv and getgenv()
+        local hasAtlasHint = g and (type(g.Atlas) == "table" or type(g.Atlas) == "userdata")
+        if not hasAtlasHint and type(_G) == "table" then
+            hasAtlasHint = type(_G.Atlas) == "table" or type(_G.Atlas) == "userdata"
+        end
+        local lastScan = tonumber(g and g._IvyisUiNextScanAt) or 0
+        if hasAtlasHint and tick() - lastScan >= 15 then
+            if g then g._IvyisUiNextScanAt = tick() end
+            for _, root in ipairs(getUiRoots()) do
+                local res, raw, nonGear = scanNextItemIn(root)
+                if res then
+                    nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = res, raw, false
+                    lastGoodNext = { val = res, raw = raw, nonGear = false, at = tick() }
+                    return res, false
+                elseif nonGear then
+                    nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = nil, raw, true
+                    -- Remember "non-gear" too (not just gear): a later fallback must not
+                    -- resurrect an old gear target while Atlas is still on a code/field.
+                    lastGoodNext = { val = nil, raw = raw, nonGear = true, at = tick() }
+                    return nil, true
+                end
+            end
         end
     end
 
@@ -5402,6 +5871,7 @@ local function readNextItemLabel()
     nextItemCache.val, nextItemCache.raw, nextItemCache.nonGear = nil, nil, false
     return nil, false
 end
+if getgenv then getgenv().IvyisReadNextItemLabel = readNextItemLabel end
 
 local function getLiveTarget()
     targetSource = "none"
@@ -5614,7 +6084,8 @@ end
 
 local function hasTopLevelDeficit(milestone, data)
     for _, ing in ipairs(milestone and milestone.Ingredients or {}) do
-        if countItem(ing.Item, data) < ing.Amount then return true end
+        local have = countItem(ing.Item, data) + BlenderProg.pending(ing.Item)
+        if have < ing.Amount then return true end
     end
     return false
 end
@@ -5797,6 +6268,28 @@ local function findRouteEntry(targetItem)
     return nil
 end
 
+-- True when the active Blender craft is the target itself, or one of the
+-- target's direct/indirect ingredients. Used to suppress false "MISSING"
+-- reports while a craft is running.
+function BlenderProg.busyFor(targetItem)
+    local st = BlenderProg.read()
+    if not st or not (st.active or st.ready) or not st.item then return false, st end
+    if not targetItem or targetItem == "None" then return false, st end
+    if BlenderProg.sameItem(st.item, targetItem) then return true, st end
+
+    local matched = findRouteEntry(targetItem)
+    local function scan(list, depth)
+        if depth > 4 or type(list) ~= "table" then return false end
+        for _, ing in ipairs(list) do
+            if BlenderProg.sameItem(st.item, ing.Item) then return true end
+            local recipe = getRecipe(ing.Item)
+            if recipe and scan(recipe, depth + 1) then return true end
+        end
+        return false
+    end
+    return scan(matched and matched.Ingredients, 0), st
+end
+
 -- tra ve (thieu, dang co, can) cua Honey cho 1 item
 local function getHoneyInfo(targetItem, data)
     local matched = findRouteEntry(targetItem)
@@ -5811,7 +6304,7 @@ local function topLevelMissing(targetItem, data)
     local matched = findRouteEntry(targetItem)
     if not matched then return nil end
     for _, ing in ipairs(matched.Ingredients or {}) do
-        local have = countItem(ing.Item, data)
+        local have = countItem(ing.Item, data) + BlenderProg.pending(ing.Item)
         if have < ing.Amount then
             return ing.Item, ing.Amount - have
         end
@@ -5835,39 +6328,44 @@ local function describeIngredients(targetItem, data, beeCount, plain)
     local missingSeen = {}
     local honeyLine = nil
 
-    local function markMissing(item, deficit)
+    local function markMissing(item, deficit, pending)
         local key = tostring(item)
         if not missingSeen[key] then
             missingSeen[key] = true
-            missing[#missing + 1] = string.format("%s %s", key, formatAmount(deficit))
+            local pendingNote = pending and pending > 0
+                and string.format(" (%s in blender)", formatAmount(pending)) or ""
+            missing[#missing + 1] = string.format("%s %s%s", key, formatAmount(deficit), pendingNote)
         end
     end
 
     -- depth 0 = nguyen lieu chinh; depth > 0 = nguyen lieu tho de craft mon chinh
     local function addLine(item, need, depth)
         local have = countItem(item, data)
+        local pending = BlenderProg.pending(item)
+        local effective = have + pending
         local name = plain and tostring(item) or ("**" .. tostring(item) .. "**")
         local pad = depth == 0 and "• " or (string.rep("   ", depth) .. "-> ")
-        local deficit = need - have
+        local pendingNote = pending > 0 and string.format(" (%s in blender)", formatAmount(pending)) or ""
+        local deficit = need - effective
         if deficit <= 0 then
-            lines[#lines + 1] = string.format("%s%s: %s/%s - Enough", pad, name, formatAmount(have), formatAmount(need))
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Enough%s", pad, name, formatAmount(have), formatAmount(need), pendingNote)
             return
         end
-        if depth == 0 then markMissing(item, deficit) end
+        if depth == 0 then markMissing(item, deficit, pending) end
         local recipe = getRecipe(item)
         if recipe and depth < 4 then
-            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit))
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s%s", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit), pendingNote)
             for _, sub in ipairs(recipe) do
                 addLine(sub.Item, deficit * sub.Amount, depth + 1)
             end
         elseif item == "Stinger" then
             -- stinger lay tu Vicious Bee, script da ho tro
-            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s (Vicious Bee)", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit))
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s (Vicious Bee)%s", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit), pendingNote)
         elseif getFarmField(item, beeCount or 35) then
-            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit))
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s%s", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit), pendingNote)
         else
             -- mon khong ho tro (khong craft, khong farm): chi bao thieu
-            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s (can't farm)", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit))
+            lines[#lines + 1] = string.format("%s%s: %s/%s - Need %s (can't farm)%s", pad, name, formatAmount(have), formatAmount(need), formatAmount(deficit), pendingNote)
         end
     end
 
@@ -5891,7 +6389,22 @@ local function describeIngredients(targetItem, data, beeCount, plain)
     end
 
     local status
-    if #missing == 0 then
+    local bstate = BlenderProg.read()
+    local targetCrafting = bstate and (bstate.active or bstate.ready)
+        and BlenderProg.sameItem(bstate.item, targetItem)
+    local busy = select(1, BlenderProg.busyFor(targetItem))
+    if targetCrafting then
+        status = "CRAFTING IN BLENDER (output pending)"
+    elseif busy then
+        local extra = BlenderProg.describe(bstate)
+        if #missing == 0 then
+            status = "WAITING FOR BLENDER (not ready yet)"
+                .. (extra and (" | Blender: " .. extra) or "")
+        else
+            status = "MISSING: " .. table.concat(missing, ", ")
+                .. (extra and (" | Blender: " .. extra) or "")
+        end
+    elseif #missing == 0 then
         status = "READY TO BUY"
     else
         status = "MISSING: " .. table.concat(missing, ", ")
@@ -5914,6 +6427,7 @@ local function describeIngredients(targetItem, data, beeCount, plain)
     lines[#lines + 1] = status
     return table.concat(lines, "\n")
 end
+if getgenv then getgenv().IvyisDescribeIngredients = describeIngredients end
 
 local lastWebhookTime = 0
 local lastWebhookTarget = nil
@@ -5922,7 +6436,7 @@ local lastWebhookMat = nil
 
 -- lay link webhook + thoi gian gui lai tu getgenv/_G/shared
 -- gia tri nhap tu UI (uu tien hon getgenv)
-local WebhookState = { url = "", interval = nil, notifyBuy = true, notifyConfig = true, owned = nil, seen = {} }
+local WebhookState = { url = "", interval = nil, notifyBuy = true, notifyConfig = true, notifyBlender = true, owned = nil, seen = {} }
 
 local function getWebhookSettings()
     local url, interval = nil, 600
@@ -6000,10 +6514,11 @@ local function postWebhook(url, v2Payload, embedPayload)
     return false
 end
 
--- bao su kien (mua do, doi config...). kind = "buy" | "config" | nil
+-- bao su kien (mua do, doi config, blender...). kind = "buy" | "config" | "blender" | nil
 local function sendEventWebhook(kind, title, body, color)
     if kind == "buy" and not WebhookState.notifyBuy then return false end
     if kind == "config" and not WebhookState.notifyConfig then return false end
+    if kind == "blender" and not WebhookState.notifyBlender then return false end
     local url = getWebhookSettings()
     if not url then return false end
     local bodyText = RouteSteps.clip(body, 3500)
@@ -6024,7 +6539,158 @@ local function sendEventWebhook(kind, title, body, color)
         })
 end
 
-local function sendProgressWebhook(beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable, neededMat)
+-- Blender craft notifications. The monitor is separate from the 8s progression
+-- tick so a craft start/finish is reported quickly. Kept global because the
+-- main chunk is already at Luau's 200-local limit.
+BlenderNotify = {
+    initialized = false,
+    lastActive = false,
+    lastItem = nil,
+    lastMade = nil,
+    lastTotal = nil,
+    inactiveSince = 0,
+    startAnnounced = false,
+    doneAnnounced = false,
+    lastP = nil,
+}
+if getgenv then getgenv().IvyisBlenderNotify = BlenderNotify end
+
+function BlenderNotify.label(item, made, total)
+    local name = tostring(item or "item")
+    local t = tonumber(total)
+    if t and t > 0 then
+        return string.format("%s (%s/%s)", name, formatAmount(tonumber(made) or 0), formatAmount(t))
+    end
+    return name
+end
+
+function BlenderNotify.contextLines(p)
+    local lines = {}
+    if not p or not p.targetItem or p.targetItem == "None" then return lines end
+    lines[#lines + 1] = "**Target:** " .. tostring(p.targetItem)
+    if p.data then
+        local need = describeIngredients(p.targetItem, p.data, p.beeCount or 0, true)
+        if need and need ~= "" then
+            lines[#lines + 1] = "**Need:**\n" .. need
+        end
+    end
+    return lines
+end
+
+function BlenderNotify.sendStart(st, p)
+    if not st or not st.item or st.item == "" then return end
+    local body = { "**Crafting:** " .. BlenderNotify.label(st.item, st.made, st.total) }
+    if st.timeText and st.timeText ~= "" then
+        body[#body + 1] = "**Time left:** " .. tostring(st.timeText)
+    end
+    for _, line in ipairs(BlenderNotify.contextLines(p)) do
+        body[#body + 1] = line
+    end
+    task.spawn(sendEventWebhook, "blender", "Blender started", table.concat(body, "\n"), 3447003)
+end
+
+function BlenderNotify.sendFinish(item, made, total, p)
+    if not item or item == "" then return end
+    local body = { "**Crafted:** " .. BlenderNotify.label(item, made, total) }
+    for _, line in ipairs(BlenderNotify.contextLines(p)) do
+        body[#body + 1] = line
+    end
+    task.spawn(sendEventWebhook, "blender", "Blender finished", table.concat(body, "\n"), 5763719)
+end
+
+function BlenderNotify.check(p)
+    local n = BlenderNotify
+    local st = BlenderProg.read()
+    local now = tick()
+    local item = st and st.item or nil
+    local made = st and st.made or nil
+    local total = st and st.total or nil
+    local finished = (st and item and item ~= "" and (st.ready or st.complete)) and true or false
+    local active = (st and st.active and not finished and item ~= nil and item ~= "") and true or false
+
+    -- First read only records the baseline. A craft that was already running
+    -- before the script started must not be announced as "just started".
+    if not n.initialized then
+        n.initialized = true
+        n.lastActive = active
+        n.lastItem = item
+        n.lastMade = made
+        n.lastTotal = total
+        n.inactiveSince = active and 0 or now
+        n.startAnnounced = active
+        n.doneAnnounced = finished
+        return
+    end
+
+    -- The GUI can move straight from one recipe to another without an idle
+    -- frame. Close the old craft before opening the new one.
+    if active and n.lastActive then
+        local itemChanged = item and n.lastItem and not BlenderProg.sameItem(item, n.lastItem)
+        local totalChanged = total and n.lastTotal and total ~= n.lastTotal
+        local madeDropped = made and n.lastMade and made < n.lastMade
+        if itemChanged or totalChanged or madeDropped then
+            if n.startAnnounced then
+                BlenderNotify.sendFinish(n.lastItem, n.lastMade, n.lastTotal, p)
+            end
+            n.startAnnounced = false
+            n.lastActive = false
+            n.inactiveSince = 0
+        end
+    end
+
+    if active then
+        n.inactiveSince = 0
+        if not n.lastActive then
+            n.startAnnounced = false
+            n.doneAnnounced = false
+        end
+        if not n.startAnnounced then
+            n.startAnnounced = true
+            BlenderNotify.sendStart(st, p)
+        end
+        n.lastActive = true
+        n.lastItem = item
+        n.lastMade = made
+        n.lastTotal = total
+        return
+    end
+
+    if n.lastActive then
+        if n.inactiveSince == 0 then n.inactiveSince = now end
+        -- Explicit ready/complete is immediate. If the labels only clear on
+        -- collect, wait a few seconds so a one-frame UI miss does not look
+        -- like a finished craft.
+        local done = finished or (now - n.inactiveSince >= 6)
+        if done then
+            local finishMade = made or n.lastMade
+            local finishTotal = total or n.lastTotal
+            if not finished then
+                -- Labels may already be reset after collecting; keep the last
+                -- values seen while the craft was active.
+                finishMade = n.lastMade or finishMade
+                finishTotal = n.lastTotal or finishTotal
+            end
+            if n.startAnnounced then
+                BlenderNotify.sendFinish(item or n.lastItem, finishMade, finishTotal, p)
+            end
+            n.startAnnounced = false
+            n.doneAnnounced = true
+            n.lastActive = false
+            n.inactiveSince = 0
+            n.lastItem = item or n.lastItem
+            n.lastMade = made or n.lastMade
+            n.lastTotal = total or n.lastTotal
+        end
+        return
+    end
+
+    if finished then n.doneAnnounced = true end
+    n.lastItem = item or n.lastItem
+    n.lastMade = made or n.lastMade
+    n.lastTotal = total or n.lastTotal
+end
+
+local function sendProgressWebhook(beeCount, targetStr, fieldStr, routeStr, data, needStr, isUnfarmable, neededMat, blenderState)
     local webhookUrl, interval = getWebhookSettings()
     if not webhookUrl or not getHttpRequest() then return end
 
@@ -6043,11 +6709,18 @@ local function sendProgressWebhook(beeCount, targetStr, fieldStr, routeStr, data
     if isUnfarmable then
         noteText = string.format("\n⚠️ **Note:** can't farm `%s` in a field, you need to get it yourself.", tostring(needStr or targetStr or "this item"))
     end
+    local blenderLine = ""
+    local liveBlender = BlenderProg.read() or blenderState
+    if liveBlender and liveBlender.item and (liveBlender.active or liveBlender.ready) then
+        local verb = liveBlender.ready and "ready " or "crafting "
+        blenderLine = "\n**Blender:** " .. verb
+            .. tostring(BlenderProg.describe(liveBlender) or liveBlender.item)
+    end
 
     local bodyText = RouteSteps.clip(string.format(
-        "**Bees:** %d\n**Next item:** %s%s\n**Need:**\n%s\n**Field:** %s\n**Route:** %s",
+        "**Bees:** %d\n**Next item:** %s%s\n**Need:**\n%s%s\n**Field:** %s\n**Route:** %s",
         tonumber(beeCount) or 0, tostring(targetStr), noteText,
-        tostring(needIngredients), tostring(fieldStr), tostring(routeStr)
+        tostring(needIngredients), blenderLine, tostring(fieldStr), tostring(routeStr)
     ), 3500)
     local color = isUnfarmable and 16744448 or 3447003
     local title = getWebhookTitle()
@@ -6069,13 +6742,110 @@ local function sendProgressWebhook(beeCount, targetStr, fieldStr, routeStr, data
         })
 end
 
+local function getHiveStats(data)
+    local beeCount = 0
+    local minLevel = 25
+    local levelCounts = {}
+    local foundAny = false
+
+    local function addBee(lvl)
+        lvl = tonumber(lvl) or 1
+        beeCount = beeCount + 1
+        levelCounts[lvl] = (levelCounts[lvl] or 0) + 1
+        if lvl < minLevel then minLevel = lvl end
+        foundAny = true
+    end
+
+    if data and type(data.Honeycomb) == "table" then
+        for col = 1, 5 do
+            local colTable = data.Honeycomb["x" .. col]
+            if type(colTable) == "table" then
+                for row = 1, 10 do
+                    local bee = colTable["y" .. row]
+                    local bt = type(bee) == "table" and tostring(bee.Type or ""):lower() or ""
+                    if bt ~= "" and bt ~= "empty" and bt ~= "none" and bt ~= "nil" then
+                        addBee(bee.Lvl)
+                    end
+                end
+            end
+        end
+    end
+
+    if not foundAny or beeCount == 0 then
+        local honeycombs = workspace:FindFirstChild("Honeycombs")
+        local hVal = player:FindFirstChild("Honeycomb") and player.Honeycomb.Value
+        local hive = (typeof(hVal) == "Instance" and hVal) or (honeycombs and honeycombs:FindFirstChild(tostring(hVal)))
+        if not hive and honeycombs then
+            for _, h in ipairs(honeycombs:GetChildren()) do
+                local o = h:FindFirstChild("Owner")
+                if o and (o.Value == player or o.Value == player.Name or tostring(o.Value) == player.Name or (player.Character and o.Value == player.Character)) then
+                    hive = h
+                    break
+                end
+            end
+        end
+        if hive and hive:FindFirstChild("Cells") then
+            local pCounts = {}
+            local pCount = 0
+            local pMin = 25
+            local pFound = false
+            for _, cell in ipairs(hive.Cells:GetChildren()) do
+                local ct = cell:FindFirstChild("CellType") or cell:FindFirstChild("Type")
+                local ctv = ct and tostring(ct.Value):lower() or ""
+                if ctv ~= "" and ctv ~= "empty" and ctv ~= "none" and ctv ~= "nil" then
+                    pCount = pCount + 1
+                    local lVal = cell:FindFirstChild("CellLevel") or cell:FindFirstChild("Level") or cell:FindFirstChild("Lvl")
+                    local lvl = lVal and tonumber(lVal.Value) or nil
+                    if not lvl then
+                        local lp = cell:FindFirstChild("LevelPart")
+                        local tl = lp and lp:FindFirstChildWhichIsA("TextLabel", true)
+                        local digits = tl and tostring(tl.Text or ""):match("(%d+)")
+                        lvl = digits and tonumber(digits) or 1
+                    end
+                    pCounts[lvl] = (pCounts[lvl] or 0) + 1
+                    if lvl < pMin then pMin = lvl end
+                    pFound = true
+                end
+            end
+            if pFound and pCount > 0 then
+                beeCount = pCount
+                minLevel = pMin
+                levelCounts = pCounts
+                foundAny = true
+            end
+        end
+    end
+
+    if not foundAny then
+        minLevel = 1
+        levelCounts = {}
+        beeCount = getBeeCount(data)
+    end
+
+    return beeCount, minLevel, levelCounts, foundAny
+end
+
 local function printDebug()
     local data = getStatData()
-    local beeCount = getBeeCount(data)
+    local beeCount, minLvl, levelCounts = getHiveStats(data)
     local liveTarget = getLiveTarget()
     local activeRoute = getRoute()
     print("========== [Auto Prog Debug] ==========")
-    print("Bee Count:", beeCount)
+    print("Bee Count:", beeCount, "| min level:", tostring(minLvl))
+    local lvlParts = {}
+    for lvl, n in pairs(levelCounts or {}) do
+        lvlParts[#lvlParts + 1] = string.format("%dxLv%d", tonumber(n) or 0, tonumber(lvl) or 0)
+    end
+    table.sort(lvlParts)
+    print("Hive Levels:", table.concat(lvlParts, " + "))
+    local bstate = BlenderProg.read()
+    if bstate then
+        print("Blender:", bstate.item or "?", "| active:", tostring(bstate.active), "| ready:", tostring(bstate.ready),
+            "| complete:", tostring(bstate.complete), "| amount:", tostring(bstate.made) .. "/" .. tostring(bstate.total),
+            "| time:", tostring(bstate.timeText), "| action:", tostring(bstate.actionText))
+    else
+        print("Blender: not found")
+    end
     print("Atlas Live Target:", tostring(liveTarget))
     print("Active Latched Target:", tostring(lockedTarget))
     print("Atlas Settings Found:", tostring(findAtlasSettings() ~= nil))
@@ -6162,24 +6932,27 @@ local CONFIG_STAGES = {
         Name = "Stage 1 (King Beetle)",
         FileName = "Stage1_KingBeetle.json",
         Raw = STAGE1_CONFIG_RAW,
-        MinBees = 20,
-        MinLevel = 7,
+        ExactBees = 20,
+        LevelCounts = { [7] = 20 },
+        LevelText = "20x Lv7",
     },
     {
         Stage = 2,
         Name = "Stage 2 (Tunnel Bear)",
         FileName = "Stage2_TunnelBear.json",
         Raw = STAGE2_CONFIG_RAW,
-        MinBees = 28,
-        MinLevel = 9,
+        ExactBees = 28,
+        LevelCounts = { [8] = 14, [7] = 14 },
+        LevelText = "14x Lv8 + 14x Lv7",
     },
     {
         Stage = 3,
         Name = "Stage 3 (Coconut Crab)",
         FileName = "Stage3_CoconutCrab.json",
         Raw = STAGE3_CONFIG_RAW,
-        MinBees = 35,
-        MinLevel = 10,
+        ExactBees = 35,
+        LevelCounts = { [8] = 35 },
+        LevelText = "35x Lv8",
     }
 }
 
@@ -6188,84 +6961,31 @@ local lastStageSwitch = 0
 local pendingStage = nil
 local pendingStageTime = 0
 
-local function getHiveStats(data)
-    local beeCount = 0
-    local minLevel = 25
-    local foundAny = false
-
-    if data and type(data.Honeycomb) == "table" then
-        for col = 1, 5 do
-            local colTable = data.Honeycomb["x" .. col]
-            if type(colTable) == "table" then
-                for row = 1, 10 do
-                    local bee = colTable["y" .. row]
-                    local bt = type(bee) == "table" and tostring(bee.Type or ""):lower() or ""
-                    if bt ~= "" and bt ~= "empty" and bt ~= "none" and bt ~= "nil" then
-                        beeCount = beeCount + 1
-                        local lvl = tonumber(bee.Lvl) or 1
-                        if lvl < minLevel then minLevel = lvl end
-                        foundAny = true
-                    end
-                end
-            end
-        end
-    end
-
-    if not foundAny or beeCount == 0 then
-        local honeycombs = workspace:FindFirstChild("Honeycombs")
-        local hVal = player:FindFirstChild("Honeycomb") and player.Honeycomb.Value
-        local hive = (typeof(hVal) == "Instance" and hVal) or (honeycombs and honeycombs:FindFirstChild(tostring(hVal)))
-        if not hive and honeycombs then
-            for _, h in ipairs(honeycombs:GetChildren()) do
-                local o = h:FindFirstChild("Owner")
-                if o and (o.Value == player or o.Value == player.Name or tostring(o.Value) == player.Name or (player.Character and o.Value == player.Character)) then
-                    hive = h
+-- Stage matching is exact: both the total bee count and every level bucket
+-- must match the configured composition. A hive with one extra bee or one
+-- bee at another level deliberately falls between stages until it is fixed.
+local function pickStage(beeCount, levelCounts)
+    beeCount = tonumber(beeCount) or 0
+    if type(levelCounts) ~= "table" then return nil, nil end
+    for i = #CONFIG_STAGES, 1, -1 do
+        local s = CONFIG_STAGES[i]
+        if beeCount == s.ExactBees then
+            local ok = true
+            for lvl, want in pairs(s.LevelCounts) do
+                if (levelCounts[lvl] or 0) ~= want then
+                    ok = false
                     break
                 end
             end
-        end
-        if hive and hive:FindFirstChild("Cells") then
-            local pCount = 0
-            local pMin = 25
-            local pFound = false
-            for _, cell in ipairs(hive.Cells:GetChildren()) do
-                local ct = cell:FindFirstChild("CellType") or cell:FindFirstChild("Type")
-                local ctv = ct and tostring(ct.Value):lower() or ""
-                if ctv ~= "" and ctv ~= "empty" and ctv ~= "none" and ctv ~= "nil" then
-                    pCount = pCount + 1
-                    local lVal = cell:FindFirstChild("CellLevel") or cell:FindFirstChild("Level") or cell:FindFirstChild("Lvl")
-                    local lvl = lVal and tonumber(lVal.Value) or nil
-                    if not lvl then
-                        local lp = cell:FindFirstChild("LevelPart")
-                        local tl = lp and lp:FindFirstChildWhichIsA("TextLabel", true)
-                        local digits = tl and tostring(tl.Text or ""):match("(%d+)")
-                        lvl = digits and tonumber(digits) or 1
+            if ok then
+                for lvl, have in pairs(levelCounts) do
+                    if (s.LevelCounts[lvl] or 0) ~= have then
+                        ok = false
+                        break
                     end
-                    if lvl < pMin then pMin = lvl end
-                    pFound = true
                 end
             end
-            if pFound and pCount > 0 then
-                beeCount = pCount
-                minLevel = pMin
-                foundAny = true
-            end
-        end
-    end
-
-    if not foundAny then
-        minLevel = 1
-        beeCount = getBeeCount(data)
-    end
-
-    return beeCount, minLevel
-end
-
-local function pickStage(beeCount, minLevel)
-    for i = #CONFIG_STAGES, 1, -1 do
-        local s = CONFIG_STAGES[i]
-        if beeCount >= s.MinBees and minLevel >= s.MinLevel then
-            return s.Stage, s
+            if ok then return s.Stage, s end
         end
     end
     return nil, nil
@@ -6454,15 +7174,16 @@ local function applyStagePreset(stageInfo)
     return true
 end
 
-local function sendStageWebhook(oldStage, newStageInfo, beeCount, minLvl)
+local function sendStageWebhook(oldStage, newStageInfo, beeCount, actualLevels)
     if not WebhookState.notifyConfig then return end
     local webhookUrl = getWebhookSettings()
     if not webhookUrl or not getHttpRequest() then return end
 
     local title = "Auto Change Config - Stage Up!"
     local bodyText = RouteSteps.clip(string.format(
-        "**New stage:** %s\n**Config file:** `%s`\n**Bees:** %d\n**Min Level:** %d",
-        tostring(newStageInfo.Name), tostring(newStageInfo.FileName), tonumber(beeCount) or 0, tonumber(minLvl) or 0
+        "**New stage:** %s\n**Config file:** `%s`\n**Bees:** %d (need %d)\n**Levels:** %s (need %s)",
+        tostring(newStageInfo.Name), tostring(newStageInfo.FileName), tonumber(beeCount) or 0, tonumber(newStageInfo.ExactBees) or 0,
+        tostring(actualLevels or "unknown"), tostring(newStageInfo.LevelText or "unknown")
     ), 3500)
     local footer = "Ivyis BSS-" .. tostring(player.Name)
     postWebhook(webhookUrl,
@@ -6481,11 +7202,23 @@ local function sendStageWebhook(oldStage, newStageInfo, beeCount, minLvl)
         })
 end
 
-local function checkConfigStage(data, beeCount, minLvl)
-    if getgenv and getgenv().AutoChangeConfigEnabled == false then return end
+local function checkConfigStage(data, beeCount, minLvl, levelCounts)
+    -- Off by default: only run when the player explicitly enabled it and that
+    -- choice was restored from AutoFeedBSS/settings_<player>.json.
+    if not (getgenv and getgenv().AutoChangeConfigEnabled == true) then return end
 
-    local targetStageIdx, targetStage = pickStage(beeCount, minLvl)
+    local function formatLevels(counts)
+        local parts = {}
+        for lvl, n in pairs(counts or {}) do
+            parts[#parts + 1] = string.format("%dxLv%d", tonumber(n) or 0, tonumber(lvl) or 0)
+        end
+        table.sort(parts)
+        return #parts > 0 and table.concat(parts, " + ") or "unknown"
+    end
+
+    local targetStageIdx, targetStage = pickStage(beeCount, levelCounts)
     if not targetStageIdx then return end
+    local actualLevels = formatLevels(levelCounts)
 
     if currentStage == nil then
         currentStage = targetStageIdx
@@ -6500,8 +7233,9 @@ local function checkConfigStage(data, beeCount, minLvl)
             pendingStageTime = tick()
             local debounce = (getgenv and tonumber(getgenv().AutoChangeConfigDebounce)) or 15
             task.spawn(sendEventWebhook, "config", "Eligible for config change",
-                string.format("**Switching to:** %s\n**Bees:** %d (need %d)\n**Min Level:** %d (need %d)\nWill switch in about %d seconds if still eligible.",
-                    tostring(targetStage.Name), tonumber(beeCount) or 0, targetStage.MinBees, tonumber(minLvl) or 0, targetStage.MinLevel, debounce),
+                string.format("**Switching to:** %s\n**Bees:** %d (need %d)\n**Levels:** %s (need %s)\nWill switch in about %d seconds if still eligible.",
+                    tostring(targetStage.Name), tonumber(beeCount) or 0, tonumber(targetStage.ExactBees) or 0,
+                    actualLevels, tostring(targetStage.LevelText or "unknown"), debounce),
                 16776960)
             return
         end
@@ -6521,7 +7255,7 @@ local function checkConfigStage(data, beeCount, minLvl)
         pendingStage = nil
 
         applyStagePreset(targetStage)
-        task.spawn(sendStageWebhook, oldStage, targetStage, beeCount, minLvl)
+        task.spawn(sendStageWebhook, oldStage, targetStage, beeCount, actualLevels)
     else
         pendingStage = nil
     end
@@ -6977,12 +7711,15 @@ _G.AutoProgDebug = printDebug
     -- doc 1 lan roi dung chung cho UI, webhook va doi field
     local function snapshotProgress()
         local data = getStatData()
-        local beeCount, minBeeLvl = getHiveStats(data)
+        local beeCount, minBeeLvl, levelCounts = getHiveStats(data)
         local targetItem, neededMat, neededAmt, field, isUnfarmable = pickNextTarget(data, beeCount)
+        local blenderBusy, blenderState = BlenderProg.busyFor(targetItem)
+        if blenderBusy then field = nil end
         return {
-            data = data, beeCount = beeCount, minBeeLvl = minBeeLvl,
+            data = data, beeCount = beeCount, minBeeLvl = minBeeLvl, levelCounts = levelCounts,
             targetItem = targetItem, neededMat = neededMat, neededAmt = neededAmt,
             field = field, isUnfarmable = isUnfarmable,
+            blenderBusy = blenderBusy, blenderState = blenderState,
         }
     end
 
@@ -6995,6 +7732,9 @@ _G.AutoProgDebug = printDebug
         if p.neededMat then
             return string.format("%s %s%s", tostring(p.neededMat), formatAmount(p.neededAmt),
                 p.isUnfarmable and " [Unfarmable]" or "")
+        end
+        if p.blenderBusy and p.blenderState then
+            return "Waiting for Blender: " .. tostring(BlenderProg.describe(p.blenderState) or p.blenderState.item or "item")
         end
         if p.targetItem then
             local mat, amt, have, need = topLevelMissing(p.targetItem, p.data)
@@ -7011,14 +7751,30 @@ _G.AutoProgDebug = printDebug
     local function refreshProgressionUI(p)
         local ok, err = pcall(function()
             p = p or snapshotProgress()
+            BlenderNotify.lastP = p
+            local function levelSummary(counts)
+                local parts = {}
+                for lvl, n in pairs(counts or {}) do
+                    parts[#parts + 1] = string.format("%dxLv%d", tonumber(n) or 0, tonumber(lvl) or 0)
+                end
+                table.sort(parts)
+                return #parts > 0 and table.concat(parts, " + ") or "unknown"
+            end
+            local lvlText = levelSummary(p.levelCounts)
             local targetTitle = liveNonGear and "Atlas step: not gear"
                 or string.format("Next item: %s", tostring(p.targetItem or "nothing left"))
             local needBody = describeIngredients(p.targetItem, p.data, p.beeCount, true)
-            local targetDesc = string.format("Field: %s\nBees: %d, lowest level %d\n\nNeed:\n%s",
+            local blenderBody = ""
+            if p.blenderBusy and p.blenderState then
+                blenderBody = "\n\nBlender: crafting " .. tostring(BlenderProg.describe(p.blenderState) or p.blenderState.item or "item")
+            end
+            local targetDesc = string.format("Field: %s\nBees: %d | Levels: %s (lowest %d)\n\nNeed:\n%s%s",
                 tostring(p.field or (p.targetItem and "Unchanged" or "None")),
                 tonumber(p.beeCount) or 0,
+                lvlText,
                 tonumber(p.minBeeLvl) or 0,
-                tostring(needBody)
+                tostring(needBody),
+                blenderBody
             )
             if progTargetLabel then
                 pcall(function()
@@ -7031,10 +7787,10 @@ _G.AutoProgDebug = printDebug
 
             if hudLabel then
                 local stage = currentStage and CONFIG_STAGES[currentStage]
-                hudLabel.Text = string.format("%s | bees %d, min lv %d | next %s | need %s | field %s",
+                hudLabel.Text = string.format("%s | bees %d [%s] | next %s | need %s | field %s",
                     stage and stage.Name or "Auto Prog",
                     tonumber(p.beeCount) or 0,
-                    tonumber(p.minBeeLvl) or 0,
+                    lvlText,
                     tostring(p.targetItem or (liveNonGear and "non-gear step" or "None")),
                     describeNeed(p),
                     tostring(p.field or "Unchanged")
@@ -7051,6 +7807,7 @@ _G.AutoProgDebug = printDebug
         if bootReady and not bootReady() then return end
         local ok, err = pcall(function()
             local p = snapshotProgress()
+            BlenderNotify.lastP = p
             refreshProgressionUI(p)
 
             if autoFieldSwitchEnabled and p.field then
@@ -7067,12 +7824,13 @@ _G.AutoProgDebug = printDebug
                 end
             end
 
-            checkConfigStage(p.data, p.beeCount, p.minBeeLvl)
+            checkConfigStage(p.data, p.beeCount, p.minBeeLvl, p.levelCounts)
 
             trackPurchases(p)
 
             task.spawn(sendProgressWebhook, p.beeCount, p.targetItem or "None", p.field or "Unchanged",
-                routeFound and "Found" or "Not Found", p.data, describeNeed(p), p.isUnfarmable, p.neededMat)
+                routeFound and "Found" or "Not Found", p.data, describeNeed(p), p.isUnfarmable, p.neededMat,
+                p.blenderState)
         end)
         if not ok then
             warn("[Auto Prog] tick error: " .. tostring(err))
@@ -7139,6 +7897,7 @@ _G.AutoProgDebug = printDebug
         setWebhookInterval = function(seconds) WebhookState.interval = tonumber(seconds) end,
         setNotifyBuy = function(v) WebhookState.notifyBuy = v and true or false end,
         setNotifyConfig = function(v) WebhookState.notifyConfig = v and true or false end,
+        setNotifyBlender = function(v) WebhookState.notifyBlender = v and true or false end,
         sendTestWebhook = function()
             local url = getWebhookSettings()
             if not url then return false, "no link" end
@@ -9588,6 +10347,15 @@ ProgTab:Toggle({
 })
 
 ProgTab:Toggle({
+    Title = "Auto change config",
+    Desc = "Off by default; when enabled, the choice is saved for next time",
+    Value = false,
+    Callback = function(v)
+        if getgenv then getgenv().AutoChangeConfigEnabled = v and true or false end
+    end
+})
+
+ProgTab:Toggle({
     Title = "Kill Vicious Bee when I need stingers",
     Value = true,
     Callback = function(v)
@@ -9886,6 +10654,13 @@ SettingsTab:Toggle({
     Title = "Tell me when config changes",
     Value = true,
     Callback = function(v) Progression.setNotifyConfig(v) end
+})
+
+SettingsTab:Toggle({
+    Title = "Tell me when Blender starts/finishes",
+    Desc = "craft start and finish alerts",
+    Value = true,
+    Callback = function(v) Progression.setNotifyBlender(v) end
 })
 
 SettingsTab:Button({
@@ -10655,6 +11430,16 @@ task.spawn(function()
     while scriptAlive do
         Progression.progressionTick()
         task.wait(8)
+    end
+end)
+
+-- Blender start/finish can happen between the 8s progression ticks. Poll the
+-- labels separately and reuse the last progression snapshot for target context.
+task.spawn(function()
+    task.wait(3)
+    while scriptAlive do
+        pcall(function() BlenderNotify.check(BlenderNotify.lastP) end)
+        task.wait(1)
     end
 end)
 
