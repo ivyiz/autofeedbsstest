@@ -1933,11 +1933,11 @@ local stopAutoFeed
 local stopAutoRoll
 local restoreRollSettings
 local captureRollSettings
-local releaseCharacterHold
 
 function stopAutoFeed(keepAtlas)
     feedRunning = false
-    if releaseCharacterHold then pcall(releaseCharacterHold) end
+    local hold = getgenv and getgenv().IvyisAtlasHold
+    if hold and hold.release then pcall(hold.release) end
     if activeTween then
         pcall(function() activeTween:Cancel() end)
         activeTween = nil
@@ -1952,7 +1952,8 @@ end
 
 function stopAutoRoll(keepAtlas)
     rollRunning = false
-    if releaseCharacterHold then pcall(releaseCharacterHold) end
+    local hold = getgenv and getgenv().IvyisAtlasHold
+    if hold and hold.release then pcall(hold.release) end
     if activeTween then
         pcall(function() activeTween:Cancel() end)
         activeTween = nil
@@ -7604,36 +7605,30 @@ end
 -- While auto feed / auto roll is working, keep the character exactly where it
 -- is. Pausing Atlas is not always enough: a tween or a queued Atlas action can
 -- still move the character for a moment. The hold anchors the root and zeroes
--- movement until stopAutoFeed / stopAutoRoll releases it.
-local characterHoldActive = false
-local characterHoldConn = nil
-local characterHoldRoot = nil
-local characterHoldHumanoid = nil
-local characterHoldCFrame = nil
-local characterHoldPrevAnchored = false
-local characterHoldPrevWalkSpeed = 16
-local characterHoldPrevJumpPower = 50
-local characterHoldPrevJumpHeight = 0
+-- movement until stopAutoFeed / stopAutoRoll releases it. State lives on
+-- getgenv so the main chunk does not exceed Luau's 200-local register limit.
+getgenv().IvyisAtlasHold = getgenv().IvyisAtlasHold or {}
 
-local function startCharacterHold()
+getgenv().IvyisAtlasHold.start = function()
     if not autoPauseAtlas then return false end
 
+    local hold = getgenv().IvyisAtlasHold
     local char = player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChild("Humanoid")
     if not root or not hum then return false end
 
-    if not characterHoldActive then
-        characterHoldPrevAnchored = root.Anchored
-        characterHoldPrevWalkSpeed = hum.WalkSpeed
-        characterHoldPrevJumpPower = hum.JumpPower
-        characterHoldPrevJumpHeight = hum.JumpHeight
+    if not hold.active then
+        hold.prevAnchored = root.Anchored
+        hold.prevWalkSpeed = hum.WalkSpeed
+        hold.prevJumpPower = hum.JumpPower
+        hold.prevJumpHeight = hum.JumpHeight
     end
 
-    characterHoldActive = true
-    characterHoldRoot = root
-    characterHoldHumanoid = hum
-    characterHoldCFrame = root.CFrame
+    hold.active = true
+    hold.root = root
+    hold.humanoid = hum
+    hold.cframe = root.CFrame
     root.Anchored = true
     hum.WalkSpeed = 0
     hum.JumpPower = 0
@@ -7641,9 +7636,9 @@ local function startCharacterHold()
     root.AssemblyLinearVelocity = Vector3.zero
     root.AssemblyAngularVelocity = Vector3.zero
 
-    if not characterHoldConn then
-        characterHoldConn = RunService.Heartbeat:Connect(function()
-            if not characterHoldActive then return end
+    if not hold.conn then
+        hold.conn = RunService.Heartbeat:Connect(function()
+            if not hold.active then return end
 
             local currentChar = player.Character
             local currentRoot = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
@@ -7652,13 +7647,13 @@ local function startCharacterHold()
 
             -- Respawned while holding: let the next loop re-acquire the hive
             -- instead of teleporting the new character back to the old one.
-            if currentRoot ~= characterHoldRoot then
-                releaseCharacterHold()
+            if currentRoot ~= hold.root then
+                hold.release()
                 return
             end
 
-            if characterHoldCFrame and (currentRoot.Position - characterHoldCFrame.Position).Magnitude > 0.05 then
-                currentRoot.CFrame = characterHoldCFrame
+            if hold.cframe and (currentRoot.Position - hold.cframe.Position).Magnitude > 0.05 then
+                currentRoot.CFrame = hold.cframe
             end
             currentRoot.AssemblyLinearVelocity = Vector3.zero
             currentRoot.AssemblyAngularVelocity = Vector3.zero
@@ -7674,30 +7669,32 @@ local function startCharacterHold()
     return true
 end
 
-releaseCharacterHold = function()
-    characterHoldActive = false
-    if characterHoldConn then
-        pcall(function() characterHoldConn:Disconnect() end)
-        characterHoldConn = nil
+getgenv().IvyisAtlasHold.release = function()
+    local hold = getgenv().IvyisAtlasHold
+    if not hold then return end
+    hold.active = false
+    if hold.conn then
+        pcall(function() hold.conn:Disconnect() end)
+        hold.conn = nil
     end
 
     local char = player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChild("Humanoid")
-    if root and characterHoldRoot == root then
-        root.Anchored = characterHoldPrevAnchored
+    if root and hold.root == root then
+        root.Anchored = hold.prevAnchored
         root.AssemblyLinearVelocity = Vector3.zero
         root.AssemblyAngularVelocity = Vector3.zero
     end
-    if hum and characterHoldHumanoid == hum then
-        hum.WalkSpeed = characterHoldPrevWalkSpeed or 16
-        hum.JumpPower = characterHoldPrevJumpPower or 50
-        hum.JumpHeight = characterHoldPrevJumpHeight or 0
+    if hum and hold.humanoid == hum then
+        hum.WalkSpeed = hold.prevWalkSpeed or 16
+        hum.JumpPower = hold.prevJumpPower or 50
+        hum.JumpHeight = hold.prevJumpHeight or 0
     end
 
-    characterHoldRoot = nil
-    characterHoldHumanoid = nil
-    characterHoldCFrame = nil
+    hold.root = nil
+    hold.humanoid = nil
+    hold.cframe = nil
 end
 
 local function getHiveStandPos()
@@ -9926,7 +9923,7 @@ task.spawn(function()
                     local toBuy = math.min(treatsNeeded - ownedTreats, math.floor(honey / TREAT_COST))
                     if toBuy > 0 then
                         treatStatusLabel:SetDesc("Moving to Treat Shop...")
-                        releaseCharacterHold()
+                        if getgenv and getgenv().IvyisAtlasHold then getgenv().IvyisAtlasHold.release() end
                         local shopPos = getTreatShopPos()
                         if goToPos(shopPos, 20) then
                             task.wait(0.5)
@@ -9955,7 +9952,7 @@ task.spawn(function()
                 if ownedTreats > 0 then
                     local toFeed = math.min(treatsNeeded, ownedTreats)
                     if toFeed > 0 then
-                        startCharacterHold()
+                        if getgenv and getgenv().IvyisAtlasHold then getgenv().IvyisAtlasHold.start() end
                         treatStatusLabel:SetDesc(string.format("Feeding %s Treats to C%d,R%d (Lvl %d)...", formatNum(toFeed), tonumber(firstCand.col) or 0, tonumber(firstCand.row) or 0, tonumber(firstCand.level) or 0))
                         feedBee(firstCand.col, firstCand.row, toFeed)
                         task.wait(0.5)
@@ -9982,8 +9979,9 @@ local rollFailCount = 0
 
 -- Event bees cannot come from Royal Jelly. Bee Swarm gives each event bee its
 -- own permanent jelly (TabbyBeeJelly, PuppyBeeJelly, ...). The jelly always
--- produces the normal event bee, never a gifted one.
-local function getEventJellyInfo(beeId)
+-- produces the normal event bee, never a gifted one. These helpers live on the
+-- existing RouteSteps table so they do not add top-level locals.
+function RouteSteps.getEventJellyInfo(beeId)
     local bee = beeId and beeMapById and beeMapById[beeId]
     if not bee or bee.rarity ~= "Event" then return nil end
     return {
@@ -9994,8 +9992,8 @@ local function getEventJellyInfo(beeId)
     }
 end
 
-local function getEventJellyCount(beeId, data)
-    local info = getEventJellyInfo(beeId)
+function RouteSteps.getEventJellyCount(beeId, data)
+    local info = RouteSteps.getEventJellyInfo(beeId)
     if not info then return nil end
     data = data or getStatData()
     local n = countItem(info.display, data)
@@ -10004,20 +10002,20 @@ end
 
 -- true  -> this target can be rolled/hatched now
 -- false -> skip it and try the next target (missing jelly / gifted event)
-local function eventTargetReady(target, data)
-    local info = getEventJellyInfo(target and target.beeId)
+function RouteSteps.eventTargetReady(target, data)
+    local info = RouteSteps.getEventJellyInfo(target and target.beeId)
     if not info then return true, nil, nil end
     if tostring(target.gifted or "Any"):lower() == "gifted" then
         return false, info, "gifted"
     end
-    local count = getEventJellyCount(target.beeId, data)
+    local count = RouteSteps.getEventJellyCount(target.beeId, data)
     if (count or 0) <= 0 then
         return false, info, "missing"
     end
     return true, info, nil
 end
 
-local function skippedEventText(skipped)
+function RouteSteps.skippedEventText(skipped)
     local names = {}
     for name in pairs(skipped or {}) do
         names[#names + 1] = name
@@ -10026,7 +10024,7 @@ local function skippedEventText(skipped)
     return table.concat(names, ", ")
 end
 
-local function hiveContainsBee(grid, beeId)
+function RouteSteps.hiveContainsBee(grid, beeId)
     if not grid or not beeId then return false end
     for r = 1, 10 do
         for c = 1, 5 do
@@ -10052,7 +10050,7 @@ end
 -- Royal Jelly is consumed by a successful roll. Poll the stat cache instead of
 -- sleeping a full second, so the next roll can start as soon as the server has
 -- processed the previous one.
-local function waitForRoyalJellyDrop(beforeRJ, timeout)
+function RouteSteps.waitForRoyalJellyDrop(beforeRJ, timeout)
     local deadline = os.clock() + (timeout or 1.2)
     while os.clock() < deadline do
         task.wait(0.08)
@@ -10068,7 +10066,7 @@ end
 
 -- Event jellies are permanent (their count does not drop), so wait for the
 -- target cell to become the event bee instead of watching the inventory.
-local function waitForEventHatch(col, row, target, timeout)
+function RouteSteps.waitForEventHatch(col, row, target, timeout)
     local deadline = os.clock() + (timeout or 1.2)
     while os.clock() < deadline do
         task.wait(0.1)
@@ -10127,8 +10125,8 @@ task.spawn(function()
                     local availableExact = {}
                     local skippedExact = {}
                     for _, item in ipairs(incompleteExact) do
-                        local ready, info, reason = eventTargetReady(item.target, jellyData)
-                        if ready and info and hiveContainsBee(cellsGrid, item.target.beeId) then
+                        local ready, info, reason = RouteSteps.eventTargetReady(item.target, jellyData)
+                        if ready and info and RouteSteps.hiveContainsBee(cellsGrid, item.target.beeId) then
                             ready = false
                             reason = "already"
                         end
@@ -10140,7 +10138,7 @@ task.spawn(function()
                     end
 
                     if #availableExact == 0 then
-                        local names = skippedEventText(skippedExact)
+                        local names = RouteSteps.skippedEventText(skippedExact)
                         rollStatusLabel:SetDesc("Event bee skipped (missing jelly / gifted / already in hive): " .. (names ~= "" and names or "event target") .. ".")
                         stopAutoRoll()
                         return
@@ -10151,7 +10149,7 @@ task.spawn(function()
 
                     local skipNote = ""
                     if next(skippedExact) ~= nil then
-                        skipNote = string.format(" | Skipped: %s", skippedEventText(skippedExact))
+                        skipNote = string.format(" | Skipped: %s", RouteSteps.skippedEventText(skippedExact))
                     end
                     rollStatusLabel:SetDesc(string.format("Exact Mode: Slot %s needs %s (%s) | Remaining: %d/%d%s",
                         tostring(nextTargetSlot.key), tostring(getShortBeeName(currentTargetObj.beeId)), tostring(currentTargetObj.gifted), tonumber(#availableExact) or 0, tonumber(totalExact) or 0, skipNote))
@@ -10202,8 +10200,8 @@ task.spawn(function()
                         sumRemaining = sumRemaining + rem
                         if rem > 0 then
                             local bId, g = tag:match("^(.-)|(.*)$")
-                            local ready, info, reason = eventTargetReady({ beeId = bId, gifted = g }, jellyData)
-                            if ready and info and hiveContainsBee(cellsGrid, bId) then
+                            local ready, info, reason = RouteSteps.eventTargetReady({ beeId = bId, gifted = g }, jellyData)
+                            if ready and info and RouteSteps.hiveContainsBee(cellsGrid, bId) then
                                 ready = false
                                 reason = "already"
                             end
@@ -10227,7 +10225,7 @@ task.spawn(function()
                         IvyisUI:Notify({ Title = "Hive done", Content = "Got every bee on the list", Duration = 5 })
                         return
                     elseif usableRemaining <= 0 then
-                        local names = skippedEventText(skippedTargets)
+                        local names = RouteSteps.skippedEventText(skippedTargets)
                         rollStatusLabel:SetDesc("Event bee skipped (missing jelly / gifted / already in hive): " .. (names ~= "" and names or "event target") .. ".")
                         stopAutoRoll()
                         return
@@ -10255,7 +10253,7 @@ task.spawn(function()
 
                     local skipNote = ""
                     if next(skippedTargets) ~= nil then
-                        skipNote = string.format(" | Skipped: %s", skippedEventText(skippedTargets))
+                        skipNote = string.format(" | Skipped: %s", RouteSteps.skippedEventText(skippedTargets))
                     end
                     rollStatusLabel:SetDesc(string.format("Comp Mode: Rolling %s | Next needed: %s (%s) | Left: %d/%d%s",
                         tostring(nextTargetSlot.key), tostring(getShortBeeName(currentTargetObj.beeId)), tostring(currentTargetObj.gifted), tonumber(usableRemaining) or 0, tonumber(totalNeeded) or 0, skipNote))
@@ -10266,7 +10264,7 @@ task.spawn(function()
                     return
                 end
 
-                local eventInfo = getEventJellyInfo(currentTargetObj and currentTargetObj.beeId)
+                local eventInfo = RouteSteps.getEventJellyInfo(currentTargetObj and currentTargetObj.beeId)
                 local isEventTarget = eventInfo ~= nil
 
                 local keepGifted = forcedRollFlags.untilGifted == true
@@ -10321,7 +10319,7 @@ task.spawn(function()
                 local currentRJ = getRoyalJellies(data)
 
                 if isEventTarget then
-                    local jellyCount = getEventJellyCount(currentTargetObj.beeId, data)
+                    local jellyCount = RouteSteps.getEventJellyCount(currentTargetObj.beeId, data)
                     if (jellyCount or 0) <= 0 then
                         rollStatusLabel:SetDesc("No " .. tostring(eventInfo.display) .. " - skipping event target.")
                         task.wait(0.4)
@@ -10330,7 +10328,7 @@ task.spawn(function()
                 else
                     if currentRJ < minRJThreshold and autoBuyRJ then
                         rollStatusLabel:SetDesc("Moving to Royal Jelly Shop...")
-                        releaseCharacterHold()
+                        if getgenv and getgenv().IvyisAtlasHold then getgenv().IvyisAtlasHold.release() end
                         local rjShopPos = getRJShopPos()
                         if goToPos(rjShopPos, 20) then
                             task.wait(0.5)
@@ -10360,7 +10358,7 @@ task.spawn(function()
                 task.wait(0.5)
                 if not rollRunning or not scriptAlive then return end
 
-                startCharacterHold()
+                if getgenv and getgenv().IvyisAtlasHold then getgenv().IvyisAtlasHold.start() end
 
                 local beforeRollRJ = currentRJ
                 -- The 25k batch only pays off while one of the game's own stop
@@ -10390,7 +10388,7 @@ task.spawn(function()
                 if isEventTarget then
                     -- The event jelly stays in the inventory, so the cell itself
                     -- is the only reliable "hatch finished" signal.
-                    newCell = waitForEventHatch(nextTargetSlot.col, nextTargetSlot.row, currentTargetObj, 1.4)
+                    newCell = RouteSteps.waitForEventHatch(nextTargetSlot.col, nextTargetSlot.row, currentTargetObj, 1.4)
                     if not newCell then
                         rollFailCount = rollFailCount + 1
                         if rollFailCount >= 5 then
@@ -10405,7 +10403,7 @@ task.spawn(function()
                 else
                     -- RemoteEvent does not report a rejected roll. If Royal Jelly
                     -- was not consumed, count it as a failed attempt.
-                    local afterRollData, afterRollRJ = waitForRoyalJellyDrop(beforeRollRJ, 1.4)
+                    local afterRollData, afterRollRJ = RouteSteps.waitForRoyalJellyDrop(beforeRollRJ, 1.4)
                     if not afterRollData then
                         rollFailCount = rollFailCount + 1
                         if rollFailCount >= 5 then
@@ -11569,7 +11567,8 @@ if getgenv then
         end)
         if restoreRollSettings then pcall(restoreRollSettings) end
         Progression.cleanupProgression()
-        if releaseCharacterHold then pcall(releaseCharacterHold) end
+        local hold = getgenv and getgenv().IvyisAtlasHold
+        if hold and hold.release then pcall(hold.release) end
         if pauseAtlas then pcall(function() pauseAtlas(false) end) end
         if activeTween then pcall(function() activeTween:Cancel() end) activeTween = nil end
         if antiAfkConn then pcall(function() antiAfkConn:Disconnect() end) antiAfkConn = nil end
