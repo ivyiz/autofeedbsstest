@@ -1933,15 +1933,17 @@ local stopAutoFeed
 local stopAutoRoll
 local restoreRollSettings
 local captureRollSettings
+local releaseCharacterHold
 
 function stopAutoFeed(keepAtlas)
     feedRunning = false
-    if not keepAtlas and pauseAtlas then
-        pauseAtlas(false)
-    end
+    if releaseCharacterHold then pcall(releaseCharacterHold) end
     if activeTween then
         pcall(function() activeTween:Cancel() end)
         activeTween = nil
+    end
+    if not keepAtlas and pauseAtlas then
+        pauseAtlas(false)
     end
     if feedToggle then
         pcall(function() feedToggle:Set(false) end)
@@ -1950,12 +1952,13 @@ end
 
 function stopAutoRoll(keepAtlas)
     rollRunning = false
-    if not keepAtlas and pauseAtlas then
-        pauseAtlas(false)
-    end
+    if releaseCharacterHold then pcall(releaseCharacterHold) end
     if activeTween then
         pcall(function() activeTween:Cancel() end)
         activeTween = nil
+    end
+    if not keepAtlas and pauseAtlas then
+        pauseAtlas(false)
     end
     if rollToggle then
         pcall(function() rollToggle:Set(false) end)
@@ -7548,13 +7551,140 @@ function pauseAtlas(enable)
     end
 
     if atlasPauseBtn and firesignal then
-        pcall(function() firesignal(atlasPauseBtn.Activated) end)
-        pcall(function() firesignal(atlasPauseBtn.MouseButton1Click) end)
-        lastPauseState = targetState
-        return true
+        -- Atlas versions differ: some connect "Activated", some connect
+        -- "MouseButton1Click". Firing both can toggle twice (pause then resume)
+        -- on versions that connect both signals, so fire only the one that is
+        -- actually connected when getconnections is available.
+        local fired = false
+        local function isConnected(signal)
+            if not getconnections then return nil end
+            local ok, list = pcall(getconnections, signal)
+            if not ok or type(list) ~= "table" then return nil end
+            return #list > 0
+        end
+
+        local activated = isConnected(atlasPauseBtn.Activated)
+        local clicked = isConnected(atlasPauseBtn.MouseButton1Click)
+        local signal = nil
+        if clicked == true then
+            signal = atlasPauseBtn.MouseButton1Click
+        elseif activated == true then
+            signal = atlasPauseBtn.Activated
+        else
+            -- No getconnections, or neither signal reports a connection:
+            -- MouseButton1Click is the signal most Atlas buttons use.
+            signal = atlasPauseBtn.MouseButton1Click
+        end
+
+        if signal then
+            fired = pcall(firesignal, signal)
+        end
+        if fired then
+            lastPauseState = targetState
+            return true
+        end
     end
 
     return false
+end
+
+-- While auto feed / auto roll is working, keep the character exactly where it
+-- is. Pausing Atlas is not always enough: a tween or a queued Atlas action can
+-- still move the character for a moment. The hold anchors the root and zeroes
+-- movement until stopAutoFeed / stopAutoRoll releases it.
+local characterHoldActive = false
+local characterHoldConn = nil
+local characterHoldRoot = nil
+local characterHoldHumanoid = nil
+local characterHoldCFrame = nil
+local characterHoldPrevAnchored = false
+local characterHoldPrevWalkSpeed = 16
+local characterHoldPrevJumpPower = 50
+local characterHoldPrevJumpHeight = 0
+
+local function startCharacterHold()
+    if not autoPauseAtlas then return false end
+
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChild("Humanoid")
+    if not root or not hum then return false end
+
+    if not characterHoldActive then
+        characterHoldPrevAnchored = root.Anchored
+        characterHoldPrevWalkSpeed = hum.WalkSpeed
+        characterHoldPrevJumpPower = hum.JumpPower
+        characterHoldPrevJumpHeight = hum.JumpHeight
+    end
+
+    characterHoldActive = true
+    characterHoldRoot = root
+    characterHoldHumanoid = hum
+    characterHoldCFrame = root.CFrame
+    root.Anchored = true
+    hum.WalkSpeed = 0
+    hum.JumpPower = 0
+    hum.JumpHeight = 0
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+
+    if not characterHoldConn then
+        characterHoldConn = RunService.Heartbeat:Connect(function()
+            if not characterHoldActive then return end
+
+            local currentChar = player.Character
+            local currentRoot = currentChar and currentChar:FindFirstChild("HumanoidRootPart")
+            local currentHum = currentChar and currentChar:FindFirstChild("Humanoid")
+            if not currentRoot then return end
+
+            -- Respawned while holding: let the next loop re-acquire the hive
+            -- instead of teleporting the new character back to the old one.
+            if currentRoot ~= characterHoldRoot then
+                releaseCharacterHold()
+                return
+            end
+
+            if characterHoldCFrame and (currentRoot.Position - characterHoldCFrame.Position).Magnitude > 0.05 then
+                currentRoot.CFrame = characterHoldCFrame
+            end
+            currentRoot.AssemblyLinearVelocity = Vector3.zero
+            currentRoot.AssemblyAngularVelocity = Vector3.zero
+            if currentHum then
+                currentHum.WalkSpeed = 0
+                currentHum.JumpPower = 0
+                currentHum.JumpHeight = 0
+                currentHum:Move(Vector3.zero)
+            end
+        end)
+    end
+
+    return true
+end
+
+releaseCharacterHold = function()
+    characterHoldActive = false
+    if characterHoldConn then
+        pcall(function() characterHoldConn:Disconnect() end)
+        characterHoldConn = nil
+    end
+
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChild("Humanoid")
+    if root and characterHoldRoot == root then
+        root.Anchored = characterHoldPrevAnchored
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+    if hum and characterHoldHumanoid == hum then
+        hum.WalkSpeed = characterHoldPrevWalkSpeed or 16
+        hum.JumpPower = characterHoldPrevJumpPower or 50
+        hum.JumpHeight = characterHoldPrevJumpHeight or 0
+    end
+
+    characterHoldRoot = nil
+    characterHoldHumanoid = nil
+    characterHoldCFrame = nil
 end
 
 local function getHiveStandPos()
@@ -7648,14 +7778,15 @@ local function feedBee(col, row, amount)
     end)
 end
 
-local function rollBee(col, row, rjCount)
+local function rollBee(col, row, rjCount, eggType)
     local remote = getRemote("ConstructHiveCellFromEgg")
     if not remote or not col or not row or rjCount <= 0 then return false, nil end
     local c = tonumber(col)
     local r = tonumber(row)
     local amt = math.floor(tonumber(rjCount) or 1)
+    local item = tostring(eggType or "RoyalJelly")
     local ok, res = pcall(function()
-        return callRemote(remote, c, r, "RoyalJelly", amt)
+        return callRemote(remote, c, r, item, amt)
     end)
     return ok, res
 end
@@ -9782,6 +9913,7 @@ task.spawn(function()
                     local toBuy = math.min(treatsNeeded - ownedTreats, math.floor(honey / TREAT_COST))
                     if toBuy > 0 then
                         treatStatusLabel:SetDesc("Moving to Treat Shop...")
+                        releaseCharacterHold()
                         local shopPos = getTreatShopPos()
                         if goToPos(shopPos, 20) then
                             task.wait(0.5)
@@ -9810,6 +9942,7 @@ task.spawn(function()
                 if ownedTreats > 0 then
                     local toFeed = math.min(treatsNeeded, ownedTreats)
                     if toFeed > 0 then
+                        startCharacterHold()
                         treatStatusLabel:SetDesc(string.format("Feeding %s Treats to C%d,R%d (Lvl %d)...", formatNum(toFeed), tonumber(firstCand.col) or 0, tonumber(firstCand.row) or 0, tonumber(firstCand.level) or 0))
                         feedBee(firstCand.col, firstCand.row, toFeed)
                         task.wait(0.5)
@@ -9834,6 +9967,52 @@ end)
 
 local rollFailCount = 0
 
+-- Event bees cannot come from Royal Jelly. Bee Swarm gives each event bee its
+-- own permanent jelly (TabbyBeeJelly, PuppyBeeJelly, ...). The jelly always
+-- produces the normal event bee, never a gifted one.
+local function getEventJellyInfo(beeId)
+    local bee = beeId and beeMapById and beeMapById[beeId]
+    if not bee or bee.rarity ~= "Event" then return nil end
+    return {
+        beeId = bee.id,
+        name = bee.name,
+        item = bee.id .. "Jelly",
+        display = bee.name .. " Jelly",
+    }
+end
+
+local function getEventJellyCount(beeId, data)
+    local info = getEventJellyInfo(beeId)
+    if not info then return nil end
+    data = data or getStatData()
+    local n = countItem(info.display, data)
+    return tonumber(n) or 0
+end
+
+-- true  -> this target can be rolled/hatched now
+-- false -> skip it and try the next target (missing jelly / gifted event)
+local function eventTargetReady(target, data)
+    local info = getEventJellyInfo(target and target.beeId)
+    if not info then return true, nil, nil end
+    if tostring(target.gifted or "Any"):lower() == "gifted" then
+        return false, info, "gifted"
+    end
+    local count = getEventJellyCount(target.beeId, data)
+    if (count or 0) <= 0 then
+        return false, info, "missing"
+    end
+    return true, info, nil
+end
+
+local function skippedEventText(skipped)
+    local names = {}
+    for name in pairs(skipped or {}) do
+        names[#names + 1] = name
+    end
+    table.sort(names)
+    return table.concat(names, ", ")
+end
+
 local function cellMatches(cellData, target)
     if not cellData or not target or cellData.beeType == "Empty" then return false end
     local typeOk = (cellData.beeType == target.beeId) or (cellData.beeType:gsub("%s+",""):lower() == target.beeId:gsub("%s+",""):lower())
@@ -9844,6 +10023,39 @@ local function cellMatches(cellData, target)
         return cellData.gifted == false
     end
     return true
+end
+
+-- Royal Jelly is consumed by a successful roll. Poll the stat cache instead of
+-- sleeping a full second, so the next roll can start as soon as the server has
+-- processed the previous one.
+local function waitForRoyalJellyDrop(beforeRJ, timeout)
+    local deadline = os.clock() + (timeout or 1.2)
+    while os.clock() < deadline do
+        task.wait(0.08)
+        if not rollRunning or not scriptAlive then return nil end
+        local data = getStatData()
+        local rj = getRoyalJellies(data)
+        if beforeRJ > 0 and rj < beforeRJ then
+            return data, rj
+        end
+    end
+    return nil
+end
+
+-- Event jellies are permanent (their count does not drop), so wait for the
+-- target cell to become the event bee instead of watching the inventory.
+local function waitForEventHatch(col, row, target, timeout)
+    local deadline = os.clock() + (timeout or 1.2)
+    while os.clock() < deadline do
+        task.wait(0.1)
+        if not rollRunning or not scriptAlive then return nil end
+        local grid = readHiveGrid(true)
+        local cell = grid[row] and grid[row][col]
+        if cell and cellMatches(cell, target) then
+            return cell
+        end
+    end
+    return nil
 end
 
 task.spawn(function()
@@ -9887,11 +10099,34 @@ task.spawn(function()
                         return
                     end
 
-                    nextTargetSlot = incompleteExact[1]
+                    local jellyData = getStatData()
+                    local availableExact = {}
+                    local skippedExact = {}
+                    for _, item in ipairs(incompleteExact) do
+                        local ready, info, reason = eventTargetReady(item.target, jellyData)
+                        if ready then
+                            availableExact[#availableExact + 1] = item
+                        elseif info then
+                            skippedExact[info.name] = reason or true
+                        end
+                    end
+
+                    if #availableExact == 0 then
+                        local names = skippedEventText(skippedExact)
+                        rollStatusLabel:SetDesc("Event bee jelly missing (or gifted event): " .. (names ~= "" and names or "event target") .. ". Skipped.")
+                        stopAutoRoll()
+                        return
+                    end
+
+                    nextTargetSlot = availableExact[1]
                     currentTargetObj = nextTargetSlot.target
 
-                    rollStatusLabel:SetDesc(string.format("Exact Mode: Slot %s needs %s (%s) | Remaining: %d/%d", 
-                        tostring(nextTargetSlot.key), tostring(getShortBeeName(currentTargetObj.beeId)), tostring(currentTargetObj.gifted), tonumber(#incompleteExact) or 0, tonumber(totalExact) or 0))
+                    local skipNote = ""
+                    if next(skippedExact) ~= nil then
+                        skipNote = string.format(" | Skipped: %s", skippedEventText(skippedExact))
+                    end
+                    rollStatusLabel:SetDesc(string.format("Exact Mode: Slot %s needs %s (%s) | Remaining: %d/%d%s",
+                        tostring(nextTargetSlot.key), tostring(getShortBeeName(currentTargetObj.beeId)), tostring(currentTargetObj.gifted), tonumber(#availableExact) or 0, tonumber(totalExact) or 0, skipNote))
 
                 else
                     if #compositionTargets == 0 then
@@ -9928,19 +10163,28 @@ task.spawn(function()
                         end
                     end
 
+                    local jellyData = getStatData()
                     local sumRemaining = 0
+                    local usableRemaining = 0
+                    local skippedTargets = {}
                     local primaryNeededTarget = nil
-                    local rarityRank = { Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5 }
+                    local rarityRank = { Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5, Event = 6 }
                     local primaryRank = -1
                     for tag, rem in pairs(remainingNeeded) do
                         sumRemaining = sumRemaining + rem
                         if rem > 0 then
                             local bId, g = tag:match("^(.-)|(.*)$")
-                            local bee = beeMapById and beeMapById[bId]
-                            local rank = bee and (rarityRank[bee.rarity] or 0) or 0
-                            if not primaryNeededTarget or rank > primaryRank then
-                                primaryNeededTarget = { beeId = bId, gifted = g }
-                                primaryRank = rank
+                            local ready, info, reason = eventTargetReady({ beeId = bId, gifted = g }, jellyData)
+                            if ready then
+                                usableRemaining = usableRemaining + rem
+                                local bee = beeMapById and beeMapById[bId]
+                                local rank = bee and (rarityRank[bee.rarity] or 0) or 0
+                                if not primaryNeededTarget or rank > primaryRank then
+                                    primaryNeededTarget = { beeId = bId, gifted = g }
+                                    primaryRank = rank
+                                end
+                            elseif info then
+                                skippedTargets[info.name] = reason or true
                             end
                         end
                     end
@@ -9949,6 +10193,11 @@ task.spawn(function()
                         rollStatusLabel:SetDesc("All composition quota targets satisfied! Stopped.")
                         stopAutoRoll()
                         IvyisUI:Notify({ Title = "Hive done", Content = "Got every bee on the list", Duration = 5 })
+                        return
+                    elseif usableRemaining <= 0 then
+                        local names = skippedEventText(skippedTargets)
+                        rollStatusLabel:SetDesc("Event bee jelly missing (or gifted event): " .. (names ~= "" and names or "event target") .. ". Skipped.")
+                        stopAutoRoll()
                         return
                     end
 
@@ -9972,8 +10221,12 @@ task.spawn(function()
                     nextTargetSlot = candidates[1]
                     currentTargetObj = primaryNeededTarget
 
-                    rollStatusLabel:SetDesc(string.format("Comp Mode: Rolling %s | Next needed: %s (%s) | Left: %d/%d", 
-                        tostring(nextTargetSlot.key), tostring(getShortBeeName(currentTargetObj.beeId)), tostring(currentTargetObj.gifted), tonumber(sumRemaining) or 0, tonumber(totalNeeded) or 0))
+                    local skipNote = ""
+                    if next(skippedTargets) ~= nil then
+                        skipNote = string.format(" | Skipped: %s", skippedEventText(skippedTargets))
+                    end
+                    rollStatusLabel:SetDesc(string.format("Comp Mode: Rolling %s | Next needed: %s (%s) | Left: %d/%d%s",
+                        tostring(nextTargetSlot.key), tostring(getShortBeeName(currentTargetObj.beeId)), tostring(currentTargetObj.gifted), tonumber(usableRemaining) or 0, tonumber(totalNeeded) or 0, skipNote))
                 end
 
                 if not nextTargetSlot then
@@ -9981,11 +10234,14 @@ task.spawn(function()
                     return
                 end
 
+                local eventInfo = getEventJellyInfo(currentTargetObj and currentTargetObj.beeId)
+                local isEventTarget = eventInfo ~= nil
+
                 local keepGifted = forcedRollFlags.untilGifted == true
                 -- A target that must be gifted always needs the game's own stop
                 -- condition, even with both web toggles off. Without it one
                 -- remote call burns the whole 25k Royal Jelly batch.
-                local needGifted = currentTargetObj ~= nil
+                local needGifted = not isEventTarget and currentTargetObj ~= nil
                     and tostring(currentTargetObj.gifted or ""):lower() == "gifted"
                 -- Auto switch: the Until gifted switch follows the slot being
                 -- rolled. A plan that mixes one gifted bee with one plain bee
@@ -9993,7 +10249,7 @@ task.spawn(function()
                 -- plain one, instead of keeping one stop condition for the whole
                 -- plan. The player's own "Until gifted" toggle still wins: with it
                 -- on the switch never drops.
-                local wantGifted = keepGifted or needGifted
+                local wantGifted = (keepGifted or needGifted) and not isEventTarget
                 local wantMythic = false
                 local wantLegendary = false
                 if currentTargetObj then
@@ -10018,7 +10274,7 @@ task.spawn(function()
                     -- slot. It must hold even with sync settings off - the player
                     -- asked for it from the web - and the restore hands their own
                     -- value back afterwards.
-                    if webRollRunning and forcedRollFlags.stopOnMythic == true then
+                    if not isEventTarget and webRollRunning and forcedRollFlags.stopOnMythic == true then
                         wantMythic = true
                         webMythicSwitchOwned = true
                         setGameSetting("RollToMythic", true)
@@ -10032,27 +10288,37 @@ task.spawn(function()
                 local data = getStatData()
                 local currentRJ = getRoyalJellies(data)
 
-                if currentRJ < minRJThreshold and autoBuyRJ then
-                    rollStatusLabel:SetDesc("Moving to Royal Jelly Shop...")
-                    local rjShopPos = getRJShopPos()
-                    if goToPos(rjShopPos, 20) then
-                        task.wait(0.5)
-                        if not rollRunning or not scriptAlive then return end
-                        rollStatusLabel:SetDesc(string.format("Buying %s Royal Jellies...", formatNum(buyRJAmount)))
-                        buyRoyalJellies(buyRJAmount)
-                        task.wait(0.5)
-                        if not rollRunning or not scriptAlive then return end
-                        data = getStatData()
-                        currentRJ = getRoyalJellies(data)
-                    else
+                if isEventTarget then
+                    local jellyCount = getEventJellyCount(currentTargetObj.beeId, data)
+                    if (jellyCount or 0) <= 0 then
+                        rollStatusLabel:SetDesc("No " .. tostring(eventInfo.display) .. " - skipping event target.")
+                        task.wait(0.4)
                         return
                     end
-                end
+                else
+                    if currentRJ < minRJThreshold and autoBuyRJ then
+                        rollStatusLabel:SetDesc("Moving to Royal Jelly Shop...")
+                        releaseCharacterHold()
+                        local rjShopPos = getRJShopPos()
+                        if goToPos(rjShopPos, 20) then
+                            task.wait(0.5)
+                            if not rollRunning or not scriptAlive then return end
+                            rollStatusLabel:SetDesc(string.format("Buying %s Royal Jellies...", formatNum(buyRJAmount)))
+                            buyRoyalJellies(buyRJAmount)
+                            task.wait(0.5)
+                            if not rollRunning or not scriptAlive then return end
+                            data = getStatData()
+                            currentRJ = getRoyalJellies(data)
+                        else
+                            return
+                        end
+                    end
 
-                if currentRJ <= 0 then
-                    rollStatusLabel:SetDesc("Out of Royal Jellies! Stopped.")
-                    stopAutoRoll()
-                    return
+                    if currentRJ <= 0 then
+                        rollStatusLabel:SetDesc("Out of Royal Jellies! Stopped.")
+                        stopAutoRoll()
+                        return
+                    end
                 end
 
                 if not goToHive() then
@@ -10062,15 +10328,20 @@ task.spawn(function()
                 task.wait(0.5)
                 if not rollRunning or not scriptAlive then return end
 
+                startCharacterHold()
+
                 local beforeRollRJ = currentRJ
                 -- The 25k batch only pays off while one of the game's own stop
                 -- switches is on: the game then stops early the moment the bee
                 -- turns gifted / mythic / legendary. With no stop switch the whole
                 -- batch is spent on a single random result, so roll one jelly at a
-                -- time and let the plan check decide after each one.
+                -- time and let the plan check decide after each one. Event jellies
+                -- are always one use and do not consume Royal Jelly.
                 local hasStop = wantGifted or wantMythic or wantLegendary
-                local rollBatch = hasStop and math.min(currentRJ, 25000) or math.min(currentRJ, 1)
-                local okR = rollBee(nextTargetSlot.col, nextTargetSlot.row, rollBatch)
+                local rollBatch = isEventTarget and 1
+                    or (hasStop and math.min(currentRJ, 25000) or math.min(currentRJ, 1))
+                local rollType = isEventTarget and eventInfo.item or "RoyalJelly"
+                local okR = rollBee(nextTargetSlot.col, nextTargetSlot.row, rollBatch, rollType)
                 if not okR then
                     rollFailCount = rollFailCount + 1
                     if rollFailCount >= 5 then
@@ -10079,38 +10350,47 @@ task.spawn(function()
                         return
                     end
                     rollStatusLabel:SetDesc(string.format("Roll remote failed (%d/5)! Retrying...", rollFailCount))
-                    task.wait(1)
+                    task.wait(0.35)
                     return
                 end
 
-                task.wait(1)
-                if not rollRunning or not scriptAlive then return end
-
-                -- RemoteEvent does not report a rejected roll. If Royal Jelly was
-                -- not consumed after two reads, count it as a failed attempt.
-                local afterRollData = getStatData()
-                local afterRollRJ = getRoyalJellies(afterRollData)
-                if beforeRollRJ > 0 and afterRollRJ >= beforeRollRJ then
-                    task.wait(1)
-                    if not rollRunning or not scriptAlive then return end
-                    afterRollData = getStatData()
-                    afterRollRJ = getRoyalJellies(afterRollData)
-                end
-                if beforeRollRJ > 0 and afterRollRJ >= beforeRollRJ then
-                    rollFailCount = rollFailCount + 1
-                    if rollFailCount >= 5 then
-                        rollStatusLabel:SetDesc("Game rejected 5 rolls (RJ not used)! Stopped.")
-                        stopAutoRoll()
+                local newCell = nil
+                if isEventTarget then
+                    -- The event jelly stays in the inventory, so the cell itself
+                    -- is the only reliable "hatch finished" signal.
+                    newCell = waitForEventHatch(nextTargetSlot.col, nextTargetSlot.row, currentTargetObj, 1.4)
+                    if not newCell then
+                        rollFailCount = rollFailCount + 1
+                        if rollFailCount >= 5 then
+                            rollStatusLabel:SetDesc("Event jelly did not hatch after 5 tries! Stopped.")
+                            stopAutoRoll()
+                            return
+                        end
+                        rollStatusLabel:SetDesc(string.format("Event jelly not applied (%d/5)! Retrying...", rollFailCount))
+                        task.wait(0.35)
                         return
                     end
-                    rollStatusLabel:SetDesc(string.format("Game did not use RJ (%d/5)! Retrying...", rollFailCount))
-                    task.wait(1)
-                    return
+                else
+                    -- RemoteEvent does not report a rejected roll. If Royal Jelly
+                    -- was not consumed, count it as a failed attempt.
+                    local afterRollData, afterRollRJ = waitForRoyalJellyDrop(beforeRollRJ, 1.4)
+                    if not afterRollData then
+                        rollFailCount = rollFailCount + 1
+                        if rollFailCount >= 5 then
+                            rollStatusLabel:SetDesc("Game rejected 5 rolls (RJ not used)! Stopped.")
+                            stopAutoRoll()
+                            return
+                        end
+                        rollStatusLabel:SetDesc(string.format("Game did not use RJ (%d/5)! Retrying...", rollFailCount))
+                        task.wait(0.35)
+                        return
+                    end
+                    task.wait(0.2)
+                    local refreshedGrid = readHiveGrid(true)
+                    newCell = refreshedGrid[nextTargetSlot.row] and refreshedGrid[nextTargetSlot.row][nextTargetSlot.col]
                 end
                 rollFailCount = 0
 
-                local refreshedGrid = readHiveGrid(true)
-                local newCell = refreshedGrid[nextTargetSlot.row] and refreshedGrid[nextTargetSlot.row][nextTargetSlot.col]
                 local newType = newCell and newCell.beeType or "Unknown"
 
                 if currentBuildMode == "Exact" then
@@ -10138,7 +10418,7 @@ task.spawn(function()
             end)
             if not ok then warn("[AutoRoll] Error: " .. tostring(err)) end
         end
-        task.wait(1)
+        task.wait(0.15)
     end
 end)
 
@@ -11257,6 +11537,7 @@ if getgenv then
         end)
         if restoreRollSettings then pcall(restoreRollSettings) end
         Progression.cleanupProgression()
+        if releaseCharacterHold then pcall(releaseCharacterHold) end
         if pauseAtlas then pcall(function() pauseAtlas(false) end) end
         if activeTween then pcall(function() activeTween:Cancel() end) activeTween = nil end
         if antiAfkConn then pcall(function() antiAfkConn:Disconnect() end) antiAfkConn = nil end
