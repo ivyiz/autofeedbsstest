@@ -7538,15 +7538,28 @@ function pauseAtlas(enable)
             end
         end
 
+        local roots = {}
         local hui = (gethui and gethui()) or game:GetService("CoreGui")
-        for _, desc in ipairs(hui:GetDescendants()) do
-            if (desc:IsA("TextLabel") or desc:IsA("TextButton")) and desc.Text:lower():find("stop everything") and not desc.Text:lower():find("auto pause") then
-                local btn = desc:IsA("GuiButton") and desc or desc.Parent:FindFirstChildWhichIsA("GuiButton", true)
-                if btn then
-                    atlasPauseBtn = btn
-                    break
+        roots[#roots + 1] = hui
+        local playerGui = player:FindFirstChild("PlayerGui")
+        if playerGui and playerGui ~= hui then
+            roots[#roots + 1] = playerGui
+        end
+
+        for _, root in ipairs(roots) do
+            for _, desc in ipairs(root:GetDescendants()) do
+                if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+                    local text = tostring(desc.Text or ""):lower()
+                    if text:find("stop everything", 1, true) and not text:find("auto pause", 1, true) then
+                        local btn = desc:IsA("GuiButton") and desc or desc.Parent:FindFirstChildWhichIsA("GuiButton", true)
+                        if btn then
+                            atlasPauseBtn = btn
+                            break
+                        end
+                    end
                 end
             end
+            if atlasPauseBtn then break end
         end
     end
 
@@ -10013,6 +10026,17 @@ local function skippedEventText(skipped)
     return table.concat(names, ", ")
 end
 
+local function hiveContainsBee(grid, beeId)
+    if not grid or not beeId then return false end
+    for r = 1, 10 do
+        for c = 1, 5 do
+            local cell = grid[r] and grid[r][c]
+            if cell and cell.beeType == beeId then return true end
+        end
+    end
+    return false
+end
+
 local function cellMatches(cellData, target)
     if not cellData or not target or cellData.beeType == "Empty" then return false end
     local typeOk = (cellData.beeType == target.beeId) or (cellData.beeType:gsub("%s+",""):lower() == target.beeId:gsub("%s+",""):lower())
@@ -10104,6 +10128,10 @@ task.spawn(function()
                     local skippedExact = {}
                     for _, item in ipairs(incompleteExact) do
                         local ready, info, reason = eventTargetReady(item.target, jellyData)
+                        if ready and info and hiveContainsBee(cellsGrid, item.target.beeId) then
+                            ready = false
+                            reason = "already"
+                        end
                         if ready then
                             availableExact[#availableExact + 1] = item
                         elseif info then
@@ -10113,7 +10141,7 @@ task.spawn(function()
 
                     if #availableExact == 0 then
                         local names = skippedEventText(skippedExact)
-                        rollStatusLabel:SetDesc("Event bee jelly missing (or gifted event): " .. (names ~= "" and names or "event target") .. ". Skipped.")
+                        rollStatusLabel:SetDesc("Event bee skipped (missing jelly / gifted / already in hive): " .. (names ~= "" and names or "event target") .. ".")
                         stopAutoRoll()
                         return
                     end
@@ -10175,6 +10203,10 @@ task.spawn(function()
                         if rem > 0 then
                             local bId, g = tag:match("^(.-)|(.*)$")
                             local ready, info, reason = eventTargetReady({ beeId = bId, gifted = g }, jellyData)
+                            if ready and info and hiveContainsBee(cellsGrid, bId) then
+                                ready = false
+                                reason = "already"
+                            end
                             if ready then
                                 usableRemaining = usableRemaining + rem
                                 local bee = beeMapById and beeMapById[bId]
@@ -10196,7 +10228,7 @@ task.spawn(function()
                         return
                     elseif usableRemaining <= 0 then
                         local names = skippedEventText(skippedTargets)
-                        rollStatusLabel:SetDesc("Event bee jelly missing (or gifted event): " .. (names ~= "" and names or "event target") .. ". Skipped.")
+                        rollStatusLabel:SetDesc("Event bee skipped (missing jelly / gifted / already in hive): " .. (names ~= "" and names or "event target") .. ".")
                         stopAutoRoll()
                         return
                     end
