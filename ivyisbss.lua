@@ -997,6 +997,7 @@ do
         end
 
         -- ---- keo goc duoi phai de doi kich thuoc (giong o Resize cua Atlas) ----
+        local resizeHandle = nil
         do
             local handle = mk("TextButton", {
                 Name = "Resize",
@@ -1006,6 +1007,7 @@ do
                 Text = "",
                 AutoButtonColor = false,
             }, window)
+            resizeHandle = handle
             local resizing, rStart, rSize = false, nil, nil
             handle.InputBegan:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -1058,9 +1060,35 @@ do
             end)
         end
 
+        -- ---- thu nho cua so: chi giu thanh tieu de, khong an ca tab ----
+        local minimized = false
+        local expandedSize = nil
+        local function setMinimized(value)
+            value = value and true or false
+            if minimized == value then return end
+            minimized = value
+            if value then
+                expandedSize = window.Size
+                for _, entry in ipairs(allRailButtons) do
+                    if entry.page then entry.page.Visible = false end
+                end
+                rail.Visible = false
+                if resizeHandle then resizeHandle.Visible = false end
+                window.Size = UDim2.new(expandedSize.X.Scale, expandedSize.X.Offset, 0, 25)
+                collapse.Rotation = 270
+            else
+                rail.Visible = true
+                if resizeHandle then resizeHandle.Visible = true end
+                window.Size = expandedSize or UDim2.fromOffset(450, 280)
+                collapse.Rotation = 90
+                local active = allRailButtons[activeIndex]
+                if active and active.page then active.page.Visible = true end
+            end
+        end
+        Window.SetMinimized = setMinimized
+
         collapse.MouseButton1Click:Connect(function()
-            window.Visible = false
-            fireClose()
+            setMinimized(not minimized)
         end)
 
         searchInput:GetPropertyChangedSignal("Text"):Connect(applySearch)
