@@ -157,47 +157,9 @@ local function detectExecutor()
 
     local name, version = nil, nil
 
-    -- Cheap globals first: no function calls, no yields.
-    --
-    -- Order matters. Arceus X, Delta, Hydrogen, Codex... are Fluxus forks on
-    -- Android and keep Fluxus compatibility globals, so checking "fluxus" first
-    -- labelled every fork as Fluxus (e.g. Arceus X shown as "Fluxus").
-    -- Fork-specific markers are therefore checked before the base executor.
-    local env = envTable()
-    if env then
-        if hasMarker(env, { "MadiumSignal", "MadiumConnection" }) then
-            name = "Madium"
-        end
-        if not name and hasArceusMarker(env) then
-            name = "Arceus X"
-        end
-        if not name then
-            local direct = readMarker(env, "ExecutorName")
-                or readMarker(env, "Executor")
-                or readMarker(env, "executor")
-            if type(direct) == "string" and direct ~= "" then
-                name = direct
-            end
-        end
-        if not name and hasMarker(env, { "delta", "Delta", "DeltaX" }) then name = "Delta" end
-        if not name and hasMarker(env, { "hydrogen", "Hydrogen" }) then name = "Hydrogen" end
-        if not name and hasMarker(env, { "codex", "Codex" }) then name = "Codex" end
-        if not name and hasMarker(env, { "cryptic", "Cryptic" }) then name = "Cryptic" end
-        if not name and hasMarker(env, { "vega", "Vega", "VegaX" }) then name = "Vega X" end
-        if not name and hasMarker(env, { "karma", "Karma" }) then name = "Karma" end
-        if not name and hasMarker(env, { "wave", "Wave" }) then name = "Wave" end
-        if not name and hasMarker(env, { "solara", "Solara" }) then name = "Solara" end
-        if not name and hasMarker(env, { "xeno", "Xeno" }) then name = "Xeno" end
-        -- Base executors last: their globals are inherited by the forks above.
-        if not name and hasMarker(env, { "KRNL_LOADED" }) then name = "Krnl" end
-        if not name and hasMarker(env, { "syn", "Synapse" }) then name = "Synapse X" end
-        if not name and hasMarker(env, { "Fluxus", "fluxus", "is_fluxus_closure", "FLUXUS_LOADED" }) then name = "Fluxus" end
-    end
-    if not name and (type(MadiumSignal) ~= "nil" or type(MadiumConnection) ~= "nil") then
-        name = "Madium"
-    end
-
-    -- Fallback chuan UNC. Chay async de executor nao yield cung khong treo webhook.
+    -- Standardized UNC probe first. It is more trustworthy than globals, but
+    -- some forks report their base executor's name (e.g. "Fluxus"), so marker
+    -- detection below is still used to refine a generic/unknown result.
     local function probe(fn)
         if type(fn) ~= "function" then return end
         local done = false
@@ -218,11 +180,63 @@ local function detectExecutor()
         end
     end
 
-    if not name and type(identifyexecutor) == "function" then
+    if type(identifyexecutor) == "function" then
         pcall(probe, identifyexecutor)
     end
     if not name and type(getexecutorname) == "function" then
         pcall(probe, getexecutorname)
+    end
+
+    local function isGenericExecutorName(value)
+        if type(value) ~= "string" then return true end
+        local n = value:lower():gsub("%s+", "")
+        return n == "" or n == "unknown" or n == "fluxus" or n == "synapse"
+            or n == "synapsex" or n == "krnl"
+    end
+
+    -- Only let globals override when UNC was unavailable or generic. Arceus X,
+    -- Delta, Hydrogen, Codex... are Fluxus forks on Android and keep Fluxus
+    -- compatibility globals, so fork-specific markers are checked before the
+    -- base executor marker.
+    local env = envTable()
+    if env and (not name or isGenericExecutorName(name)) then
+        local markerName = nil
+        if hasMarker(env, { "MadiumSignal", "MadiumConnection" }) then
+            markerName = "Madium"
+        end
+        if not markerName and hasArceusMarker(env) then
+            markerName = "Arceus X"
+        end
+        if not markerName then
+            local direct = readMarker(env, "ExecutorName")
+                or readMarker(env, "Executor")
+                or readMarker(env, "executor")
+            if type(direct) == "string" and direct ~= "" then
+                markerName = direct
+            end
+        end
+        if not markerName and hasMarker(env, { "delta", "Delta", "DeltaX" }) then markerName = "Delta" end
+        if not markerName and hasMarker(env, { "hydrogen", "Hydrogen" }) then markerName = "Hydrogen" end
+        if not markerName and hasMarker(env, { "codex", "Codex" }) then markerName = "Codex" end
+        if not markerName and hasMarker(env, { "cryptic", "Cryptic" }) then markerName = "Cryptic" end
+        if not markerName and hasMarker(env, { "vega", "Vega", "VegaX" }) then markerName = "Vega X" end
+        if not markerName and hasMarker(env, { "karma", "Karma" }) then markerName = "Karma" end
+        if not markerName and hasMarker(env, { "wave", "Wave" }) then markerName = "Wave" end
+        if not markerName and hasMarker(env, { "solara", "Solara" }) then markerName = "Solara" end
+        if not markerName and hasMarker(env, { "xeno", "Xeno" }) then markerName = "Xeno" end
+        -- Base executors last: their globals are inherited by the forks above.
+        if not markerName and hasMarker(env, { "KRNL_LOADED" }) then markerName = "Krnl" end
+        if not markerName and hasMarker(env, { "syn", "Synapse" }) then markerName = "Synapse X" end
+        if not markerName and hasMarker(env, { "Fluxus", "fluxus", "is_fluxus_closure", "FLUXUS_LOADED" }) then markerName = "Fluxus" end
+        if markerName then
+            name = markerName
+            version = nil
+        end
+    end
+    if (not name or isGenericExecutorName(name))
+        and (type(MadiumSignal) ~= "nil" or type(MadiumConnection) ~= "nil") then
+        name = "Madium"
+        version = nil
     end
 
     EXECUTOR_NAME = cleanExecutorText(name or "Unknown", 48)
@@ -960,6 +974,7 @@ do
         function Window:DisableTopbarButtons(_) end
 
         function Window:Open()
+            screen.Enabled = true
             window.Visible = true
         end
 
@@ -1293,12 +1308,13 @@ do
                 }, card.box)
                 paint(titleLbl, "TextColor3", "valueText")
 
+                local descText = tostring(o.Desc or "")
                 local descLbl = nil
-                if o.Desc and tostring(o.Desc) ~= "" then
+                if descText ~= "" then
                     descLbl = textLabel({
                         Name = "Desc",
                         Size = UDim2.new(1, 0, 0, 14),
-                        Text = tostring(o.Desc),
+                        Text = descText,
                         TextSize = 12,
                         TextXAlignment = Enum.TextXAlignment.Left,
                         TextWrapped = true,
@@ -1314,13 +1330,14 @@ do
                     titleLbl.Text = tostring(v or "")
                 end
                 function obj:SetDesc(v)
+                    descText = tostring(v or "")
                     if descLbl then
-                        descLbl.Text = tostring(v or "")
-                    elseif v and tostring(v) ~= "" then
+                        descLbl.Text = descText
+                    elseif descText ~= "" then
                         descLbl = textLabel({
                             Name = "Desc",
                             Size = UDim2.new(1, 0, 0, 14),
-                            Text = tostring(v),
+                            Text = descText,
                             TextSize = 12,
                             TextXAlignment = Enum.TextXAlignment.Left,
                             TextWrapped = true,
@@ -1328,9 +1345,13 @@ do
                         }, card.box)
                         descLbl.AutomaticSize = Enum.AutomaticSize.Y
                         paint(descLbl, "TextColor3", "muted")
-                        -- Giu cho LayoutOrder cua cac element sau khong bi trung.
-                        card.__order = order + 1
+                        -- Khong keo card.__order ve sau: cac element khac co the
+                        -- da duoc them sau Paragraph nay.
+                        card.__order = math.max(card.__order or 0, order + 1)
                     end
+                end
+                function obj:GetDesc()
+                    return descText
                 end
                 obj.Label = titleLbl
                 return obj
@@ -1827,16 +1848,17 @@ do
                 o = o or {}
                 local card = currentCard()
                 local order = nextOrder(card)
+                local hasIcon = type(o.Icon) == "string" and o.Icon ~= ""
 
                 local btn = mk("TextButton", {
                     Name = "Button",
                     Size = UDim2.fromOffset(130, 20),
                     BackgroundColor3 = S.bar,
                     BorderSizePixel = 0,
-                    Text = tostring(o.Title or "Button"),
+                    Text = (hasIcon and string.rep(" ", 7) or "") .. tostring(o.Title or "Button"),
                     TextSize = 13,
                     Font = FONT_BOLD,
-                    TextXAlignment = Enum.TextXAlignment.Center,
+                    TextXAlignment = hasIcon and Enum.TextXAlignment.Left or Enum.TextXAlignment.Center,
                     AutoButtonColor = false,
                     ClipsDescendants = true,
                     LayoutOrder = order,
@@ -1844,6 +1866,17 @@ do
                 paint(btn, "BackgroundColor3", "bar")
                 rounded(btn, 4)
                 btn.TextColor3 = Color3.new(1, 1, 1)
+
+                if hasIcon then
+                    mk("ImageLabel", {
+                        Name = "ButtonIcon",
+                        Size = UDim2.fromOffset(14, 14),
+                        Position = UDim2.fromOffset(6, 3),
+                        BackgroundTransparency = 1,
+                        Image = ICON[o.Icon] or (o.Icon:match("^rbxasset") and o.Icon) or ICON.sparkles,
+                        ImageColor3 = Color3.new(1, 1, 1),
+                    }, btn)
+                end
 
                 -- Atlas: nut tu co gian theo do dai chu (do duoc 86 / 100 / 130px)
                 local function fitWidth()
@@ -1863,7 +1896,7 @@ do
                 end)
 
                 local obj = {}
-                function obj:SetTitle(v) btn.Text = tostring(v or "") end
+                function obj:SetTitle(v) btn.Text = (hasIcon and string.rep(" ", 7) or "") .. tostring(v or "") end
                 obj.Button = btn
                 return obj
             end
@@ -1989,6 +2022,7 @@ end
 
 function stopAutoRoll(keepAtlas)
     rollRunning = false
+    if RouteSteps then RouteSteps.activeSlot = nil end
     local hold = getgenv and getgenv().IvyisAtlasHold
     if hold and hold.release then pcall(hold.release) end
     if activeTween then
@@ -2008,6 +2042,14 @@ function stopAutoRoll(keepAtlas)
 end
 local HIVE_CONFIGS_DIR = "AutoFeedBSS/HiveConfigs"
 local currentBuildMode = "Composition"
+local buildModeDropdown = nil
+
+local function setBuildMode(mode)
+    currentBuildMode = (mode == "Exact" or mode == "Exact (100% Slot Order)") and "Exact" or "Composition"
+    if buildModeDropdown then
+        pcall(function() buildModeDropdown:Set(currentBuildMode) end)
+    end
+end
 local selectedHiveSlots = {}
 local exactSlotTargets = {}
 local compositionTargets = {}
@@ -2071,6 +2113,24 @@ local function listHiveConfigs()
     return list
 end
 
+function IvyisUI.SanitizeConfigName(name)
+    local s = tostring(name or "")
+    s = s:gsub("%c", "")
+    s = s:gsub("[\\/:*?\"<>|]", "_")
+    s = s:gsub("%.%.+", "_")
+    s = s:gsub("^%s+", ""):gsub("[%.%s]+$", "")
+    if s == "" then s = "MyHiveBuild" end
+    local base = (s:match("^([^%.]+)") or s):lower()
+    local reserved = base == "con" or base == "prn" or base == "aux" or base == "nul"
+        or base:match("^com[1-9]$") ~= nil or base:match("^lpt[1-9]$") ~= nil
+    if reserved then
+        s = "_" .. s
+    end
+    if #s > 80 then s = s:sub(1, 80):gsub("[%.%s]+$", "") end
+    if s == "" then s = "MyHiveBuild" end
+    return s
+end
+
 local function serializeHiveConfig(name)
     local data = {
         name = name or configNameInput or "MyHiveBuild",
@@ -2093,7 +2153,7 @@ end
 local function applyLoadedHiveConfig(data)
     if type(data) ~= "table" then return false end
     if data.buildMode then
-        currentBuildMode = (data.buildMode == "Exact" or data.buildMode == "Exact (100% Slot Order)") and "Exact" or "Composition"
+        setBuildMode(data.buildMode)
     end
     if type(data.composition) == "table" then
         compositionTargets = {}
@@ -2647,27 +2707,67 @@ local function nameVariants(item, cleanKey)
     return variants, cItem
 end
 
-local function countItemInGui(variants)
-    local count = nil
+-- Cache GUI inventory lookups for a short window. The old code scanned the
+-- entire PlayerGui once per countItem() call, and ownsPlanter() calls countItem
+-- up to five times per planter.
+local itemPerfCache = {
+    guiFramesAt = 0,
+    guiFrames = nil,
+    guiFrameCounts = setmetatable({}, { __mode = "k" }),
+    ownsAt = 0,
+    ownsData = nil,
+    ownsChar = nil,
+    ownsValues = {},
+}
+
+local function getGuiItemFrames()
+    local now = tick()
+    if itemPerfCache.guiFrames and now - itemPerfCache.guiFramesAt < 0.75 then
+        return itemPerfCache.guiFrames
+    end
+    local frames = {}
     pcall(function()
         local pg = player:FindFirstChild("PlayerGui")
         if not pg then return end
         for _, desc in ipairs(pg:GetDescendants()) do
             if (desc:IsA("Frame") or desc:IsA("ImageLabel") or desc:IsA("TextButton")) and desc.Visible then
-                local dName = desc.Name:gsub("[%s%-_']", ""):lower()
-                if variants[dName] then
-                    for _, sub in ipairs(desc:GetDescendants()) do
-                        if sub:IsA("TextLabel") and sub.Visible then
-                            local num = tonumber(sub.Text:match("^[xX]?%s*(%d+)%s*$"))
-                            if num and (not count or num > count) then
-                                count = num
-                            end
-                        end
-                    end
-                end
+                frames[#frames + 1] = desc
             end
         end
     end)
+    itemPerfCache.guiFramesAt = now
+    itemPerfCache.guiFrames = frames
+    return frames
+end
+
+local function readGuiFrameCount(desc, now)
+    local cached = itemPerfCache.guiFrameCounts[desc]
+    if cached and now - cached.at < 0.75 then return cached.value end
+    local count = nil
+    pcall(function()
+        for _, sub in ipairs(desc:GetDescendants()) do
+            if sub:IsA("TextLabel") and sub.Visible then
+                local num = tonumber(sub.Text:match("^[xX]?%s*(%d+)%s*$"))
+                if num and (not count or num > count) then count = num end
+            end
+        end
+    end)
+    itemPerfCache.guiFrameCounts[desc] = { at = now, value = count }
+    return count
+end
+
+local function countItemInGui(variants)
+    local count = nil
+    local now = tick()
+    for _, desc in ipairs(getGuiItemFrames()) do
+        if desc and desc.Parent then
+            local dName = desc.Name:gsub("[%s%-_']", ""):lower()
+            if variants[dName] then
+                local num = readGuiFrameCount(desc, now)
+                if num and (not count or num > count) then count = num end
+            end
+        end
+    end
     return count
 end
 
@@ -3204,15 +3304,20 @@ local lastGcScan = { settings = 0, route = 0 }
 
 local function isAtlasSettingsTable(t)
     if type(t) ~= "table" then return false end
-    if type(t.autofarm) == "table" and (t.autofarm.field1 ~= nil or t.autofarm.field ~= nil or t.autofarm.fields ~= nil) then
+    -- getgc() can return tables with hostile __index metamethods. Use rawget so
+    -- probing a random object cannot run arbitrary code.
+    local autofarm = rawget(t, "autofarm")
+    if type(autofarm) == "table"
+        and (rawget(autofarm, "field1") ~= nil or rawget(autofarm, "field") ~= nil or rawget(autofarm, "fields") ~= nil) then
         return true
     end
-    if type(t.farming) == "table" and (t.farming.field1 ~= nil or t.farming.field ~= nil) then
+    local farming = rawget(t, "farming")
+    if type(farming) == "table" and (rawget(farming, "field1") ~= nil or rawget(farming, "field") ~= nil) then
         return true
     end
-    local ok, hasToys = pcall(function() return t.toys end)
-    local ok2, hasFarm = pcall(function() return t.autofarm or t.farming or (t.toys and t.toys.route) end)
-    return ok and ok2 and (type(hasFarm) == "table" or (type(hasToys) == "table" and t.toys.route ~= nil))
+    local toys = rawget(t, "toys")
+    local toysRoute = type(toys) == "table" and rawget(toys, "route") or nil
+    return type(autofarm) == "table" or type(farming) == "table" or toysRoute ~= nil
 end
 
 local function findAtlasSettings()
@@ -3227,23 +3332,27 @@ local function findAtlasSettings()
                 atlasSettingsCache = root
                 return root
             end
-            if root.Atlas and type(root.Atlas) == "table" then
-                if isAtlasSettingsTable(root.Atlas.Settings) then
-                    atlasSettingsCache = root.Atlas.Settings
-                    return root.Atlas.Settings
+            local atlas = rawget(root, "Atlas")
+            if type(atlas) == "table" then
+                local atlasSettings = rawget(atlas, "Settings")
+                if isAtlasSettingsTable(atlasSettings) then
+                    atlasSettingsCache = atlasSettings
+                    return atlasSettings
                 end
-                if isAtlasSettingsTable(root.Atlas) then
-                    atlasSettingsCache = root.Atlas
-                    return root.Atlas
+                if isAtlasSettingsTable(atlas) then
+                    atlasSettingsCache = atlas
+                    return atlas
                 end
             end
-            if isAtlasSettingsTable(root.Settings) then
-                atlasSettingsCache = root.Settings
-                return root.Settings
+            local rootSettings = rawget(root, "Settings")
+            if isAtlasSettingsTable(rootSettings) then
+                atlasSettingsCache = rootSettings
+                return rootSettings
             end
-            if isAtlasSettingsTable(root.Config) then
-                atlasSettingsCache = root.Config
-                return root.Config
+            local rootConfig = rawget(root, "Config")
+            if isAtlasSettingsTable(rootConfig) then
+                atlasSettingsCache = rootConfig
+                return rootConfig
             end
             for k, v in pairs(root) do
                 if type(v) == "table" and k ~= "_G" and k ~= "shared" and k ~= "game" and k ~= "workspace" and k ~= "Enum" then
@@ -3251,9 +3360,10 @@ local function findAtlasSettings()
                         atlasSettingsCache = v
                         return v
                     end
-                    if isAtlasSettingsTable(v.Settings) then
-                        atlasSettingsCache = v.Settings
-                        return v.Settings
+                    local vSettings = rawget(v, "Settings")
+                    if isAtlasSettingsTable(vSettings) then
+                        atlasSettingsCache = vSettings
+                        return vSettings
                     end
                 end
             end
@@ -3565,22 +3675,39 @@ end
 
 local function ownsItem(itemName, itemType, char, data)
     if not itemName then return false end
+
+    local now = tick()
+    if itemPerfCache.ownsData ~= data or itemPerfCache.ownsChar ~= char
+        or now - itemPerfCache.ownsAt > 0.75 then
+        itemPerfCache.ownsAt = now
+        itemPerfCache.ownsData = data
+        itemPerfCache.ownsChar = char
+        itemPerfCache.ownsValues = {}
+    end
+    local cacheKey = tostring(itemName):lower() .. "|" .. tostring(itemType or "")
+    local cached = itemPerfCache.ownsValues[cacheKey]
+    if cached ~= nil then return cached end
+    local function done(value)
+        itemPerfCache.ownsValues[cacheKey] = value
+        return value
+    end
+
     local canonical = toItemName(itemName) or itemName
     local cleanName = tostring(canonical):gsub("[%s%-_']", ""):lower()
     local rawClean = tostring(itemName):gsub("[%s%-_']", ""):lower()
 
     if (itemType == "Planter" or cleanName:find("planter") or rawClean:find("planter")) then
         if ownsPlanter(cleanName, rawClean, canonical, data) then
-            return true
+            return done(true)
         end
     end
 
-    if char and (char:FindFirstChild(canonical) or char:FindFirstChild(itemName) or char:FindFirstChild(cleanName)) then return true end
-    if player.Backpack and (player.Backpack:FindFirstChild(canonical) or player.Backpack:FindFirstChild(itemName) or player.Backpack:FindFirstChild(cleanName)) then return true end
+    if char and (char:FindFirstChild(canonical) or char:FindFirstChild(itemName) or char:FindFirstChild(cleanName)) then return done(true) end
+    if player.Backpack and (player.Backpack:FindFirstChild(canonical) or player.Backpack:FindFirstChild(itemName) or player.Backpack:FindFirstChild(cleanName)) then return done(true) end
     if char then
         for _, child in ipairs(char:GetChildren()) do
             local cName = child.Name:gsub("[%s%-_']", ""):lower()
-            if cName == cleanName or cName == rawClean then return true end
+            if cName == cleanName or cName == rawClean then return done(true) end
         end
     end
 
@@ -3686,28 +3813,28 @@ local function ownsItem(itemName, itemType, char, data)
         or slotCovers(curSprinkler, SPRINKLER_TIERS)
         or slotCovers(curBlueGuard, BLUE_GUARD_TIERS)
         or slotCovers(curRedGuard, RED_GUARD_TIERS) then
-        return true
+        return done(true)
     end
 
     if (cleanName == "glider" or rawClean == "glider") and curGlider then
-        return true
+        return done(true)
     end
 
     local eqSources = { eq, data, data and data.Accessories, data and data.Equipment, data and data.Items, data and data.Inventory }
     for _, src in ipairs(dropNils(eqSources, 6)) do
         if type(src) == "table" then
-            if hasValue(src[canonical]) or hasValue(src[itemName]) or hasValue(src[cleanName]) or hasValue(src[rawClean]) then return true end
+            if hasValue(src[canonical]) or hasValue(src[itemName]) or hasValue(src[cleanName]) or hasValue(src[rawClean]) then return done(true) end
             for k, val in pairs(src) do
                 local kClean = tostring(k):gsub("[%s%-_']", ""):lower()
                 local vClean = tostring(val):gsub("[%s%-_']", ""):lower()
                 if ((kClean == cleanName or kClean == rawClean) and hasValue(val)) or vClean == cleanName or vClean == rawClean then
-                    return true
+                    return done(true)
                 end
             end
         end
     end
 
-    return false
+    return done(false)
 end
 
 local BASE_ROUTE_FIELDS = {
@@ -4130,38 +4257,251 @@ end
 
 local lastFileSync = { field = nil, vicious = false, at = 0 }
 
+-- Sua text truc tiep trong file config, nhung chi trong dung object JSON.
+-- Khong decode/encode lai toan bo file vi JSONEncode co the doi {} thanh [].
+-- Cac field cua planter cung ten field1/field2/field3, nen khong duoc gsub
+-- toan file: chi patch ben trong object "autofarm"/"farming" va "combat".
+local function patchConfigFileContent(content, targetField, enableVicious)
+    local function escapeJsonString(value)
+        local s = tostring(value or "")
+        s = s:gsub("\\", "\\\\")
+        s = s:gsub('"', '\\"')
+        s = s:gsub("\n", "\\n")
+        s = s:gsub("\r", "\\r")
+        s = s:gsub("\t", "\\t")
+        return s
+    end
+
+    local function jsonLiteral(value)
+        local kind = type(value)
+        if kind == "string" then return '"' .. escapeJsonString(value) .. '"' end
+        if kind == "boolean" then return value and "true" or "false" end
+        if kind == "number" then return tostring(value) end
+        return "null"
+    end
+
+    -- Tim moi object co key tuong ung, o bat ky do sau nao. Tra ve vung
+    -- content nam giua cap ngoac nhon, bo qua chuoi/escape.
+    local function findObjectSpans(text, key)
+        local spans = {}
+        local n = #text
+        local i = 1
+        while i <= n do
+            local c = text:sub(i, i)
+            if c == '"' then
+                local start = i
+                local j = i + 1
+                local escaped = false
+                while j <= n do
+                    local ch = text:sub(j, j)
+                    if escaped then
+                        escaped = false
+                    elseif ch == "\\" then
+                        escaped = true
+                    elseif ch == '"' then
+                        break
+                    end
+                    j = j + 1
+                end
+                if j > n then break end
+                if text:sub(start + 1, j - 1) == key then
+                    local k = j + 1
+                    while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
+                    if text:sub(k, k) == ":" then
+                        k = k + 1
+                        while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
+                        if text:sub(k, k) == "{" then
+                            local depth = 1
+                            local p = k + 1
+                            local inString = false
+                            local inEscape = false
+                            while p <= n do
+                                local ch = text:sub(p, p)
+                                if inString then
+                                    if inEscape then
+                                        inEscape = false
+                                    elseif ch == "\\" then
+                                        inEscape = true
+                                    elseif ch == '"' then
+                                        inString = false
+                                    end
+                                elseif ch == '"' then
+                                    inString = true
+                                elseif ch == "{" then
+                                    depth = depth + 1
+                                elseif ch == "}" then
+                                    depth = depth - 1
+                                    if depth == 0 then break end
+                                end
+                                p = p + 1
+                            end
+                            if p <= n and depth == 0 then
+                                spans[#spans + 1] = { contentStart = k + 1, contentEnd = p - 1 }
+                                i = p + 1
+                            else
+                                break
+                            end
+                        else
+                            i = j + 1
+                        end
+                    else
+                        i = j + 1
+                    end
+                else
+                    i = j + 1
+                end
+            else
+                i = i + 1
+            end
+        end
+        return spans
+    end
+
+    -- Chi thay field o cap ngoai cung cua object, khong cham field long ben trong.
+    local function patchTopLevelField(text, key, value)
+        local literal = jsonLiteral(value)
+        local out = {}
+        local last = 1
+        local depth = 0
+        local n = #text
+        local i = 1
+        while i <= n do
+            local c = text:sub(i, i)
+            if c == '"' then
+                local start = i
+                local j = i + 1
+                local escaped = false
+                while j <= n do
+                    local ch = text:sub(j, j)
+                    if escaped then
+                        escaped = false
+                    elseif ch == "\\" then
+                        escaped = true
+                    elseif ch == '"' then
+                        break
+                    end
+                    j = j + 1
+                end
+                if j > n then break end
+                local advanced = false
+                if depth == 0 and text:sub(start + 1, j - 1) == key then
+                    local k = j + 1
+                    while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
+                    if text:sub(k, k) == ":" then
+                        k = k + 1
+                        while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
+                        if k <= n then
+                            local valueStart = k
+                            local valueEnd = nil
+                            if text:sub(k, k) == '"' then
+                                local vj = k + 1
+                                local vEscape = false
+                                while vj <= n do
+                                    local ch = text:sub(vj, vj)
+                                    if vEscape then
+                                        vEscape = false
+                                    elseif ch == "\\" then
+                                        vEscape = true
+                                    elseif ch == '"' then
+                                        break
+                                    end
+                                    vj = vj + 1
+                                end
+                                if vj <= n then valueEnd = vj end
+                            else
+                                local vj = k
+                                while vj <= n do
+                                    local ch = text:sub(vj, vj)
+                                    if ch == "," or ch == "}" or ch == "]" or ch:match("%s") then break end
+                                    vj = vj + 1
+                                end
+                                valueEnd = vj - 1
+                            end
+                            if valueEnd and valueEnd >= valueStart then
+                                out[#out + 1] = text:sub(last, valueStart - 1)
+                                out[#out + 1] = literal
+                                last = valueEnd + 1
+                                i = valueEnd + 1
+                                advanced = true
+                            end
+                        end
+                    end
+                end
+                if not advanced then i = j + 1 end
+            elseif c == "{" or c == "[" then
+                depth = depth + 1
+                i = i + 1
+            elseif c == "}" or c == "]" then
+                depth = depth - 1
+                i = i + 1
+            else
+                i = i + 1
+            end
+        end
+        out[#out + 1] = text:sub(last)
+        return table.concat(out)
+    end
+
+    local function patchObject(text, objectKey, fields)
+        local spans = findObjectSpans(text, objectKey)
+        for index = #spans, 1, -1 do
+            local span = spans[index]
+            local body = text:sub(span.contentStart, span.contentEnd)
+            local updated = body
+            for _, field in ipairs(fields) do
+                updated = patchTopLevelField(updated, field[1], field[2])
+            end
+            if updated ~= body then
+                text = text:sub(1, span.contentStart - 1) .. updated .. text:sub(span.contentEnd + 1)
+            end
+        end
+        return text
+    end
+
+    local patched = content
+    if targetField and targetField ~= "" and targetField ~= "Idle" and targetField ~= "Unchanged" then
+        local fields = {
+            { "field1", targetField },
+            { "field2", "None" },
+            { "field3", "None" },
+        }
+        patched = patchObject(patched, "autofarm", fields)
+        patched = patchObject(patched, "farming", fields)
+    end
+    if enableVicious ~= nil then
+        patched = patchObject(patched, "combat", {
+            { "killvicious", enableVicious == true },
+            { "vicious", enableVicious == true },
+        })
+    end
+    return patched
+end
+
 -- sua truc tiep text trong file config (khong decode/encode lai JSON,
 -- vi JSONEncode doi {} thanh [] va lam hong config cua Atlas)
 local function syncFieldAndViciousToActiveFile(targetField, enableVicious)
-    if not (readfile and writefile and configState.path and isfile and isfile(configState.path)) then return end
+    if not (readfile and writefile and configState.path and isfile and isfile(configState.path)) then return false end
     local wantField = targetField and targetField ~= "" and targetField ~= "Idle" and targetField ~= "Unchanged"
-    if not wantField and not enableVicious then return end
+    if not wantField and enableVicious == nil then return false end
     if (not wantField or lastFileSync.field == targetField)
-        and (not enableVicious or lastFileSync.vicious)
+        and (enableVicious == nil or lastFileSync.vicious == enableVicious)
         and tick() - lastFileSync.at < 20 then
-        return
+        return false
     end
+    local changed = false
     pcall(function()
         local content = readfile(configState.path)
         if type(content) ~= "string" or #content == 0 then return end
-        local patched = content
-        if wantField then
-            local safe = targetField:gsub("%%", "%%%%")
-            patched = patched:gsub('("field1"%s*:%s*)"[^"]*"', '%1"' .. safe .. '"')
-            patched = patched:gsub('("field2"%s*:%s*)"[^"]*"', '%1"None"')
-            patched = patched:gsub('("field3"%s*:%s*)"[^"]*"', '%1"None"')
-        end
-        if enableVicious then
-            patched = patched:gsub('("killvicious"%s*:%s*)false', "%1true")
-            patched = patched:gsub('("vicious"%s*:%s*)false', "%1true")
-        end
+        local patched = patchConfigFileContent(content, targetField, enableVicious)
         if patched ~= content then
             writefile(configState.path, patched)
+            changed = true
         end
         lastFileSync.at = tick()
         if wantField then lastFileSync.field = targetField end
-        if enableVicious then lastFileSync.vicious = true end
+        if enableVicious ~= nil then lastFileSync.vicious = enableVicious == true end
     end)
+    return changed
 end
 
 local function syncFieldAndViciousToMemory(targetField, enableVicious)
@@ -4186,13 +4526,15 @@ local function syncFieldAndViciousToMemory(targetField, enableVicious)
                 synced = true
             end
         end
-        if enableVicious then
+        if enableVicious ~= nil then
             if not settings.combat or type(settings.combat) ~= "table" then settings.combat = {} end
-            settings.combat.killvicious = true
-            settings.combat.vicious = true
-            settings.combat.giftedvicious = true
-            if settings.combat.viciousmin == nil or settings.combat.viciousmin == 0 then settings.combat.viciousmin = 1 end
-            if settings.combat.viciousmax == nil or settings.combat.viciousmax < 6 then settings.combat.viciousmax = 6 end
+            settings.combat.killvicious = enableVicious == true
+            settings.combat.vicious = enableVicious == true
+            if enableVicious then
+                settings.combat.giftedvicious = true
+                if settings.combat.viciousmin == nil or settings.combat.viciousmin == 0 then settings.combat.viciousmin = 1 end
+                if settings.combat.viciousmax == nil or settings.combat.viciousmax < 6 then settings.combat.viciousmax = 6 end
+            end
             synced = true
         end
     end
@@ -4217,13 +4559,13 @@ local function syncFieldAndViciousToMemory(targetField, enableVicious)
                         synced = true
                     end
                 end
-                if enableVicious then
+                if enableVicious ~= nil then
                     if not root.Atlas.Settings or type(root.Atlas.Settings) ~= "table" then root.Atlas.Settings = {} end
                     if not root.Atlas.Settings.combat or type(root.Atlas.Settings.combat) ~= "table" then root.Atlas.Settings.combat = {} end
-                    root.Atlas.Settings.combat.killvicious = true
-                    root.Atlas.Settings.combat.vicious = true
+                    root.Atlas.Settings.combat.killvicious = enableVicious == true
+                    root.Atlas.Settings.combat.vicious = enableVicious == true
                     if type(root.Atlas.Toggle) == "function" then
-                        pcall(root.Atlas.Toggle, "killvicious", true)
+                        pcall(root.Atlas.Toggle, "killvicious", enableVicious == true)
                         synced = true
                     end
                 end
@@ -4235,19 +4577,19 @@ local function syncFieldAndViciousToMemory(targetField, enableVicious)
                     root.Config.Field = targetField
                     synced = true
                 end
-                if enableVicious then
+                if enableVicious ~= nil then
                     if not root.Config.combat or type(root.Config.combat) ~= "table" then root.Config.combat = {} end
-                    root.Config.combat.killvicious = true
-                    root.Config.combat.vicious = true
+                    root.Config.combat.killvicious = enableVicious == true
+                    root.Config.combat.vicious = enableVicious == true
                     synced = true
                 end
             end
-            if enableVicious and type(root.Toggles) == "table" then
+            if enableVicious ~= nil and type(root.Toggles) == "table" then
                 for k, tog in pairs(root.Toggles) do
                     local lk = tostring(k):lower():gsub("[%s%-_']", "")
                     if lk == "killvicious" or lk == "vicious" or lk == "viciousbee" or lk == "autokillvicious" then
                         if type(tog) == "table" and type(tog.SetValue) == "function" then
-                            pcall(function() tog:SetValue(true) end)
+                            pcall(function() tog:SetValue(enableVicious == true) end)
                             synced = true
                         end
                     end
@@ -4302,14 +4644,9 @@ local function setFieldViaUI(targetField)
                 end
             end
 
-            local isFarmingVisible = farmingHeader and isOnScreen(farmingHeader)
-            local prevTabName, prevTabBtn = nil, nil
-            local switchedTab = false
-
             if farmingHeader then
                 local curVal = headerTxt and headerTxt:match("^[Ff]ield%s*:%s*(.+)")
                 if curVal and curVal:gsub("[%s%-_']", ""):lower() == targetClean then
-                    if switchedTab and prevTabBtn then triggerButtonHeadless(prevTabBtn) end
                     return true, "ui_already_set"
                 end
 
@@ -4339,16 +4676,9 @@ local function setFieldViaUI(targetField)
                     end
                 end
 
-                if switchedTab and prevTabBtn then
-                    task.wait(0.04)
-                    triggerButtonHeadless(prevTabBtn)
-                end
-
                 if foundAndClicked then
                     return true, "ui_field_set"
                 end
-            elseif switchedTab and prevTabBtn then
-                triggerButtonHeadless(prevTabBtn)
             end
         end
     end
@@ -4373,6 +4703,15 @@ end
 
 local viciousUiDone = false
 local lastViciousCheck = 0
+-- Track config and switch ownership separately. Cleanup must never disable a
+-- switch the player enabled manually, even if the script also patched config.
+-- Always start with fresh ownership. A previous execution may have crashed
+-- before cleanup and must not be allowed to disable this run's switches.
+getgenv().IvyisViciousState = {
+    switchChanged = false,
+    configChanged = false,
+    lastDisableCheck = 0,
+}
 
 local function isViciousToggleText(txt)
     if not txt or type(txt) ~= "string" then return false end
@@ -4475,6 +4814,11 @@ local function findViciousSwitch(root)
 end
 
 local function setViciousViaUI(enable)
+    local vs = getgenv().IvyisViciousState
+    if not enable and not vs.switchChanged then
+        return false, "ui_vicious_not_owned"
+    end
+
     local uiRoots = {}
     pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
     pcall(function() table.insert(uiRoots, CoreGui) end)
@@ -4483,31 +4827,31 @@ local function setViciousViaUI(enable)
     for _, root in ipairs(uiRoots) do
         if root then
             local switchBtn, switchRow = findViciousSwitch(root)
-            local prevTabName, prevTabBtn = nil, nil
-            local switchedTab = false
 
             -- Khong tu dong chuyen tab combat de khong lam lo UI
             -- switchBtn chi duoc tim neu da co san tren UI hien tai
 
             if switchBtn then
                 local isChecked = isToggleOn(switchBtn, switchRow)
-                if enable and not isChecked then
-                    triggerButtonHeadless(switchBtn)
+                if enable then
+                    if not isChecked then
+                        local clicked = triggerButtonHeadless(switchBtn)
+                        task.wait(0.05)
+                        if clicked then vs.switchChanged = true end
+                    end
+                    viciousUiDone = true
+                    return true, "ui_vicious_set"
+                end
+
+                if isChecked then
+                    local clicked = triggerButtonHeadless(switchBtn)
                     task.wait(0.05)
-                    viciousUiDone = true
-                elseif isChecked then
-                    viciousUiDone = true
+                    if clicked then vs.switchChanged = false end
+                else
+                    vs.switchChanged = false
                 end
-
-                if switchedTab and prevTabBtn then
-                    task.wait(0.04)
-                    triggerButtonHeadless(prevTabBtn)
-                end
-
-                return true, "ui_vicious_set"
-            elseif switchedTab and prevTabBtn then
-                task.wait(0.04)
-                triggerButtonHeadless(prevTabBtn)
+                viciousUiDone = true
+                return true, isChecked and "ui_vicious_disabled" or "ui_vicious_already_off"
             end
         end
     end
@@ -4515,13 +4859,42 @@ local function setViciousViaUI(enable)
 end
 
 local function enableViciousKill()
-    syncFieldAndViciousToMemory(nil, true)
-    syncFieldAndViciousToActiveFile(nil, true)
+    local vs = getgenv().IvyisViciousState
+    local settings = findAtlasSettings()
+    local alreadyOn = settings and type(settings.combat) == "table"
+        and (settings.combat.killvicious == true or settings.combat.vicious == true)
+    local memOk = syncFieldAndViciousToMemory(nil, true)
+    local fileChanged = syncFieldAndViciousToActiveFile(nil, true)
+    if (memOk or fileChanged) and not alreadyOn then vs.configChanged = true end
 
     if not viciousUiDone or (tick() - lastViciousCheck > 30) then
         lastViciousCheck = tick()
         pcall(setViciousViaUI, true)
     end
+end
+
+local function disableViciousKill(force)
+    local vs = getgenv().IvyisViciousState
+    if not vs.switchChanged and not vs.configChanged then
+        return false, "not_owned"
+    end
+    -- Retry slowly if Atlas' combat UI is closed; keep switch ownership true
+    -- until the visible switch is actually off. Cleanup passes force=true so a
+    -- recent tick cannot leave the switch enabled after the script stops.
+    if not force and tick() - vs.lastDisableCheck < 2 then return true, "throttled" end
+    vs.lastDisableCheck = tick()
+
+    if vs.configChanged then
+        syncFieldAndViciousToMemory(nil, false)
+        syncFieldAndViciousToActiveFile(nil, false)
+        vs.configChanged = false
+    end
+    if not vs.switchChanged then return true, "config_restored" end
+
+    local ok, changed, reason = pcall(setViciousViaUI, false)
+    if not ok then return false, tostring(changed) end
+    if not changed then return false, tostring(reason or "ui_vicious_not_found") end
+    return true, tostring(reason or "ui_vicious_disabled")
 end
 
 local function needsStinger(targetItem, data)
@@ -4780,28 +5153,38 @@ end
 local function findRouteInMemory()
     local settings = findAtlasSettings()
     if settings then
-        if settings.toys and type(settings.toys) == "table" and settings.toys.route then
-            return settings.toys.route
-        end
-        if settings.route and type(settings.route) == "table" then
-            return settings.route
-        end
+        local toys = rawget(settings, "toys")
+        local toysRoute = type(toys) == "table" and rawget(toys, "route") or nil
+        if toysRoute then return toysRoute end
+        local route = rawget(settings, "route")
+        if type(route) == "table" then return route end
     end
 
     local roots = dropNils({ getgenv and getgenv(), _G, shared }, 3)
     for _, r in ipairs(roots) do
         if type(r) == "table" then
-            if r.Atlas and type(r.Atlas) == "table" then
-                if r.Atlas.Route and type(r.Atlas.Route) == "table" then return r.Atlas.Route end
-                if r.Atlas.Toys and type(r.Atlas.Toys) == "table" and r.Atlas.Toys.route then return r.Atlas.Toys.route end
-                if r.Atlas.Settings and type(r.Atlas.Settings) == "table" then
-                    if r.Atlas.Settings.toys and r.Atlas.Settings.toys.route then return r.Atlas.Settings.toys.route end
-                    if r.Atlas.Settings.route then return r.Atlas.Settings.route end
+            local atlas = rawget(r, "Atlas")
+            if type(atlas) == "table" then
+                local route = rawget(atlas, "Route")
+                if type(route) == "table" then return route end
+                local atlasToys = rawget(atlas, "Toys")
+                local atlasToysRoute = type(atlasToys) == "table" and rawget(atlasToys, "route") or nil
+                if atlasToysRoute then return atlasToysRoute end
+                local atlasSettings = rawget(atlas, "Settings")
+                if type(atlasSettings) == "table" then
+                    local sToys = rawget(atlasSettings, "toys")
+                    local sToysRoute = type(sToys) == "table" and rawget(sToys, "route") or nil
+                    if sToysRoute then return sToysRoute end
+                    local sRoute = rawget(atlasSettings, "route")
+                    if sRoute then return sRoute end
                 end
             end
-            if r.AtlasRoute and type(r.AtlasRoute) == "table" then return r.AtlasRoute end
-            if r.Route and type(r.Route) == "table" and (#r.Route > 0 or r.Route.purchase) then return r.Route end
-            if r.ProgressionRoute and type(r.ProgressionRoute) == "table" then return r.ProgressionRoute end
+            local atlasRoute = rawget(r, "AtlasRoute")
+            if type(atlasRoute) == "table" then return atlasRoute end
+            local route = rawget(r, "Route")
+            if type(route) == "table" and (rawlen(route) > 0 or rawget(route, "purchase")) then return route end
+            local progressionRoute = rawget(r, "ProgressionRoute")
+            if type(progressionRoute) == "table" then return progressionRoute end
         end
     end
 
@@ -4812,20 +5195,22 @@ local function findRouteInMemory()
         if ok and type(gc) == "table" then
             for _, obj in ipairs(gc) do
                 if type(obj) == "table" then
-                    if obj.toys and type(obj.toys) == "table" and obj.toys.route then
-                        return obj.toys.route
-                    end
-                    if obj.route and type(obj.route) == "table" then
-                        local rt = obj.route
-                        if type(rt) == "table" and #rt > 0 then
-                            for _, step in ipairs(rt) do
-                                if isRouteStep(step) then return rt end
+                    local toys = rawget(obj, "toys")
+                    local toysRoute = type(toys) == "table" and rawget(toys, "route") or nil
+                    if toysRoute then return toysRoute end
+                    local route = rawget(obj, "route")
+                    if type(route) == "table" then
+                        local routeLen = rawlen(route)
+                        if routeLen > 0 then
+                            for i = 1, routeLen do
+                                if isRouteStep(rawget(route, i)) then return route end
                             end
                         end
                     end
-                    if #obj > 0 and type(obj[1]) == "table" then
-                        for _, step in ipairs(obj) do
-                            if isRouteStep(step) then return obj end
+                    local objLen = rawlen(obj)
+                    if objLen > 0 and type(rawget(obj, 1)) == "table" then
+                        for i = 1, objLen do
+                            if isRouteStep(rawget(obj, i)) then return obj end
                         end
                     end
                 end
@@ -4903,16 +5288,19 @@ local function discoverAtlasRoots()
     local roots, seen = {}, {}
     local function add(p)
         p = normPath(p)
-        if not seen[p] then seen[p] = true; roots[#roots + 1] = p end
+        if p ~= "" and not seen[p] then seen[p] = true; roots[#roots + 1] = p end
     end
 
+    -- Uu tien thu muc nguoi dung cau hinh, sau do moi den cac thu muc Atlas
+    -- dang ton tai. Khong dung "" lam root vi no tao ra path "/Stage...".
     local g = getgenv and getgenv() or nil
-    if g and type(g.AtlasConfigDir) == "string" then add(g.AtlasConfigDir) end
+    if g and type(g.AtlasConfigDir) == "string" and g.AtlasConfigDir ~= "" then
+        add(g.AtlasConfigDir)
+    end
 
-    add("")
-    add(".")
-    add("atlas")
-    add("Atlas")
+    for _, name in ipairs({ "atlas1", "Atlas", "atlas", "AtlasBSS", "Atlas BSS" }) do
+        if not seen[name] and fsIsFolder(name) then add(name) end
+    end
 
     local top = listDir("")
     if #top == 0 then top = listDir(".") end
@@ -4922,9 +5310,8 @@ local function discoverAtlasRoots()
         end
     end
 
-    for _, name in ipairs({ "atlas1", "Atlas", "atlas", "AtlasBSS", "Atlas BSS" }) do
-        if not seen[name] and fsIsFolder(name) then add(name) end
-    end
+    -- Neu khong tim thay root nao, ghi ngay trong thu muc hien tai.
+    add(".")
     return roots
 end
 
@@ -5333,7 +5720,6 @@ local function getRoute()
     if customUserRoute then
         rawRoute, routeSrc = customUserRoute, "custom"
     else
-        local preferMemory = getgenv and getgenv().AtlasRouteSource == "memory"
         local function tryFile()
             local okF, r = pcall(readRouteFile)
             if okF and r then return r, "file:" .. tostring(lastRouteFile) end
@@ -6111,9 +6497,21 @@ local function getLiveTarget()
 
     if allowUI then
         local uiRoots = {}
-        pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
-        pcall(function() table.insert(uiRoots, CoreGui) end)
-        pcall(function() table.insert(uiRoots, player:FindFirstChild("PlayerGui")) end)
+        -- Uu tien cua so Atlas; chi quet toan bo CoreGui/PlayerGui khi khong tim
+        -- thay cua so, va toi da 15 giay mot lan.
+        local atlasWin = findAtlasWindow and findAtlasWindow()
+        if atlasWin then
+            uiRoots[1] = atlasWin
+        else
+            local g = getgenv and getgenv()
+            local lastScan = tonumber(g and g._IvyisLiveTargetScanAt) or 0
+            if tick() - lastScan >= 15 then
+                if g then g._IvyisLiveTargetScanAt = tick() end
+                pcall(function() if gethui then table.insert(uiRoots, gethui()) end end)
+                pcall(function() table.insert(uiRoots, CoreGui) end)
+                pcall(function() table.insert(uiRoots, player:FindFirstChild("PlayerGui")) end)
+            end
+        end
 
         local patterns = {
             "[Tt]arget%s*[:%-]%s*([%w%s%-_']+)",
@@ -7154,7 +7552,7 @@ end
 local function writeStageFiles()
     if not writefile then return end
     local roots = discoverAtlasRoots()
-    local targetDir = roots[1] or "atlas"
+    local targetDir = roots[1] or "."
     if makefolder and not fsIsFolder(targetDir) then
         pcall(makefolder, targetDir)
     end
@@ -7162,9 +7560,6 @@ local function writeStageFiles()
         local path = targetDir .. "/" .. s.FileName
         if not fsIsFile(path) then
             pcall(writefile, path, s.Raw)
-        end
-        if not fsIsFile(s.FileName) then
-            pcall(writefile, s.FileName, s.Raw)
         end
     end
 end
@@ -7176,11 +7571,29 @@ local function applyStagePreset(stageInfo)
 
     if writefile then
         local roots = discoverAtlasRoots()
-        for _, r in ipairs(roots) do
-            pcall(writefile, r .. "/" .. fileName, raw)
+        local targetDir = roots[1] or "."
+        if makefolder and not fsIsFolder(targetDir) then
+            pcall(makefolder, targetDir)
         end
-        pcall(writefile, fileName, raw)
-        pcall(writefile, "atlas/" .. fileName, raw)
+
+        local function backupBeforeWrite(path)
+            if not (readfile and fsIsFile(path)) then return end
+            local content = safeRead(path)
+            if not content then return end
+            local backup = path .. ".bak"
+            local n = 1
+            while fsIsFile(backup) do
+                n = n + 1
+                if n > 9 then return end
+                backup = path .. ".bak" .. n
+            end
+            pcall(writefile, backup, content)
+        end
+
+        local function writeWithBackup(path, content)
+            backupBeforeWrite(path)
+            return pcall(writefile, path, content)
+        end
 
         local activePresets = {}
         local seenPresets = {}
@@ -7194,59 +7607,105 @@ local function applyStagePreset(stageInfo)
             end
         end
 
-        if configState and configState.path and type(configState.path) == "string" then
-            local pName = configState.path:match("([^/\\]+%.json)$")
+        local activeConfigPath = nil
+        if configState and configState.path and type(configState.path) == "string" and fsIsFile(configState.path) then
+            activeConfigPath = normPath(configState.path)
+            local pName = activeConfigPath:match("([^/\\]+%.json)$")
             if pName then addPreset(pName) end
         end
 
+        local pointerStyles = {}
         local ptrFiles = findPointerFiles()
-        for _, pf in ipairs(ptrFiles) do
-            if fsIsFile(pf) and readfile then
-                local ok, content = pcall(readfile, pf)
-                if ok and content and #content > 0 then
-                    addPreset(content)
-                end
-            end
+        local function readPointer(path)
+            if not (fsIsFile(path) and readfile) then return end
+            local ok, content = pcall(readfile, path)
+            if not (ok and content and #content > 0) then return end
+            local trimmed = content:gsub("^%s+", ""):gsub("%s+$", "")
+            pointerStyles[path] = trimmed:sub(1, 1) == '"' and trimmed:sub(-1) == '"'
+            addPreset(content)
         end
+        for _, pf in ipairs(ptrFiles) do readPointer(pf) end
 
         local userPtr = {
             "atlas-" .. player.Name .. ".json",
             "atlas-" .. tostring(player.UserId) .. ".json"
         }
-        for _, pf in ipairs(userPtr) do
-            if fsIsFile(pf) and readfile then
-                local ok, content = pcall(readfile, pf)
-                if ok and content and #content > 0 then
-                    addPreset(content)
-                end
+        for _, pf in ipairs(userPtr) do readPointer(pf) end
+
+        local written = {}
+        local function writePreset(path, content)
+            path = normPath(path)
+            if path == "" or written[path] then return end
+            written[path] = true
+            writeWithBackup(path, content)
+        end
+
+        -- Chi ghi file stage vao root da chon, khong rai ra moi thu muc Atlas.
+        writePreset(targetDir .. "/" .. fileName, raw)
+
+        -- Uu tien dung file config Atlas dang doc. Neu chua biet, cap nhat cac
+        -- ten preset dang active trong root da chon.
+        if activeConfigPath then
+            writePreset(activeConfigPath, raw)
+        else
+            for _, pName in ipairs(activePresets) do
+                writePreset(targetDir .. "/" .. pName, raw)
             end
         end
 
-        for _, pName in ipairs(activePresets) do
-            for _, r in ipairs(roots) do
-                pcall(writefile, r .. "/" .. pName, raw)
-            end
-            pcall(writefile, pName, raw)
-            pcall(writefile, "atlas/" .. pName, raw)
+        -- Giu nguyen kieu quote cua tung pointer file; pointer moi van dung quote.
+        local writtenPointers = {}
+        local function writePointer(path)
+            if writtenPointers[path] then return end
+            writtenPointers[path] = true
+            local quoted = pointerStyles[path] ~= false
+            writeWithBackup(path, quoted and ('"' .. fileName .. '"') or fileName)
         end
-
-        for _, pf in ipairs(ptrFiles) do
-            pcall(writefile, pf, '"' .. fileName .. '"')
-        end
-        for _, pf in ipairs(userPtr) do
-            pcall(writefile, pf, '"' .. fileName .. '"')
-        end
+        for _, pf in ipairs(ptrFiles) do writePointer(pf) end
+        for _, pf in ipairs(userPtr) do writePointer(pf) end
     end
 
     local decoded = decodeConfig(raw)
     if decoded then
+        local function isNumericArray(t)
+            if type(t) ~= "table" then return false end
+            local has = false
+            for k in pairs(t) do
+                if type(k) ~= "number" or k < 1 or k % 1 ~= 0 then return false end
+                has = true
+            end
+            return has or next(t) == nil
+        end
+
+        local function deepCopy(value)
+            if type(value) ~= "table" then return value end
+            local out = {}
+            for k, v in pairs(value) do out[k] = deepCopy(v) end
+            return out
+        end
+
+        local function replaceTable(dst, src)
+            for k in pairs(dst) do dst[k] = nil end
+            for k, v in pairs(src) do dst[k] = deepCopy(v) end
+        end
+
         local function deepMerge(dst, src)
             if type(dst) ~= "table" or type(src) ~= "table" then return end
+            -- Arrays (ke ca array rong/sparse) phai duoc thay ca bang; merge theo
+            -- index se de lai phan tu cu khi array moi ngan hon.
+            if isNumericArray(src) then
+                replaceTable(dst, src)
+                return
+            end
             for k, v in pairs(src) do
-                if type(v) == "table" and type(dst[k]) == "table" then
-                    deepMerge(dst[k], v)
+                local dstValue = dst[k]
+                if type(v) == "table" and type(dstValue) == "table"
+                    and not isNumericArray(v) and not isNumericArray(dstValue) then
+                    deepMerge(dstValue, v)
+                elseif type(v) == "table" and type(dstValue) == "table" then
+                    replaceTable(dstValue, v)
                 else
-                    dst[k] = v
+                    dst[k] = deepCopy(v)
                 end
             end
         end
@@ -7868,13 +8327,31 @@ _G.AutoProgDebug = printDebug
         end
     end
 
-    -- doc 1 lan roi dung chung cho UI, webhook va doi field
-    local function snapshotProgress()
+    -- Doc 1 lan roi dung chung cho UI, webhook va doi field. Khi route automation
+    -- dang tat, chi lay du lieu hive co ban: khong quet route, khong tu doi field.
+    local function snapshotProgress(includeRoute)
         local data = getStatData()
         local beeCount, minBeeLvl, levelCounts = getHiveStats(data)
-        local targetItem, neededMat, neededAmt, field, isUnfarmable = pickNextTarget(data, beeCount)
-        local blenderBusy, blenderState = BlenderProg.busyFor(targetItem)
-        if blenderBusy then field = nil end
+        local targetItem, neededMat, neededAmt, field, isUnfarmable
+        local blenderBusy, blenderState
+
+        if includeRoute ~= false then
+            targetItem, neededMat, neededAmt, field, isUnfarmable = pickNextTarget(data, beeCount)
+            blenderBusy, blenderState = BlenderProg.busyFor(targetItem)
+            if blenderBusy then field = nil end
+        else
+            -- Giu target gan nhat de UI/webhook khong nhay ve "None" chi vi
+            -- nguoi dung tat route; khong dung no de tu dong doi field.
+            local last = BlenderNotify.lastP
+            targetItem = last and last.targetItem or nil
+            neededMat = last and last.neededMat or nil
+            neededAmt = last and last.neededAmt or 0
+            field = nil
+            isUnfarmable = last and last.isUnfarmable or false
+            blenderBusy = last and last.blenderBusy or false
+            blenderState = last and last.blenderState or nil
+        end
+
         return {
             data = data, beeCount = beeCount, minBeeLvl = minBeeLvl, levelCounts = levelCounts,
             targetItem = targetItem, neededMat = neededMat, neededAmt = neededAmt,
@@ -7962,16 +8439,18 @@ _G.AutoProgDebug = printDebug
     end
 
     local function progressionTick()
-        if not autoProgressionEnabled then return end
+        local routeEnabled = autoProgressionEnabled == true
         -- Doi Atlas load xong (10-20s) truoc khi doc/bam UI va ghi preset.
         local bootReady = getgenv and getgenv().IvyisAtlasBootReady
         if bootReady and not bootReady() then return end
         local ok, err = pcall(function()
-            local p = snapshotProgress()
+            local p = snapshotProgress(routeEnabled)
             BlenderNotify.lastP = p
             refreshProgressionUI(p)
 
-            if autoFieldSwitchEnabled and p.field then
+            -- Chi route automation moi duoc doi field. Cac phan status, purchase,
+            -- webhook va config-stage ben duoi van chay khi route dang tat.
+            if routeEnabled and autoFieldSwitchEnabled and p.field then
                 setField(p.field)
             end
 
@@ -7982,15 +8461,20 @@ _G.AutoProgDebug = printDebug
                 end
                 if wantStinger then
                     pcall(enableViciousKill)
+                else
+                    pcall(disableViciousKill)
                 end
+            else
+                pcall(disableViciousKill)
             end
 
             checkConfigStage(p.data, p.beeCount, p.minBeeLvl, p.levelCounts)
 
             trackPurchases(p)
 
+            local routeStatus = routeEnabled and (routeFound and "Found" or "Not Found") or "Disabled"
             task.spawn(sendProgressWebhook, p.beeCount, p.targetItem or "None", p.field or "Unchanged",
-                routeFound and "Found" or "Not Found", p.data, describeNeed(p), p.isUnfarmable, p.neededMat,
+                routeStatus, p.data, describeNeed(p), p.isUnfarmable, p.neededMat,
                 p.blenderState)
         end)
         if not ok then
@@ -9180,10 +9664,14 @@ local SettingsStore = {
     pending = {},
     ready = false,
     queued = false,
+    replaying = false,
     skip = {
         ["Auto feed"] = true, ["Auto roll"] = true,
         ["Show info text on screen"] = true, ["Paste layout text"] = true,
         ["Discord link code"] = true,
+        -- A Discord webhook URL is a credential. Keeping it in plaintext
+        -- settings_<player>.json lets any local script spam the channel.
+        ["Webhook link"] = true,
     },
 }
 
@@ -9193,7 +9681,23 @@ do
             or (isfile(SettingsStore.sharedPath) and SettingsStore.sharedPath)
         if source then
             local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(source)) end)
-            if ok and type(decoded) == "table" then SettingsStore.data = decoded end
+            if ok and type(decoded) == "table" then
+                -- Drop sensitive values saved by older builds so a later
+                -- unrelated write does not put them back on disk.
+                local removeKeys = {}
+                for key in pairs(decoded) do
+                    local title = tostring(key):match("^[^/]+/(.+)$")
+                    if title and SettingsStore.skip[title] then
+                        removeKeys[#removeKeys + 1] = key
+                    end
+                end
+                for _, key in ipairs(removeKeys) do decoded[key] = nil end
+                local scrubbed = #removeKeys > 0
+                SettingsStore.data = decoded
+                if scrubbed and writefile then
+                    pcall(writefile, source, HttpService:JSONEncode(decoded))
+                end
+            end
         end
     end
 
@@ -9466,24 +9970,18 @@ if hui:FindFirstChild("AutoFeed_MobileToggle") then
 end
 
 -- bat/tat cua so ngay lap tuc, khong chay animation cua IvyisUI
-local function findIvyisGui()
-    for _, root in ipairs({ (gethui and gethui()) or false, CoreGui, player:FindFirstChild("PlayerGui") }) do
-        if root then
-            local g = root:FindFirstChild("IvyisUI")
-            if g and g:IsA("ScreenGui") then return g end
-        end
-    end
-    return nil
-end
-
 local function toggleMainWindow()
-    local g = findIvyisGui()
-    if g then
-        g.Enabled = not g.Enabled
-        return
-    end
     local winFrame = Window.Frame
-    if winFrame then winFrame.Visible = not winFrame.Visible end
+    if not winFrame then return end
+    local g = Window.ScreenGui
+    local visible = winFrame.Visible and (not g or g.Enabled)
+    if visible then
+        -- Go through the public methods so OnClose listeners (including the
+        -- mobile hint) run for every hide path, not just the close button.
+        Window:Hide()
+    else
+        Window:Open()
+    end
 end
 
 -- Mobile toggle button. Wrapped in "do ... end" on purpose: the main chunk of
@@ -9955,35 +10453,60 @@ local function ssaGetGiftedDiscoveredMap()
         return nil
     end
 
-    local function addValue(val, depth)
-        if val == nil or (depth or 0) > 2 then return end
-        local matchedName = nil
+    local function resolveValue(val, depth)
+        if val == nil or (depth or 0) > 2 then return nil end
         if type(val) == "number" then
-            matchedName = idToName(val)
+            return idToName(val)
         elseif type(val) == "string" then
             local nId = tonumber(val)
-            matchedName = (nId and idToName(nId)) or ssaExtractBeeName(val)
+            return (nId and idToName(nId)) or ssaExtractBeeName(val)
         elseif type(val) == "table" then
-            addValue(val.Name or val.Bee or val.Type or val.Id or val.id, (depth or 0) + 1)
-            return
+            return resolveValue(val.Name or val.Bee or val.Type or val.Id or val.id, (depth or 0) + 1)
         end
+        return nil
+    end
+
+    local function addValue(val, depth)
+        local matchedName = resolveValue(val, depth)
         if matchedName then discovered[matchedName] = true end
     end
 
     -- Gifted discovery is a map (name -> true/count), an array of names/ids, or
-    -- a nested list. Accept every shape; unknown keys simply resolve to nil.
+    -- a nested list. A numeric map can mean either {[beeId] = count} or
+    -- {beeId1, beeId2, ...}; use its shape to avoid reading a count as a bee id.
     local function addContainer(tbl, depth)
         if type(tbl) ~= "table" or depth > 2 then return end
+
+        local numericCount = 0
+        local maxIndex = 0
+        for k in pairs(tbl) do
+            if type(k) == "number" and k >= 1 and k == math.floor(k) then
+                numericCount = numericCount + 1
+                if k > maxIndex then maxIndex = k end
+            end
+        end
+        local denseArray = numericCount > 0 and numericCount == maxIndex
+        if denseArray then
+            for i = 1, maxIndex do
+                if resolveValue(rawget(tbl, i), 0) == nil then
+                    denseArray = false
+                    break
+                end
+            end
+        end
+
         for k, v in pairs(tbl) do
             local truthy = type(v) ~= "table" and v ~= nil and v ~= false and v ~= 0 and tostring(v) ~= ""
             if type(k) == "string" then
                 local name = ssaExtractBeeName(k)
                 if name and truthy then discovered[name] = true end
-            elseif type(k) == "number" and (v == true or v == 1) then
-                -- Boolean map keyed by bee id / egg index: {[3] = true}.
+            elseif type(k) == "number" and not denseArray then
+                -- Sparse numeric key: key is the bee id / egg index and the
+                -- value is a count (or just true).
                 local name = idToName(k)
-                if name then discovered[name] = true end
+                if name and truthy then discovered[name] = true end
             end
+
             if type(v) == "table" then
                 local wrapped = v.Name or v.Bee or v.Type or v.Id or v.id
                 if wrapped ~= nil then
@@ -9993,11 +10516,15 @@ local function ssaGetGiftedDiscoveredMap()
                     -- small, so one more level is safe and catches shape changes.
                     addContainer(v, depth + 1)
                 end
+            elseif type(k) == "number" then
+                if denseArray then
+                    addValue(v, 0)
+                end
             else
                 local vk = type(k) == "string" and k:lower() or ""
                 local looksBeeKey = vk:find("bee", 1, true) or vk == "id" or vk == "type"
                     or vk == "name" or vk == "value" or vk == "index" or vk == "item"
-                if type(k) == "number" or looksBeeKey then
+                if looksBeeKey then
                     addValue(v, 0)
                 elseif type(v) == "string" then
                     -- Plain list value under an unknown key: only accept strings
@@ -10324,7 +10851,7 @@ HiveTab:Button({
     Icon = "save",
     Callback = function()
         ensureHiveConfigDir()
-        local name = configNameInput or "MyHiveBuild"
+        local name = IvyisUI.SanitizeConfigName(configNameInput)
         local raw = serializeHiveConfig(name)
         if raw and writefile then
             local path = HIVE_CONFIGS_DIR .. "/" .. name .. ".json"
@@ -10439,7 +10966,12 @@ HiveTab:Section({ Title = "Royal jelly" })
 autoSyncToggle = HiveTab:Toggle({
     Title = "Copy roll settings from game",
     Value = autoSyncSettings,
-    Callback = function(v) autoSyncSettings = v end
+    Callback = function(v)
+        autoSyncSettings = v
+        -- Keep the local mirror used by roll restore in step with the UI. A
+        -- heartbeat with unchanged web flags will not overwrite this value.
+        forcedRollFlags.syncSettings = v
+    end
 })
 
 HiveTab:Toggle({
@@ -10456,6 +10988,18 @@ HiveTab:Slider({
 })
 
 HiveTab:Section({ Title = "Rolling" })
+
+buildModeDropdown = HiveTab:Dropdown({
+    Title = "Build mode",
+    Values = { "Composition", "Exact" },
+    Value = currentBuildMode,
+    Callback = function(v)
+        setBuildMode(v)
+        if refreshQuotaText then pcall(refreshQuotaText) end
+        if refreshBuilderStatus then pcall(refreshBuilderStatus) end
+        IvyisUI:Notify({ Title = "Build mode", Content = currentBuildMode, Duration = 2 })
+    end
+})
 
 local rollStatusLabel = HiveTab:Paragraph({
     Title = "Roll status",
@@ -10608,9 +11152,10 @@ SettingsTab:Toggle({
 })
 
 local stripConn = nil
-local savedPartProperties = {}
-local savedMeshTextures = {}
-local savedParticles = {}
+local savedPartProperties = setmetatable({}, { __mode = "k" })
+local savedMeshTextures = setmetatable({}, { __mode = "k" })
+local savedParticles = setmetatable({}, { __mode = "k" })
+local savedDecalProperties = setmetatable({}, { __mode = "k" })
 local savedLighting = nil
 
 local function isProtected(inst)
@@ -10630,44 +11175,55 @@ local function isProtected(inst)
 end
 
 local function stripInstance(inst)
-    if isProtected(inst) then return end
-    if inst:IsA("Decal") or inst:IsA("Texture") or inst:IsA("SurfaceAppearance") then
-        pcall(function() inst:Destroy() end)
-    elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Smoke") or inst:IsA("Fire") or inst:IsA("Sparkles") then
-        if savedParticles[inst] == nil then
-            savedParticles[inst] = inst.Enabled
-        end
-        inst.Enabled = false
-    elseif inst:IsA("SpecialMesh") then
-        if inst.TextureId ~= "" then
-            if savedMeshTextures[inst] == nil then
-                savedMeshTextures[inst] = inst.TextureId
+    -- Mot property loi tren Terrain/custom instance khong duoc phep lam hong
+    -- ca vong quet. Moi instance duoc bao ve rieng.
+    pcall(function()
+        if not inst or isProtected(inst) then return end
+        if inst == workspace.Terrain or inst:IsA("Terrain") then return end
+
+        if inst:IsA("Decal") or inst:IsA("Texture") then
+            if savedDecalProperties[inst] == nil then
+                savedDecalProperties[inst] = { Transparency = inst.Transparency }
             end
-            inst.TextureId = ""
-        end
-    elseif inst:IsA("MeshPart") then
-        if inst.TextureID ~= "" then
-            if savedMeshTextures[inst] == nil then
-                savedMeshTextures[inst] = inst.TextureID
+            inst.Transparency = 1
+        elseif inst:IsA("SurfaceAppearance") then
+            -- Destroy() se mat map vinh vien; bo qua thay vi pha SurfaceAppearance.
+        elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Smoke") or inst:IsA("Fire") or inst:IsA("Sparkles") then
+            if savedParticles[inst] == nil then
+                savedParticles[inst] = inst.Enabled
             end
-            pcall(function() inst.TextureID = "" end)
+            inst.Enabled = false
+        elseif inst:IsA("SpecialMesh") then
+            if inst.TextureId ~= "" then
+                if savedMeshTextures[inst] == nil then
+                    savedMeshTextures[inst] = inst.TextureId
+                end
+                inst.TextureId = ""
+            end
+        elseif inst:IsA("MeshPart") then
+            if inst.TextureID ~= "" then
+                if savedMeshTextures[inst] == nil then
+                    savedMeshTextures[inst] = inst.TextureID
+                end
+                inst.TextureID = ""
+            end
+            if not savedPartProperties[inst] then
+                savedPartProperties[inst] = { Material = inst.Material, Reflectance = inst.Reflectance, CastShadow = inst.CastShadow, Transparency = inst.Transparency }
+            end
+            inst.Material = Enum.Material.SmoothPlastic
+            inst.Reflectance = 0
+            inst.CastShadow = false
+            inst.Transparency = 1
+        elseif inst:IsA("BasePart") then
+            if not savedPartProperties[inst] then
+                savedPartProperties[inst] = { Material = inst.Material, Reflectance = inst.Reflectance, CastShadow = inst.CastShadow, Transparency = inst.Transparency }
+            end
+            inst.Material = Enum.Material.SmoothPlastic
+            inst.Reflectance = 0
+            inst.CastShadow = false
+            inst.Transparency = 1
         end
-        if not savedPartProperties[inst] then
-            savedPartProperties[inst] = { Material = inst.Material, Reflectance = inst.Reflectance, CastShadow = inst.CastShadow, Transparency = inst.Transparency }
-        end
-        inst.Material = Enum.Material.SmoothPlastic
-        inst.Reflectance = 0
-        inst.CastShadow = false
-        inst.Transparency = 1
-    elseif inst:IsA("BasePart") then
-        if not savedPartProperties[inst] then
-            savedPartProperties[inst] = { Material = inst.Material, Reflectance = inst.Reflectance, CastShadow = inst.CastShadow, Transparency = inst.Transparency }
-        end
-        inst.Material = Enum.Material.SmoothPlastic
-        inst.Reflectance = 0
-        inst.CastShadow = false
-        inst.Transparency = 1
-    end
+    end)
 end
 
 local function setMapRemoval(enabled)
@@ -10681,10 +11237,14 @@ local function setMapRemoval(enabled)
     local hc = workspace:FindFirstChild("Honeycombs")
     if enabled then
         if not savedLighting then
-            savedLighting = { GlobalShadows = Lighting.GlobalShadows, FogEnd = Lighting.FogEnd }
+            pcall(function()
+                savedLighting = { GlobalShadows = Lighting.GlobalShadows, FogEnd = Lighting.FogEnd }
+            end)
         end
-        Lighting.GlobalShadows = false
-        Lighting.FogEnd = 9e9
+        pcall(function()
+            Lighting.GlobalShadows = false
+            Lighting.FogEnd = 9e9
+        end)
         pcall(function()
             if sethiddenproperty then
                 sethiddenproperty(workspace.Terrain, "Decoration", false)
@@ -10695,25 +11255,27 @@ local function setMapRemoval(enabled)
                 if savedParticles[desc] == nil then
                     savedParticles[desc] = desc.Enabled
                 end
-                desc.Enabled = false
+                pcall(function() desc.Enabled = false end)
             end
         end
         for _, child in ipairs(workspace:GetChildren()) do
             if child ~= fz and child ~= fl and child ~= hc and not Players:GetPlayerFromCharacter(child) then
                 for _, desc in ipairs(child:GetDescendants()) do
-                    stripInstance(desc)
+                    pcall(stripInstance, desc)
                 end
-                stripInstance(child)
+                pcall(stripInstance, child)
             end
         end
         stripConn = workspace.DescendantAdded:Connect(function(desc)
             task.wait()
-            stripInstance(desc)
+            pcall(stripInstance, desc)
         end)
     else
         if savedLighting then
-            Lighting.GlobalShadows = savedLighting.GlobalShadows
-            Lighting.FogEnd = savedLighting.FogEnd
+            pcall(function()
+                Lighting.GlobalShadows = savedLighting.GlobalShadows
+                Lighting.FogEnd = savedLighting.FogEnd
+            end)
             savedLighting = nil
         end
         pcall(function()
@@ -10727,6 +11289,12 @@ local function setMapRemoval(enabled)
             end
         end
         table.clear(savedParticles)
+        for decal, props in pairs(savedDecalProperties) do
+            if decal and decal.Parent then
+                pcall(function() decal.Transparency = props.Transparency end)
+            end
+        end
+        table.clear(savedDecalProperties)
         for mesh, tex in pairs(savedMeshTextures) do
             if mesh and mesh.Parent then
                 pcall(function()
@@ -10853,10 +11421,11 @@ getgenv().IvyisDiscordCodeInput = ""
 local initialBridgeUrl = tostring((getgenv and getgenv().IvyisBridgeUrl) or "")
 if
     initialBridgeUrl == ""
+    or initialBridgeUrl == "http://78.154.103.12:16477"
     or initialBridgeUrl == "http://78.154.103.24:14873"
     or initialBridgeUrl == "http://78.154.103.8:16573"
 then
-    initialBridgeUrl = "http://78.154.103.12:16477"
+    initialBridgeUrl = "https://78.154.103.12:16477"
 end
 
 SettingsTab:Input({
@@ -10866,7 +11435,17 @@ SettingsTab:Input({
     Callback = function(v)
         local bridge = getgenv().IvyisDiscordBridge
         if bridge then
-            bridge.setUrl(v)
+            local ok, why = bridge.setUrl(v)
+            local replaying = SettingsStore.replaying == true
+            if not ok and not replaying then
+                IvyisUI:Notify({
+                    Title = "Bridge URL",
+                    Content = why == "https_required"
+                        and "Use https:// (plain HTTP is only for localhost)"
+                        or ("Invalid bridge URL: " .. tostring(why or "invalid_url")),
+                    Duration = 4,
+                })
+            end
         end
     end
 })
@@ -10928,6 +11507,7 @@ SettingsTab:Input({
     Value = tostring((getgenv and getgenv().IvyisExecutorNameOverride) or ""),
     Placeholder = "Auto: " .. detectedExecutorName,
     Callback = function(v)
+        local replaying = SettingsStore.replaying == true
         local text = tostring(v or "")
         text = text:gsub("^%s+", ""):gsub("%s+$", "")
         if text == "" then
@@ -10948,15 +11528,17 @@ SettingsTab:Input({
         if label then
             pcall(function() label:SetDesc(tostring(getExecutorLabel(true))) end)
         end
-        local bridge = getgenv and getgenv().IvyisDiscordBridge
-        if bridge and bridge.sendState then
-            task.spawn(function() pcall(bridge.sendState) end)
+        if not replaying then
+            local bridge = getgenv and getgenv().IvyisDiscordBridge
+            if bridge and bridge.sendState then
+                task.spawn(function() pcall(bridge.sendState) end)
+            end
+            IvyisUI:Notify({
+                Title = "Executor",
+                Content = "Name set to " .. tostring(EXECUTOR_NAME or "Unknown"),
+                Duration = 3,
+            })
         end
-        IvyisUI:Notify({
-            Title = "Executor",
-            Content = "Name set to " .. tostring(EXECUTOR_NAME or "Unknown"),
-            Duration = 3,
-        })
     end
 })
 
@@ -11173,21 +11755,61 @@ local function cellMatches(cellData, target)
     return true
 end
 
--- Royal Jelly is consumed by a successful roll. Poll the stat cache instead of
--- sleeping a full second, so the next roll can start as soon as the server has
--- processed the previous one.
-function RouteSteps.waitForRoyalJellyDrop(beforeRJ, timeout)
-    local deadline = os.clock() + (timeout or 1.2)
-    while os.clock() < deadline do
+-- Royal Jelly is consumed by a successful roll. Detect the first drop quickly,
+-- then wait for the batch to go idle instead of immediately starting another
+-- roll while the game is still spending RJ. A target-cell match also ends the
+-- wait immediately. Returns nil, nil, "no_drop" if RJ was never used, or
+-- nil, nil, "batch_still_running" if the batch did not settle in time.
+function RouteSteps.waitForRoyalJellyDrop(beforeRJ, timeout, col, row, target)
+    local firstDeadline = os.clock() + (timeout or 1.4)
+    local batchDeadline = nil
+    local dropSeen = false
+    local lastRJ = nil
+    local stablePolls = 0
+    local nextGridCheck = 0
+
+    while os.clock() < (batchDeadline or firstDeadline) do
         task.wait(0.08)
-        if not rollRunning or not scriptAlive then return nil end
+        if not rollRunning or not scriptAlive then return nil, nil, "interrupted" end
         local data = getStatData()
         local rj = getRoyalJellies(data)
+
         if beforeRJ > 0 and rj < beforeRJ then
-            return data, rj
+            if not dropSeen then
+                dropSeen = true
+                batchDeadline = os.clock() + 8
+                lastRJ = rj
+                stablePolls = 0
+            end
+
+            -- Stop as soon as the requested bee actually appears in the slot.
+            if col and row and target and os.clock() >= nextGridCheck then
+                nextGridCheck = os.clock() + 0.16
+                local grid = readHiveGrid(true)
+                local cell = grid[row] and grid[row][col]
+                if cell and cellMatches(cell, target) then
+                    return data, rj
+                end
+            end
+
+            if rj == lastRJ then
+                stablePolls = stablePolls + 1
+            else
+                lastRJ = rj
+                stablePolls = 0
+            end
+            if stablePolls >= 3 then
+                return data, rj
+            end
+        elseif dropSeen then
+            -- Inventory moved again (purchase/refund); restart the stable count.
+            lastRJ = rj
+            stablePolls = 0
         end
     end
-    return nil
+
+    if dropSeen then return nil, nil, "batch_still_running" end
+    return nil, nil, "no_drop"
 end
 
 -- Event jellies are permanent (their count does not drop), so wait for the
@@ -11272,6 +11894,7 @@ task.spawn(function()
 
                     nextTargetSlot = availableExact[1]
                     currentTargetObj = nextTargetSlot.target
+                    RouteSteps.activeSlot = nextTargetSlot.key
 
                     local skipNote = ""
                     if next(skippedExact) ~= nil then
@@ -11290,10 +11913,27 @@ task.spawn(function()
                     local remainingNeeded = {}
                     local totalNeeded = 0
                     for _, item in ipairs(compositionTargets) do
+                        local count = tonumber(item.count) or 0
                         local tag = item.beeId .. "|" .. (item.gifted or "Any")
-                        remainingNeeded[tag] = item.count
-                        totalNeeded = totalNeeded + item.count
+                        remainingNeeded[tag] = (remainingNeeded[tag] or 0) + count
+                        totalNeeded = totalNeeded + count
                     end
+
+                    -- Sap xep mot lan de viec tieu thu quota khong phu thuoc vao
+                    -- thu tu hash cua pairs(): target cu the (Gifted/Normal) phai
+                    -- duoc uu tien truoc target "Any", sau do moi den beeId/tag.
+                    local neededOrder = {}
+                    for tag in pairs(remainingNeeded) do
+                        local bId, g = tag:match("^(.-)|(.*)$")
+                        neededOrder[#neededOrder + 1] = { tag = tag, beeId = bId, gifted = g }
+                    end
+                    table.sort(neededOrder, function(a, b)
+                        local aAny = a.gifted == "Any"
+                        local bAny = b.gifted == "Any"
+                        if aAny ~= bAny then return not aAny end
+                        if a.beeId ~= b.beeId then return tostring(a.beeId) < tostring(b.beeId) end
+                        return tostring(a.gifted) < tostring(b.gifted)
+                    end)
 
                     local protectedSlots = {}
                     for r = 1, 10 do
@@ -11301,14 +11941,12 @@ task.spawn(function()
                             local cd = cellsGrid[r] and cellsGrid[r][c]
                             if cd and cd.beeType ~= "Empty" then
                                 local slotKey = string.format("C%d,%d", c, r)
-                                for tag, rem in pairs(remainingNeeded) do
-                                    if rem > 0 then
-                                        local bId, g = tag:match("^(.-)|(.*)$")
-                                        if cellMatches(cd, { beeId = bId, gifted = g }) then
-                                            remainingNeeded[tag] = rem - 1
-                                            protectedSlots[slotKey] = true
-                                            break
-                                        end
+                                for _, entry in ipairs(neededOrder) do
+                                    local rem = remainingNeeded[entry.tag] or 0
+                                    if rem > 0 and cellMatches(cd, { beeId = entry.beeId, gifted = entry.gifted }) then
+                                        remainingNeeded[entry.tag] = rem - 1
+                                        protectedSlots[slotKey] = true
+                                        break
                                     end
                                 end
                             end
@@ -11319,30 +11957,46 @@ task.spawn(function()
                     local sumRemaining = 0
                     local usableRemaining = 0
                     local skippedTargets = {}
-                    local primaryNeededTarget = nil
+                    local primaryCandidates = {}
                     local rarityRank = { Common = 1, Rare = 2, Epic = 3, Legendary = 4, Mythic = 5, Event = 6 }
-                    local primaryRank = -1
-                    for tag, rem in pairs(remainingNeeded) do
+                    for _, entry in ipairs(neededOrder) do
+                        local rem = remainingNeeded[entry.tag] or 0
                         sumRemaining = sumRemaining + rem
                         if rem > 0 then
-                            local bId, g = tag:match("^(.-)|(.*)$")
-                            local ready, info, reason = RouteSteps.eventTargetReady({ beeId = bId, gifted = g }, jellyData)
-                            if ready and info and RouteSteps.hiveContainsBee(cellsGrid, bId) then
+                            local ready, info, reason = RouteSteps.eventTargetReady({ beeId = entry.beeId, gifted = entry.gifted }, jellyData)
+                            if ready and info and RouteSteps.hiveContainsBee(cellsGrid, entry.beeId) then
                                 ready = false
                                 reason = "already"
                             end
                             if ready then
                                 usableRemaining = usableRemaining + rem
-                                local bee = beeMapById and beeMapById[bId]
+                                local bee = beeMapById and beeMapById[entry.beeId]
                                 local rank = bee and (rarityRank[bee.rarity] or 0) or 0
-                                if not primaryNeededTarget or rank > primaryRank then
-                                    primaryNeededTarget = { beeId = bId, gifted = g }
-                                    primaryRank = rank
-                                end
+                                primaryCandidates[#primaryCandidates + 1] = {
+                                    beeId = entry.beeId,
+                                    gifted = entry.gifted,
+                                    rank = rank,
+                                    specific = entry.gifted ~= "Any",
+                                    tag = entry.tag,
+                                }
                             elseif info then
                                 skippedTargets[info.name] = reason or true
                             end
                         end
+                    end
+
+                    table.sort(primaryCandidates, function(a, b)
+                        if a.rank ~= b.rank then return a.rank > b.rank end
+                        if a.specific ~= b.specific then return a.specific end
+                        if a.beeId ~= b.beeId then return tostring(a.beeId) < tostring(b.beeId) end
+                        return tostring(a.gifted) < tostring(b.gifted)
+                    end)
+                    local primaryNeededTarget = nil
+                    if primaryCandidates[1] then
+                        primaryNeededTarget = {
+                            beeId = primaryCandidates[1].beeId,
+                            gifted = primaryCandidates[1].gifted,
+                        }
                     end
 
                     if sumRemaining <= 0 then
@@ -11361,8 +12015,9 @@ task.spawn(function()
                     for r = 1, 10 do
                         for c = 1, 5 do
                             local key = string.format("C%d,%d", c, r)
-                            if selectedHiveSlots[key] and not protectedSlots[key] then
-                                local cd = cellsGrid[r] and cellsGrid[r][c]
+                            local cd = cellsGrid[r] and cellsGrid[r][c]
+                            local cdUsable = cd and cd.beeType and cd.beeType ~= "Empty" and cd.gifted ~= true
+                            if selectedHiveSlots[key] and not protectedSlots[key] and cdUsable then
                                 table.insert(candidates, { col = c, row = r, key = key, cd = cd })
                             end
                         end
@@ -11376,6 +12031,7 @@ task.spawn(function()
 
                     nextTargetSlot = candidates[1]
                     currentTargetObj = primaryNeededTarget
+                    RouteSteps.activeSlot = nextTargetSlot.key
 
                     local skipNote = ""
                     if next(skippedTargets) ~= nil then
@@ -11529,8 +12185,16 @@ task.spawn(function()
                 else
                     -- RemoteEvent does not report a rejected roll. If Royal Jelly
                     -- was not consumed, count it as a failed attempt.
-                    local afterRollData, afterRollRJ = RouteSteps.waitForRoyalJellyDrop(beforeRollRJ, 1.4)
+                    local afterRollData, afterRollRJ, waitReason = RouteSteps.waitForRoyalJellyDrop(
+                        beforeRollRJ, 1.4, nextTargetSlot.col, nextTargetSlot.row, currentTargetObj)
                     if not afterRollData then
+                        if waitReason == "batch_still_running" then
+                            rollStatusLabel:SetDesc("Royal Jelly batch still running after 8s! Stopped.")
+                            stopAutoRoll()
+                            return
+                        elseif waitReason == "interrupted" then
+                            return
+                        end
                         rollFailCount = rollFailCount + 1
                         if rollFailCount >= 5 then
                             rollStatusLabel:SetDesc("Game rejected 5 rolls (RJ not used)! Stopped.")
@@ -11614,11 +12278,13 @@ pcall(function()
 end)
 
 getgenv().IvyisDiscordBridge = (function()
-    local DEFAULT_BRIDGE_URL = "http://78.154.103.12:16477"
+    local DEFAULT_BRIDGE_URL = "https://78.154.103.12:16477"
     -- Panel hosts rotate. Saved sessions keep the URL they were linked with, so
     -- old defaults are rewritten on load instead of leaving the client pointed
-    -- at a host that no longer exists.
+    -- at a host that no longer exists. The old entries were plain HTTP and are
+    -- also rejected by normalizeBridgeUrl below.
     local LEGACY_BRIDGE_URLS = {
+        ["http://78.154.103.12:16477"] = true,
         ["http://78.154.103.24:14873"] = true,
         ["http://78.154.103.8:16573"] = true,
     }
@@ -11641,47 +12307,67 @@ getgenv().IvyisDiscordBridge = (function()
     local function applyRollFlags(flags, force)
         if type(flags) ~= "table" then return forcedRollFlags end
         local wasGifted = forcedRollFlags.untilGifted == true
-        forcedRollFlags.untilGifted = flags.untilGifted == true
-        forcedRollFlags.syncSettings = flags.syncSettings ~= false
-        forcedRollFlags.stopOnMythic = flags.stopOnMythic == true
+
+        -- Build the candidate state first. Do not touch the live mirror or the
+        -- Lua toggle until we know this payload actually differs from the last
+        -- one; otherwise the heartbeat stomps a manual local toggle every tick.
+        local incoming = {
+            untilGifted = flags.untilGifted == true,
+            syncSettings = flags.syncSettings ~= false,
+            stopOnMythic = flags.stopOnMythic == true,
+            keepMythics = {},
+            rev = tonumber(flags.rev) or 0,
+        }
         -- The keep list is a list of mythic bee ids; anything else the web (or a
         -- hand edited payload) sends is dropped here so the roll loop can trust
         -- the map without checking rarities again.
-        forcedRollFlags.keepMythics = {}
         if type(flags.keepMythics) == "table" then
             for _, value in ipairs(flags.keepMythics) do
                 local item = beeMapById and beeMapById[tostring(value or "")]
                 if item and item.rarity == "Mythic" then
-                    forcedRollFlags.keepMythics[item.id] = true
+                    incoming.keepMythics[item.id] = true
                 end
             end
         end
-        forcedRollFlags.rev = tonumber(flags.rev) or 0
-
-        -- The sync switch is the same setting as the script's own "Copy roll
-        -- settings from game" toggle, so the web and the Lua UI always agree.
-        autoSyncSettings = forcedRollFlags.syncSettings
-        pcall(function()
-            if autoSyncToggle then autoSyncToggle:Set(autoSyncSettings) end
-        end)
-        rollFlagsSynced = true
 
         local keepIds = {}
-        for id in pairs(forcedRollFlags.keepMythics) do
+        for id in pairs(incoming.keepMythics) do
             table.insert(keepIds, id)
         end
         table.sort(keepIds)
         local signature = string.format(
             "%s|%s|%s|%s",
-            tostring(forcedRollFlags.untilGifted),
-            tostring(forcedRollFlags.syncSettings),
-            tostring(forcedRollFlags.stopOnMythic),
+            tostring(incoming.untilGifted),
+            tostring(incoming.syncSettings),
+            tostring(incoming.stopOnMythic),
             table.concat(keepIds, ",")
         )
-        if not force and signature == lastRollFlagsSignature then
+
+        local firstSync = not rollFlagsSynced
+        if not force and not firstSync and signature == lastRollFlagsSignature then
+            -- Same flags: only advance the revision. In particular, never write
+            -- autoSyncSettings or autoSyncToggle here.
+            if incoming.rev > (tonumber(forcedRollFlags.rev) or 0) then
+                forcedRollFlags.rev = incoming.rev
+            end
             return forcedRollFlags
         end
+
         lastRollFlagsSignature = signature
+        rollFlagsSynced = true
+        forcedRollFlags.untilGifted = incoming.untilGifted
+        forcedRollFlags.syncSettings = incoming.syncSettings
+        forcedRollFlags.stopOnMythic = incoming.stopOnMythic
+        forcedRollFlags.keepMythics = incoming.keepMythics
+        forcedRollFlags.rev = incoming.rev
+
+        -- The sync switch is the same setting as the script's own "Copy roll
+        -- settings from game" toggle, so the web and the Lua UI agree whenever
+        -- the web actually sends a changed value.
+        autoSyncSettings = forcedRollFlags.syncSettings
+        pcall(function()
+            if autoSyncToggle then autoSyncToggle:Set(autoSyncSettings) end
+        end)
 
         -- While a roll runs the batch loop writes these switches before every
         -- roll; touching them here as well would fight with it.
@@ -11713,10 +12399,41 @@ getgenv().IvyisDiscordBridge = (function()
         return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
     end
 
+    local function isLoopbackHost(host)
+        host = tostring(host or ""):lower()
+        return host == "localhost" or host == "127.0.0.1" or host == "::1"
+    end
+
+    local function bridgeHost(url)
+        local rest = tostring(url or ""):match("^https?://(.+)$")
+        if not rest then return nil end
+        return rest:match("^%[([^%]]+)%]") or rest:match("^([^/:]+)")
+    end
+
     local function normalizeBridgeUrl(value)
         local url = trim(value):gsub("/+$", "")
-        if LEGACY_BRIDGE_URLS[url] then return DEFAULT_BRIDGE_URL end
+        if LEGACY_BRIDGE_URLS[url] then url = DEFAULT_BRIDGE_URL end
+        local scheme, rest = url:match("^(https?)://(.+)$")
+        if not scheme or not rest or rest == "" then return nil, "invalid_url" end
+        local authority = rest:match("^([^/]+)")
+        if not authority or authority == "" or authority:find("%s") then
+            return nil, "invalid_url"
+        end
+        if authority:find("@", 1, true) then return nil, "invalid_url" end
+        if scheme == "http" and not isLoopbackHost(bridgeHost(url)) then
+            return nil, "https_required"
+        end
         return url
+    end
+
+    do
+        local normalized, urlError = normalizeBridgeUrl(bridgeUrl)
+        if normalized then
+            bridgeUrl = normalized
+        else
+            bridgeUrl = DEFAULT_BRIDGE_URL
+            warn("[DiscordBridge] " .. tostring(urlError) .. "; using the HTTPS default.")
+        end
     end
 
     local function sessionPath()
@@ -11733,13 +12450,15 @@ getgenv().IvyisDiscordBridge = (function()
         if ensureHiveConfigDir then pcall(ensureHiveConfigDir) end
     end
 
+    -- Do not persist the bearer token. Any local executor script can read
+    -- AutoFeedBSS/*.json, so a saved token is a plaintext credential. The URL
+    -- and Discord id are kept only so /link can reuse the same bridge.
     local function saveSession()
         if not writefile then return end
         ensureDir()
         local ok, raw = pcall(function()
             return HttpService:JSONEncode({
                 url = bridgeUrl,
-                token = sessionToken,
                 discordId = linkedDiscordId,
             })
         end)
@@ -11757,13 +12476,21 @@ getgenv().IvyisDiscordBridge = (function()
         local urlChanged = false
         if type(decoded.url) == "string" and decoded.url ~= "" then
             local rawUrl = trim(decoded.url):gsub("/+$", "")
-            local restored = normalizeBridgeUrl(rawUrl)
-            urlChanged = restored ~= rawUrl
-            bridgeUrl = restored
+            local restored, urlError = normalizeBridgeUrl(rawUrl)
+            if restored then
+                urlChanged = restored ~= rawUrl
+                bridgeUrl = restored
+            else
+                urlChanged = true
+                bridgeUrl = DEFAULT_BRIDGE_URL
+                setStatus("Bridge URL rejected (" .. tostring(urlError) .. "). Using HTTPS default.")
+            end
         end
-        if type(decoded.token) == "string" and decoded.token ~= "" then sessionToken = decoded.token end
+        -- Older builds stored a token here. Ignore it and immediately rewrite
+        -- the file without the credential.
+        local hadStoredToken = type(decoded.token) == "string" and decoded.token ~= ""
         if decoded.discordId then linkedDiscordId = tostring(decoded.discordId) end
-        if urlChanged then saveSession() end
+        if urlChanged or hadStoredToken then saveSession() end
     end
 
     local function clearSession()
@@ -11785,6 +12512,16 @@ getgenv().IvyisDiscordBridge = (function()
         if type(httpRequest) ~= "function" then return nil, "executor_has_no_http" end
         local base = trim(bridgeUrl):gsub("/+$", "")
         if base == "" then return nil, "bridge_url_missing" end
+        if base:match("^http://") then
+            if not isLoopbackHost(bridgeHost(base)) then
+                setStatus("Bridge URL must use HTTPS (plain HTTP is only allowed for localhost).")
+                return nil, "https_required"
+            end
+            if token and token ~= "" then
+                setStatus("Refusing to send the Discord session token over plain HTTP.")
+                return nil, "https_required"
+            end
+        end
 
         local headers = {
             ["Content-Type"] = "application/json",
@@ -11875,7 +12612,13 @@ getgenv().IvyisDiscordBridge = (function()
 
         local rollText = ""
         if rollStatusLabel then
-            pcall(function() rollText = tostring(rollStatusLabel.Desc or "") end)
+            pcall(function()
+                rollText = tostring(
+                    (type(rollStatusLabel.GetDesc) == "function" and rollStatusLabel:GetDesc())
+                    or rollStatusLabel.Desc
+                    or ""
+                )
+            end)
         end
         local executorName = "Unknown"
         if detectExecutor then
@@ -12000,9 +12743,10 @@ getgenv().IvyisDiscordBridge = (function()
         job.finishedAt = os.time()
 
         pcall(stopAutoRoll)
+        if RouteSteps then RouteSteps.activeSlot = nil end
         local snapshot = job.snapshot
         if snapshot then
-            currentBuildMode = snapshot.mode or "Composition"
+            setBuildMode(snapshot.mode or "Composition")
             compositionTargets = snapshot.composition or {}
             exactSlotTargets = snapshot.exact or {}
             selectedHiveSlots = snapshot.selected or {}
@@ -12084,19 +12828,21 @@ getgenv().IvyisDiscordBridge = (function()
             for c = 1, 5 do
                 local cell = grid[r] and grid[r][c]
                 local key = string.format("C%d,%d", c, r)
-                if not skipExistingGiftedCheck and cell and cell.beeType and targets[cell.beeType] and cell.gifted == true then
+                local cellOccupied = cell and cell.beeType and cell.beeType ~= "Empty"
+                local cellUsable = cellOccupied and cell.gifted ~= true
+                if not skipExistingGiftedCheck and cellOccupied and targets[cell.beeType] and cell.gifted == true then
                     existingGiftedSlot = key
                 end
                 if wantedSlot then
                     if key == wantedSlot then
                         if cell and cell.gifted == true then
                             selectedSlotGifted = key
-                        else
+                        elseif cellUsable then
                             eligible[key] = true
                             eligibleCount = 1
                         end
                     end
-                elseif not (cell and cell.gifted == true) then
+                elseif cellUsable then
                     eligible[key] = true
                     eligibleCount = eligibleCount + 1
                 end
@@ -12151,7 +12897,7 @@ getgenv().IvyisDiscordBridge = (function()
             eligible = eligibleCount,
             slot = wantedSlot,
         }
-        currentBuildMode = "Composition"
+        setBuildMode("Composition")
         compositionTargets = {}
         for _, id in ipairs(targetOrder) do
             table.insert(compositionTargets, { beeId = id, gifted = "Gifted", count = 1 })
@@ -12216,34 +12962,24 @@ getgenv().IvyisDiscordBridge = (function()
                 and job.targets[cell.beeType] ~= nil
         end
 
-        local targetSlot = nil
-        if job.slot then
-            local col, row = tostring(job.slot):match("^C(%d+),(%d+)$")
-            col = tonumber(col)
-            row = tonumber(row)
-            local cell = col and row and grid[row] and grid[row][col]
+        -- The slot the roll loop is actually working on. A remote job with an
+        -- explicit slot uses that; otherwise use the slot chosen by the normal
+        -- Exact/Composition loop. Do not scan the whole hive: another gifted
+        -- target sitting in a different slot is not evidence that this roll
+        -- succeeded, and scanning made remote jobs finish almost immediately.
+        local watchedSlot = job.slot or (RouteSteps and RouteSteps.activeSlot) or nil
+        local watchedCol, watchedRow = nil, nil
+        if watchedSlot then
+            local col, row = tostring(watchedSlot):match("^C(%d+),(%d+)$")
+            watchedCol = tonumber(col)
+            watchedRow = tonumber(row)
+            local cell = watchedCol and watchedRow and grid[watchedRow] and grid[watchedRow][watchedCol]
             if isTargetCell(cell) then
                 local bee = beeMapById and beeMapById[cell.beeType]
                 local name = bee and bee.name or cell.beeType
-                finishRemoteRoll("target_gifted", string.format("%s in %s", name, job.slot))
+                finishRemoteRoll("target_gifted", string.format("%s in %s", name, watchedSlot))
                 return
             end
-        else
-            for r = 1, 10 do
-                for c = 1, 5 do
-                    local cell = grid[r] and grid[r][c]
-                    if isTargetCell(cell) then
-                        targetSlot = string.format("C%d,%d", c, r)
-                        break
-                    end
-                end
-                if targetSlot then break end
-            end
-        end
-
-        if targetSlot then
-            finishRemoteRoll("target_gifted", string.format("%s in %s", job.targetName, targetSlot))
-            return
         end
 
         -- Select bee page "stop on mythic". The batch loop holds the game's Until
@@ -12255,30 +12991,13 @@ getgenv().IvyisDiscordBridge = (function()
             local keepAny = not (type(keep) == "table" and next(keep) ~= nil)
             local mythicBee = nil
             local mythicSlot = nil
-            if job.slot then
-                local col, row = tostring(job.slot):match("^C(%d+),(%d+)$")
-                col = tonumber(col)
-                row = tonumber(row)
-                local cell = col and row and grid[row] and grid[row][col]
+            if watchedSlot then
+                local cell = watchedCol and watchedRow and grid[watchedRow] and grid[watchedRow][watchedCol]
                 local bee = cell and cell.beeType and cell.beeType ~= "Empty"
                     and mythicBeeName(cell.beeType) or nil
                 if bee and (keepAny or keep[cell.beeType]) then
                     mythicBee = bee
-                    mythicSlot = job.slot
-                end
-            else
-                for r = 1, 10 do
-                    for c = 1, 5 do
-                        local cell = grid[r] and grid[r][c]
-                        local bee = cell and cell.beeType and cell.beeType ~= "Empty"
-                            and mythicBeeName(cell.beeType) or nil
-                        if bee and (keepAny or keep[cell.beeType]) then
-                            mythicBee = bee
-                            mythicSlot = string.format("C%d,%d", c, r)
-                            break
-                        end
-                    end
-                    if mythicBee then break end
+                    mythicSlot = watchedSlot
                 end
             end
             if mythicBee then
@@ -12508,7 +13227,7 @@ getgenv().IvyisDiscordBridge = (function()
             job.finishedAt = os.time()
             local snapshot = job.snapshot
             if snapshot then
-                currentBuildMode = snapshot.mode or "Composition"
+                setBuildMode(snapshot.mode or "Composition")
                 compositionTargets = snapshot.composition or {}
                 exactSlotTargets = snapshot.exact or {}
                 selectedHiveSlots = snapshot.selected or {}
@@ -12579,11 +13298,17 @@ getgenv().IvyisDiscordBridge = (function()
     end
 
     local function setUrl(value)
-        bridgeUrl = normalizeBridgeUrl(value)
+        local normalized, why = normalizeBridgeUrl(value)
+        if not normalized then
+            setStatus("Bridge URL rejected: " .. tostring(why or "invalid_url"))
+            return false, why or "invalid_url"
+        end
+        bridgeUrl = normalized
         if getgenv then pcall(function() getgenv().IvyisBridgeUrl = bridgeUrl end) end
         if sessionToken and sessionToken ~= "" then
             saveSession()
         end
+        return true
     end
 
     local function start()
@@ -12594,9 +13319,13 @@ getgenv().IvyisDiscordBridge = (function()
             local g = getgenv()
             if type(g) == "table" then
                 if type(g.IvyisBridgeUrl) == "string" and g.IvyisBridgeUrl ~= "" then
-                    bridgeUrl = normalizeBridgeUrl(g.IvyisBridgeUrl)
+                    local normalized = normalizeBridgeUrl(g.IvyisBridgeUrl)
+                    -- Keep the saved session URL if the old getgenv value is
+                    -- invalid instead of discarding a working custom tunnel.
+                    if normalized then bridgeUrl = normalized end
                 end
             end
+            pcall(function() getgenv().IvyisBridgeUrl = bridgeUrl end)
         end
         if sessionToken and sessionToken ~= "" then
             setStatus("Reconnecting...")
@@ -12666,9 +13395,11 @@ getgenv().IvyisDiscordBridge.setStatusSink(function(text)
 end)
 
 -- ap dung cai dat da luu, roi moi bat dau ghi lai thay doi
+SettingsStore.replaying = true
 for _, item in ipairs(SettingsStore.pending) do
     pcall(item[1], item[2])
 end
+SettingsStore.replaying = false
 SettingsStore.pending = {}
 SettingsStore.ready = true
 pcall(function()
@@ -12708,6 +13439,7 @@ if getgenv then
                 bridge.stopLoops()
             end
         end)
+        pcall(disableViciousKill, true)
         if restoreRollSettings then pcall(restoreRollSettings) end
         Progression.cleanupProgression()
         local hold = getgenv and getgenv().IvyisAtlasHold
@@ -12728,5 +13460,35 @@ if getgenv then
         destroyOldGuis(CoreGui)
         if gethui then destroyOldGuis(gethui()) end
         destroyOldGuis(player.PlayerGui)
+
+        -- Drop cache/UI tables from the old execution so a re-execute cannot
+        -- reuse stale route data or references to destroyed instances.
+        if type(RouteSteps) == "table" then pcall(table.clear, RouteSteps) end
+        RouteSteps = nil
+        if type(BlenderProg) == "table" then pcall(table.clear, BlenderProg) end
+        BlenderProg = nil
+        if type(BlenderNotify) == "table" then pcall(table.clear, BlenderNotify) end
+        BlenderNotify = nil
+        if type(AtlasToysUI) == "table" then pcall(table.clear, AtlasToysUI) end
+        AtlasToysUI = nil
+        if getgenv then
+            pcall(function()
+                getgenv().IvyisBlenderProg = nil
+                getgenv().IvyisBlenderNotify = nil
+                getgenv().IvyisAtlasToysUI = nil
+                getgenv().IvyisAtlasHold = nil
+                getgenv().IvyisDiscordBridge = nil
+                getgenv().IvyisDiscordStatusLabel = nil
+                getgenv().IvyisExecutorLabel = nil
+                getgenv().IvyisDiscordCodeInput = nil
+                local vs = getgenv().IvyisViciousState
+                if type(vs) == "table" then
+                    vs.switchChanged = false
+                    vs.configChanged = false
+                    vs.lastDisableCheck = 0
+                end
+                getgenv()._AutoFeedCleanup = nil
+            end)
+        end
     end
 end
