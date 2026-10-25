@@ -2674,17 +2674,77 @@ end
 -- Blender state is kept in one table so the main chunk does not add many
 -- top-level locals (Luau has a 200-local limit in the main chunk).
 -- Deliberately global: the main chunk is already at Luau's 200-local limit.
-BlenderProg = { cache = { at = 0, state = nil } }
+BlenderProg = {
+    cache = { at = 0, state = nil },
+    -- The Blender labels keep the last craft after it is collected. A stale
+    -- "Crafting X..." label therefore looks exactly like a live craft. Only
+    -- trust a crafting label after its timer/progress actually moves, and drop
+    -- it again when it stops moving.
+    watch = {
+        key = nil, made = nil, total = nil, seconds = nil, timeText = nil,
+        seenAt = 0, changedAt = 0, confirmed = false,
+    },
+    staleAfter = 20,
+}
 if getgenv then getgenv().IvyisBlenderProg = BlenderProg end
+
+function BlenderProg.resetWatch()
+    local w = BlenderProg.watch
+    w.key, w.made, w.total, w.seconds, w.timeText = nil, nil, nil, nil, nil
+    w.seenAt, w.changedAt, w.confirmed = 0, 0, false
+end
+
+-- Returns (confirmed, secondsSinceLastChange). The first observation of a
+-- recipe is not confirmation: the game must change the timer or the made/total
+-- counter before we call the craft live.
+function BlenderProg.noteCraft(item, made, total, seconds, timeText, now)
+    local w = BlenderProg.watch
+    local key = tostring(item or "") .. "|" .. tostring(total or "")
+    if w.key ~= key then
+        w.key, w.made, w.total, w.seconds, w.timeText = key, made, total, seconds, timeText
+        w.seenAt, w.changedAt, w.confirmed = now, now, false
+        return false, 0
+    end
+    -- Only forward progress confirms a craft. A made/total reset or a timer
+    -- that jumps back up means the labels were reset for a new selection; it
+    -- must stay unconfirmed until the new craft actually advances.
+    local reset = false
+    if w.made ~= nil and made ~= nil and made < w.made then reset = true end
+    if w.seconds ~= nil and seconds ~= nil and seconds > w.seconds then reset = true end
+    if w.total ~= nil and total ~= nil and total ~= w.total then reset = true end
+    if reset then
+        w.made, w.total, w.seconds, w.timeText = made, total, seconds, timeText
+        w.seenAt, w.changedAt, w.confirmed = now, now, false
+        return false, 0
+    end
+    local madeUp = w.made ~= nil and made ~= nil and made > w.made
+    local timeDown = w.seconds ~= nil and seconds ~= nil and seconds < w.seconds
+    local textMoved = (w.seconds == nil or seconds == nil)
+        and w.timeText ~= nil and timeText ~= nil and w.timeText ~= timeText
+    if madeUp or timeDown or textMoved then
+        w.confirmed = true
+        w.changedAt = now
+    end
+    w.made, w.total, w.seconds, w.timeText = made, total, seconds, timeText
+    return w.confirmed, now - (w.changedAt or now)
+end
+
+-- Direct child first, then a recursive fallback. Some BSS UI versions move the
+-- Blender frame deeper under PlayerGui, and a direct-only lookup silently
+-- reports "no Blender" even though the labels are present.
+function BlenderProg.findChild(parent, name)
+    if not parent or not name then return nil end
+    return parent:FindFirstChild(name) or parent:FindFirstChild(name, true)
+end
 
 function BlenderProg.findGui()
     if not player then return nil end
     local pg = player:FindFirstChild("PlayerGui")
     if not pg then return nil end
-    local sg = pg:FindFirstChild("ScreenGui")
-    local gui = sg and sg:FindFirstChild("Blender")
+    local sg = BlenderProg.findChild(pg, "ScreenGui")
+    local gui = sg and BlenderProg.findChild(sg, "Blender")
     if not gui then
-        gui = pg:FindFirstChild("Blender", true)
+        gui = BlenderProg.findChild(pg, "Blender")
     end
     return gui
 end
@@ -2693,6 +2753,8 @@ function BlenderProg.cleanItem(raw)
     local s = tostring(raw or "")
     s = s:gsub("<br%s*/?>", " "):gsub("<[^>]+>", " ")
     s = s:gsub("^%s*[Cc]rafting%s+", "")
+    s = s:gsub("^%s*[Rr]eady%s+[Tt]o%s+[Cc]ollect%s+", "")
+    s = s:gsub("^%s*[Tt]o%s+[Cc]ollect%s+", "")
     s = s:gsub("^%s*[Cc]ollect%s+", "")
     s = s:gsub("^%s*[Rr]eady%s+", "")
     s = s:gsub("%s*%.%.%.%s*$", "")
@@ -2730,24 +2792,26 @@ function BlenderProg.read()
 
     local gui = BlenderProg.findGui()
     if not gui then
+        BlenderProg.resetWatch()
         c.state, c.at = nil, now
         return nil
     end
 
-    local box = gui:FindFirstChild("Box") or gui:FindFirstChild("Box", true)
-    local info = box and box:FindFirstChild("RecipeInfo")
-    local prog = box and box:FindFirstChild("RecipeProgress")
+    local box = BlenderProg.findChild(gui, "Box")
+    local info = box and BlenderProg.findChild(box, "RecipeInfo")
+    local prog = box and BlenderProg.findChild(box, "RecipeProgress")
     if not box or not info or not prog then
+        BlenderProg.resetWatch()
         c.state, c.at = nil, now
         return nil
     end
 
-    local recipeLbl = info:FindFirstChild("RecipeName")
-    local actionLbl = prog:FindFirstChild("ActionLabel")
-    local bar = prog:FindFirstChild("ProgressBar")
-    local timeLbl = bar and bar:FindFirstChild("TimeLabel")
-    local itemBox = prog:FindFirstChild("Item")
-    local amountLbl = itemBox and itemBox:FindFirstChild("AmountLabel")
+    local recipeLbl = BlenderProg.findChild(info, "RecipeName")
+    local actionLbl = BlenderProg.findChild(prog, "ActionLabel")
+    local bar = BlenderProg.findChild(prog, "ProgressBar")
+    local timeLbl = bar and BlenderProg.findChild(bar, "TimeLabel")
+    local itemBox = BlenderProg.findChild(prog, "Item")
+    local amountLbl = itemBox and BlenderProg.findChild(itemBox, "AmountLabel")
 
     local recipeText = tostring(recipeLbl and recipeLbl.Text or "")
     local actionText = tostring(actionLbl and actionLbl.Text or "")
@@ -2755,23 +2819,54 @@ function BlenderProg.read()
     local amountText = tostring(amountLbl and amountLbl.Text or "")
 
     local actionItem = actionText:match("^%s*[Cc]rafting%s+(.-)%s*%.%.%.")
+        or actionText:match("^%s*[Cc]rafting%s+(.-)%s*$")
     local item = BlenderProg.cleanItem(actionItem or "")
     if item == "" then item = BlenderProg.cleanItem(recipeText) end
+    if item == "" then item = BlenderProg.cleanItem(actionText) end
 
-    local made, total = amountText:match("(%d+)%s*/%s*(%d+)")
+    -- AmountLabel can use thousands separators ("1,000 / 1,000").
+    local amountClean = amountText:gsub(",", "")
+    local made, total = amountClean:match("(%d+)%s*/%s*(%d+)")
     made, total = tonumber(made), tonumber(total)
     local seconds = BlenderProg.parseSeconds(timeText)
     local lowAction = actionText:lower()
     local crafting = lowAction:find("crafting", 1, true) ~= nil
     local ready = lowAction:find("collect", 1, true) ~= nil
         or lowAction:find("ready", 1, true) ~= nil
-    local complete = (total ~= nil and made ~= nil and total > 0 and made >= total)
+    -- Only a crafting/ready action can be "complete". An idle Blender can
+    -- still show the last recipe name and 00:00, which must not count as a
+    -- finished craft.
+    local complete = (crafting or ready) and (
+        (total ~= nil and made ~= nil and total > 0 and made >= total)
         or (seconds ~= nil and seconds <= 0)
+    )
     local active = (crafting or ready) and item ~= ""
         and (total == nil or total > 0) and not complete
+    local confirmed, changedAgo, stale = true, nil, false
+
+    -- A crafting label alone is not evidence: BSS leaves the last craft in
+    -- these labels after it is collected. A live craft must move its timer or
+    -- its made/total counter. Apply this only to "crafting"; a ready/complete
+    -- state has no timer to move and is actionable as-is.
+    if crafting and not ready and not complete and item ~= "" then
+        confirmed, changedAgo = BlenderProg.noteCraft(item, made, total, seconds, timeText, now)
+        if not confirmed then
+            active, stale = false, true
+        elseif changedAgo and changedAgo >= (BlenderProg.staleAfter or 20) then
+            active, stale = false, true
+        end
+    elseif not crafting then
+        -- Reset on every idle read so a later craft of the same recipe still
+        -- has to prove that it is advancing.
+        BlenderProg.resetWatch()
+    end
 
     local state = {
         active = active,
+        crafting = crafting,
+        confirmed = confirmed,
+        stale = stale,
+        changedAgo = changedAgo,
         ready = ready,
         complete = complete,
         item = item,
@@ -2781,14 +2876,47 @@ function BlenderProg.read()
         timeText = timeText,
         actionText = actionText,
         recipeText = recipeText,
+        readAt = now,
     }
     c.state, c.at = state, now
     return state
 end
 
+-- Run getgenv().IvyisBlenderProg.debugDump() in the executor console if the
+-- Blender line still looks wrong. It prints the labels/properties that drive
+-- the detection so the real idle-vs-crafting difference can be checked.
+function BlenderProg.debugDump()
+    local st = BlenderProg.read()
+    local w = BlenderProg.watch
+    print("[BlenderProg] active=" .. tostring(st and st.active)
+        .. " crafting=" .. tostring(st and st.crafting)
+        .. " ready=" .. tostring(st and st.ready)
+        .. " complete=" .. tostring(st and st.complete)
+        .. " confirmed=" .. tostring(st and st.confirmed)
+        .. " stale=" .. tostring(st and st.stale)
+        .. " item=" .. tostring(st and st.item)
+        .. " made/total=" .. tostring(st and st.made) .. "/" .. tostring(st and st.total)
+        .. " seconds=" .. tostring(st and st.seconds)
+        .. " timeText=" .. tostring(st and st.timeText))
+    print("[BlenderProg] watch key=" .. tostring(w.key)
+        .. " confirmed=" .. tostring(w.confirmed)
+        .. " changedAgo=" .. tostring(w.changedAt and (tick() - w.changedAt) or nil))
+    local gui = BlenderProg.findGui()
+    if not gui then print("[BlenderProg] no Blender GUI"); return end
+    local ok, err = pcall(function()
+        for _, d in ipairs(gui:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                print(string.format("[BlenderProg] %s visible=%s textTransparency=%s text=%s",
+                    d:GetFullName(), tostring(d.Visible), tostring(d.TextTransparency), tostring(d.Text)))
+            end
+        end
+    end)
+    if not ok then warn("[BlenderProg] dump error: " .. tostring(err)) end
+end
+
 function BlenderProg.pending(item)
     local st = BlenderProg.read()
-    if not st or not (st.active or st.ready) or not st.item then return 0 end
+    if not st or not (st.active or st.ready or st.complete) or not st.item then return 0 end
     if not BlenderProg.sameItem(st.item, item) then return 0 end
     return tonumber(st.total) or 1
 end
@@ -2796,11 +2924,12 @@ end
 function BlenderProg.describe(st)
     if not st or not st.item or st.item == "" then return nil end
     local amount = ""
-    if st.total then
-        amount = string.format(" (%d/%d)", tonumber(st.made) or 0, tonumber(st.total) or 0)
+    local total = tonumber(st.total)
+    if total and total > 0 then
+        amount = string.format(" (%d/%d)", tonumber(st.made) or 0, total)
     end
     local time = ""
-    if st.seconds and st.seconds > 0 and st.timeText ~= "" then
+    if st.seconds and st.seconds > 0 and not st.complete and st.timeText ~= "" then
         time = " • " .. st.timeText .. " left"
     end
     return tostring(st.item) .. amount .. time
@@ -6273,7 +6402,7 @@ end
 -- reports while a craft is running.
 function BlenderProg.busyFor(targetItem)
     local st = BlenderProg.read()
-    if not st or not (st.active or st.ready) or not st.item then return false, st end
+    if not st or not (st.active or st.ready or st.complete) or not st.item then return false, st end
     if not targetItem or targetItem == "None" then return false, st end
     if BlenderProg.sameItem(st.item, targetItem) then return true, st end
 
@@ -6390,11 +6519,15 @@ local function describeIngredients(targetItem, data, beeCount, plain)
 
     local status
     local bstate = BlenderProg.read()
-    local targetCrafting = bstate and (bstate.active or bstate.ready)
+    local targetCrafting = bstate and (bstate.active or bstate.ready or bstate.complete)
         and BlenderProg.sameItem(bstate.item, targetItem)
     local busy = select(1, BlenderProg.busyFor(targetItem))
     if targetCrafting then
-        status = "CRAFTING IN BLENDER (output pending)"
+        if bstate.complete or bstate.ready then
+            status = "READY IN BLENDER (collect it)"
+        else
+            status = "CRAFTING IN BLENDER (output pending)"
+        end
     elseif busy then
         local extra = BlenderProg.describe(bstate)
         if #missing == 0 then
@@ -6552,6 +6685,11 @@ BlenderNotify = {
     startAnnounced = false,
     doneAnnounced = false,
     lastP = nil,
+    -- A craft that was already in the labels when the script started must not
+    -- be announced as "just started" once its progress is confirmed.
+    suppressStart = false,
+    bootItem = nil,
+    bootAt = 0,
 }
 if getgenv then getgenv().IvyisBlenderNotify = BlenderNotify end
 
@@ -6617,7 +6755,11 @@ function BlenderNotify.check(p)
         n.lastMade = made
         n.lastTotal = total
         n.inactiveSince = active and 0 or now
-        n.startAnnounced = active
+        n.bootItem = item
+        n.bootAt = now
+        n.suppressStart = (st and (st.crafting or st.ready or st.complete)
+            and item ~= nil and item ~= "") and true or false
+        n.startAnnounced = n.suppressStart or active
         n.doneAnnounced = finished
         return
     end
@@ -6633,6 +6775,7 @@ function BlenderNotify.check(p)
                 BlenderNotify.sendFinish(n.lastItem, n.lastMade, n.lastTotal, p)
             end
             n.startAnnounced = false
+            n.suppressStart = false
             n.lastActive = false
             n.inactiveSince = 0
         end
@@ -6641,8 +6784,16 @@ function BlenderNotify.check(p)
     if active then
         n.inactiveSince = 0
         if not n.lastActive then
-            n.startAnnounced = false
             n.doneAnnounced = false
+            local sameBoot = n.bootItem and item and BlenderProg.sameItem(item, n.bootItem)
+            local bootFresh = n.bootAt and (now - n.bootAt) <= 120
+            if n.suppressStart and sameBoot and bootFresh then
+                -- This is the craft that was already present at startup.
+                n.startAnnounced = true
+            else
+                n.startAnnounced = false
+            end
+            n.suppressStart = false
         end
         if not n.startAnnounced then
             n.startAnnounced = true
@@ -6662,8 +6813,10 @@ function BlenderNotify.check(p)
         -- like a finished craft.
         local done = finished or (now - n.inactiveSince >= 6)
         if done then
-            local finishMade = made or n.lastMade
-            local finishTotal = total or n.lastTotal
+            local sameItem = item and n.lastItem and BlenderProg.sameItem(item, n.lastItem)
+            local finishItem = n.lastItem or item
+            local finishMade = (sameItem and made) or n.lastMade or made
+            local finishTotal = (sameItem and total) or n.lastTotal or total
             if not finished then
                 -- Labels may already be reset after collecting; keep the last
                 -- values seen while the craft was active.
@@ -6671,7 +6824,7 @@ function BlenderNotify.check(p)
                 finishTotal = n.lastTotal or finishTotal
             end
             if n.startAnnounced then
-                BlenderNotify.sendFinish(item or n.lastItem, finishMade, finishTotal, p)
+                BlenderNotify.sendFinish(finishItem, finishMade, finishTotal, p)
             end
             n.startAnnounced = false
             n.doneAnnounced = true
@@ -6710,9 +6863,15 @@ local function sendProgressWebhook(beeCount, targetStr, fieldStr, routeStr, data
         noteText = string.format("\n⚠️ **Note:** can't farm `%s` in a field, you need to get it yourself.", tostring(needStr or targetStr or "this item"))
     end
     local blenderLine = ""
-    local liveBlender = BlenderProg.read() or blenderState
-    if liveBlender and liveBlender.item and (liveBlender.active or liveBlender.ready) then
-        local verb = liveBlender.ready and "ready " or "crafting "
+    local liveBlender = BlenderProg.read()
+    -- Only use the snapshot as a fallback if it was read in the last second.
+    -- A previous tick's active state must not resurrect an idle Blender line.
+    if not liveBlender and blenderState and blenderState.readAt
+        and (now - blenderState.readAt) <= 1 then
+        liveBlender = blenderState
+    end
+    if liveBlender and liveBlender.item and (liveBlender.active or liveBlender.ready or liveBlender.complete) then
+        local verb = liveBlender.ready and "ready " or (liveBlender.complete and "done " or "crafting ")
         blenderLine = "\n**Blender:** " .. verb
             .. tostring(BlenderProg.describe(liveBlender) or liveBlender.item)
     end
@@ -6841,7 +7000,8 @@ local function printDebug()
     local bstate = BlenderProg.read()
     if bstate then
         print("Blender:", bstate.item or "?", "| active:", tostring(bstate.active), "| ready:", tostring(bstate.ready),
-            "| complete:", tostring(bstate.complete), "| amount:", tostring(bstate.made) .. "/" .. tostring(bstate.total),
+            "| complete:", tostring(bstate.complete), "| confirmed:", tostring(bstate.confirmed),
+            "| stale:", tostring(bstate.stale), "| amount:", tostring(bstate.made) .. "/" .. tostring(bstate.total),
             "| time:", tostring(bstate.timeText), "| action:", tostring(bstate.actionText))
     else
         print("Blender: not found")
@@ -7766,7 +7926,9 @@ _G.AutoProgDebug = printDebug
             local needBody = describeIngredients(p.targetItem, p.data, p.beeCount, true)
             local blenderBody = ""
             if p.blenderBusy and p.blenderState then
-                blenderBody = "\n\nBlender: crafting " .. tostring(BlenderProg.describe(p.blenderState) or p.blenderState.item or "item")
+                local blenderVerb = p.blenderState.ready and "ready " or (p.blenderState.complete and "done " or "crafting ")
+                blenderBody = "\n\nBlender: " .. blenderVerb
+                    .. tostring(BlenderProg.describe(p.blenderState) or p.blenderState.item or "item")
             end
             local targetDesc = string.format("Field: %s\nBees: %d | Levels: %s (lowest %d)\n\nNeed:\n%s%s",
                 tostring(p.field or (p.targetItem and "Unchanged" or "None")),
@@ -7787,10 +7949,9 @@ _G.AutoProgDebug = printDebug
 
             if hudLabel then
                 local stage = currentStage and CONFIG_STAGES[currentStage]
-                hudLabel.Text = string.format("%s | bees %d [%s] | next %s | need %s | field %s",
+                hudLabel.Text = string.format("%s | bees %d | next %s | need %s | field %s",
                     stage and stage.Name or "Auto Prog",
                     tonumber(p.beeCount) or 0,
-                    lvlText,
                     tostring(p.targetItem or (liveNonGear and "non-gear step" or "None")),
                     describeNeed(p),
                     tostring(p.field or "Unchanged")
@@ -11080,7 +11241,7 @@ task.spawn(function()
                     end
 
                     if #incompleteExact == 0 then
-                        rollStatusLabel:SetDesc(string.format("All %d exact slots completed 100%! Stopped.", totalExact))
+                        rollStatusLabel:SetDesc(string.format("All %d exact slots completed 100%%! Stopped.", totalExact))
                         stopAutoRoll()
                         IvyisUI:Notify({ Title = "Hive done", Content = "Every slot matches", Duration = 5 })
                         return
