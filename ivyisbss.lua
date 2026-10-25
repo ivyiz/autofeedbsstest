@@ -2361,6 +2361,230 @@ local function getRouteIcon(key)
     return asset or nil
 end
 
+-- Sua text truc tiep trong file config, nhung chi trong dung object JSON.
+-- Khong decode/encode lai toan bo file vi JSONEncode co the doi {} thanh [].
+-- Cac field cua planter cung ten field1/field2/field3, nen khong duoc gsub
+-- toan file: chi patch ben trong object "autofarm"/"farming" va "combat".
+local function patchConfigFileContent(content, targetField, enableVicious)
+    local function escapeJsonString(value)
+        local s = tostring(value or "")
+        s = s:gsub("\\", "\\\\")
+        s = s:gsub('"', '\\"')
+        s = s:gsub("\n", "\\n")
+        s = s:gsub("\r", "\\r")
+        s = s:gsub("\t", "\\t")
+        return s
+    end
+
+    local function jsonLiteral(value)
+        local kind = type(value)
+        if kind == "string" then return '"' .. escapeJsonString(value) .. '"' end
+        if kind == "boolean" then return value and "true" or "false" end
+        if kind == "number" then return tostring(value) end
+        return "null"
+    end
+
+    -- Tim moi object co key tuong ung, o bat ky do sau nao. Tra ve vung
+    -- content nam giua cap ngoac nhon, bo qua chuoi/escape.
+    local function findObjectSpans(text, key)
+        local spans = {}
+        local n = #text
+        local i = 1
+        while i <= n do
+            local c = text:sub(i, i)
+            if c == '"' then
+                local start = i
+                local j = i + 1
+                local escaped = false
+                while j <= n do
+                    local ch = text:sub(j, j)
+                    if escaped then
+                        escaped = false
+                    elseif ch == "\\" then
+                        escaped = true
+                    elseif ch == '"' then
+                        break
+                    end
+                    j = j + 1
+                end
+                if j > n then break end
+                if text:sub(start + 1, j - 1) == key then
+                    local k = j + 1
+                    while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
+                    if text:sub(k, k) == ":" then
+                        k = k + 1
+                        while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
+                        if text:sub(k, k) == "{" then
+                            local depth = 1
+                            local p = k + 1
+                            local inString = false
+                            local inEscape = false
+                            while p <= n do
+                                local ch = text:sub(p, p)
+                                if inString then
+                                    if inEscape then
+                                        inEscape = false
+                                    elseif ch == "\\" then
+                                        inEscape = true
+                                    elseif ch == '"' then
+                                        inString = false
+                                    end
+                                elseif ch == '"' then
+                                    inString = true
+                                elseif ch == "{" then
+                                    depth = depth + 1
+                                elseif ch == "}" then
+                                    depth = depth - 1
+                                    if depth == 0 then break end
+                                end
+                                p = p + 1
+                            end
+                            if p <= n and depth == 0 then
+                                spans[#spans + 1] = { contentStart = k + 1, contentEnd = p - 1 }
+                                i = p + 1
+                            else
+                                break
+                            end
+                        else
+                            i = j + 1
+                        end
+                    else
+                        i = j + 1
+                    end
+                else
+                    i = j + 1
+                end
+            else
+                i = i + 1
+            end
+        end
+        return spans
+    end
+
+    -- Chi thay field o cap ngoai cung cua object, khong cham field long ben trong.
+    local function patchTopLevelField(text, key, value)
+        local literal = jsonLiteral(value)
+        local out = {}
+        local last = 1
+        local depth = 0
+        local n = #text
+        local i = 1
+        while i <= n do
+            local c = text:sub(i, i)
+            if c == '"' then
+                local start = i
+                local j = i + 1
+                local escaped = false
+                while j <= n do
+                    local ch = text:sub(j, j)
+                    if escaped then
+                        escaped = false
+                    elseif ch == "\\" then
+                        escaped = true
+                    elseif ch == '"' then
+                        break
+                    end
+                    j = j + 1
+                end
+                if j > n then break end
+                local advanced = false
+                if depth == 0 and text:sub(start + 1, j - 1) == key then
+                    local k = j + 1
+                    while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
+                    if text:sub(k, k) == ":" then
+                        k = k + 1
+                        while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
+                        if k <= n then
+                            local valueStart = k
+                            local valueEnd = nil
+                            if text:sub(k, k) == '"' then
+                                local vj = k + 1
+                                local vEscape = false
+                                while vj <= n do
+                                    local ch = text:sub(vj, vj)
+                                    if vEscape then
+                                        vEscape = false
+                                    elseif ch == "\\" then
+                                        vEscape = true
+                                    elseif ch == '"' then
+                                        break
+                                    end
+                                    vj = vj + 1
+                                end
+                                if vj <= n then valueEnd = vj end
+                            else
+                                local vj = k
+                                while vj <= n do
+                                    local ch = text:sub(vj, vj)
+                                    if ch == "," or ch == "}" or ch == "]" or ch:match("%s") then break end
+                                    vj = vj + 1
+                                end
+                                valueEnd = vj - 1
+                            end
+                            if valueEnd and valueEnd >= valueStart then
+                                out[#out + 1] = text:sub(last, valueStart - 1)
+                                out[#out + 1] = literal
+                                last = valueEnd + 1
+                                i = valueEnd + 1
+                                advanced = true
+                            end
+                        end
+                    end
+                end
+                if not advanced then i = j + 1 end
+            elseif c == "{" or c == "[" then
+                depth = depth + 1
+                i = i + 1
+            elseif c == "}" or c == "]" then
+                depth = depth - 1
+                i = i + 1
+            else
+                i = i + 1
+            end
+        end
+        out[#out + 1] = text:sub(last)
+        return table.concat(out)
+    end
+
+    local function patchObject(text, objectKey, fields)
+        local spans = findObjectSpans(text, objectKey)
+        for index = #spans, 1, -1 do
+            local span = spans[index]
+            local body = text:sub(span.contentStart, span.contentEnd)
+            local updated = body
+            for _, field in ipairs(fields) do
+                updated = patchTopLevelField(updated, field[1], field[2])
+            end
+            if updated ~= body then
+                text = text:sub(1, span.contentStart - 1) .. updated .. text:sub(span.contentEnd + 1)
+            end
+        end
+        return text
+    end
+
+    local patched = content
+    if targetField and targetField ~= "" and targetField ~= "Idle" and targetField ~= "Unchanged" then
+        local fields = {
+            { "field1", targetField },
+            { "field2", "None" },
+            { "field3", "None" },
+        }
+        patched = patchObject(patched, "autofarm", fields)
+        patched = patchObject(patched, "farming", fields)
+    end
+    if enableVicious ~= nil then
+        patched = patchObject(patched, "combat", {
+            { "killvicious", enableVicious == true },
+            { "vicious", enableVicious == true },
+        })
+    end
+    return patched
+end
+
+-- sua truc tiep text trong file config (khong decode/encode lai JSON,
+-- vi JSONEncode doi {} thanh [] va lam hong config cua Atlas)
+
+
 local Progression = (function()
     local autoProgressionEnabled = true
     local autoFieldSwitchEnabled = true
@@ -2710,20 +2934,25 @@ end
 -- Cache GUI inventory lookups for a short window. The old code scanned the
 -- entire PlayerGui once per countItem() call, and ownsPlanter() calls countItem
 -- up to five times per planter.
-local itemPerfCache = {
-    guiFramesAt = 0,
-    guiFrames = nil,
-    guiFrameCounts = setmetatable({}, { __mode = "k" }),
-    ownsAt = 0,
-    ownsData = nil,
-    ownsChar = nil,
-    ownsValues = {},
+-- Keep the helper functions in one table so the surrounding IIFE stays below
+-- Luau's 200-register limit even with -O0 (some executors compile that way).
+local itemPerf = {
+    cache = {
+        guiFramesAt = 0,
+        guiFrames = nil,
+        guiFrameCounts = setmetatable({}, { __mode = "k" }),
+        ownsAt = 0,
+        ownsData = nil,
+        ownsChar = nil,
+        ownsValues = {},
+    },
 }
 
-local function getGuiItemFrames()
+function itemPerf.getGuiItemFrames()
+    local cache = itemPerf.cache
     local now = tick()
-    if itemPerfCache.guiFrames and now - itemPerfCache.guiFramesAt < 0.75 then
-        return itemPerfCache.guiFrames
+    if cache.guiFrames and now - cache.guiFramesAt < 0.75 then
+        return cache.guiFrames
     end
     local frames = {}
     pcall(function()
@@ -2735,13 +2964,14 @@ local function getGuiItemFrames()
             end
         end
     end)
-    itemPerfCache.guiFramesAt = now
-    itemPerfCache.guiFrames = frames
+    cache.guiFramesAt = now
+    cache.guiFrames = frames
     return frames
 end
 
-local function readGuiFrameCount(desc, now)
-    local cached = itemPerfCache.guiFrameCounts[desc]
+function itemPerf.readGuiFrameCount(desc, now)
+    local cache = itemPerf.cache
+    local cached = cache.guiFrameCounts[desc]
     if cached and now - cached.at < 0.75 then return cached.value end
     local count = nil
     pcall(function()
@@ -2752,18 +2982,18 @@ local function readGuiFrameCount(desc, now)
             end
         end
     end)
-    itemPerfCache.guiFrameCounts[desc] = { at = now, value = count }
+    cache.guiFrameCounts[desc] = { at = now, value = count }
     return count
 end
 
-local function countItemInGui(variants)
+function itemPerf.countItemInGui(variants)
     local count = nil
     local now = tick()
-    for _, desc in ipairs(getGuiItemFrames()) do
+    for _, desc in ipairs(itemPerf.getGuiItemFrames()) do
         if desc and desc.Parent then
             local dName = desc.Name:gsub("[%s%-_']", ""):lower()
             if variants[dName] then
-                local num = readGuiFrameCount(desc, now)
+                local num = itemPerf.readGuiFrameCount(desc, now)
                 if num and (not count or num > count) then count = num end
             end
         end
@@ -3132,7 +3362,7 @@ local function countItem(item, data)
         end
     end
 
-    local guiAmount = countItemInGui(variants)
+    local guiAmount = itemPerf.countItemInGui(variants)
     if guiAmount then return guiAmount end
 
     return 0
@@ -3677,18 +3907,19 @@ local function ownsItem(itemName, itemType, char, data)
     if not itemName then return false end
 
     local now = tick()
-    if itemPerfCache.ownsData ~= data or itemPerfCache.ownsChar ~= char
-        or now - itemPerfCache.ownsAt > 0.75 then
-        itemPerfCache.ownsAt = now
-        itemPerfCache.ownsData = data
-        itemPerfCache.ownsChar = char
-        itemPerfCache.ownsValues = {}
+    local ownsCache = itemPerf.cache
+    if ownsCache.ownsData ~= data or ownsCache.ownsChar ~= char
+        or now - ownsCache.ownsAt > 0.75 then
+        ownsCache.ownsAt = now
+        ownsCache.ownsData = data
+        ownsCache.ownsChar = char
+        ownsCache.ownsValues = {}
     end
     local cacheKey = tostring(itemName):lower() .. "|" .. tostring(itemType or "")
-    local cached = itemPerfCache.ownsValues[cacheKey]
+    local cached = ownsCache.ownsValues[cacheKey]
     if cached ~= nil then return cached end
     local function done(value)
-        itemPerfCache.ownsValues[cacheKey] = value
+        ownsCache.ownsValues[cacheKey] = value
         return value
     end
 
@@ -4257,228 +4488,6 @@ end
 
 local lastFileSync = { field = nil, vicious = false, at = 0 }
 
--- Sua text truc tiep trong file config, nhung chi trong dung object JSON.
--- Khong decode/encode lai toan bo file vi JSONEncode co the doi {} thanh [].
--- Cac field cua planter cung ten field1/field2/field3, nen khong duoc gsub
--- toan file: chi patch ben trong object "autofarm"/"farming" va "combat".
-local function patchConfigFileContent(content, targetField, enableVicious)
-    local function escapeJsonString(value)
-        local s = tostring(value or "")
-        s = s:gsub("\\", "\\\\")
-        s = s:gsub('"', '\\"')
-        s = s:gsub("\n", "\\n")
-        s = s:gsub("\r", "\\r")
-        s = s:gsub("\t", "\\t")
-        return s
-    end
-
-    local function jsonLiteral(value)
-        local kind = type(value)
-        if kind == "string" then return '"' .. escapeJsonString(value) .. '"' end
-        if kind == "boolean" then return value and "true" or "false" end
-        if kind == "number" then return tostring(value) end
-        return "null"
-    end
-
-    -- Tim moi object co key tuong ung, o bat ky do sau nao. Tra ve vung
-    -- content nam giua cap ngoac nhon, bo qua chuoi/escape.
-    local function findObjectSpans(text, key)
-        local spans = {}
-        local n = #text
-        local i = 1
-        while i <= n do
-            local c = text:sub(i, i)
-            if c == '"' then
-                local start = i
-                local j = i + 1
-                local escaped = false
-                while j <= n do
-                    local ch = text:sub(j, j)
-                    if escaped then
-                        escaped = false
-                    elseif ch == "\\" then
-                        escaped = true
-                    elseif ch == '"' then
-                        break
-                    end
-                    j = j + 1
-                end
-                if j > n then break end
-                if text:sub(start + 1, j - 1) == key then
-                    local k = j + 1
-                    while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
-                    if text:sub(k, k) == ":" then
-                        k = k + 1
-                        while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
-                        if text:sub(k, k) == "{" then
-                            local depth = 1
-                            local p = k + 1
-                            local inString = false
-                            local inEscape = false
-                            while p <= n do
-                                local ch = text:sub(p, p)
-                                if inString then
-                                    if inEscape then
-                                        inEscape = false
-                                    elseif ch == "\\" then
-                                        inEscape = true
-                                    elseif ch == '"' then
-                                        inString = false
-                                    end
-                                elseif ch == '"' then
-                                    inString = true
-                                elseif ch == "{" then
-                                    depth = depth + 1
-                                elseif ch == "}" then
-                                    depth = depth - 1
-                                    if depth == 0 then break end
-                                end
-                                p = p + 1
-                            end
-                            if p <= n and depth == 0 then
-                                spans[#spans + 1] = { contentStart = k + 1, contentEnd = p - 1 }
-                                i = p + 1
-                            else
-                                break
-                            end
-                        else
-                            i = j + 1
-                        end
-                    else
-                        i = j + 1
-                    end
-                else
-                    i = j + 1
-                end
-            else
-                i = i + 1
-            end
-        end
-        return spans
-    end
-
-    -- Chi thay field o cap ngoai cung cua object, khong cham field long ben trong.
-    local function patchTopLevelField(text, key, value)
-        local literal = jsonLiteral(value)
-        local out = {}
-        local last = 1
-        local depth = 0
-        local n = #text
-        local i = 1
-        while i <= n do
-            local c = text:sub(i, i)
-            if c == '"' then
-                local start = i
-                local j = i + 1
-                local escaped = false
-                while j <= n do
-                    local ch = text:sub(j, j)
-                    if escaped then
-                        escaped = false
-                    elseif ch == "\\" then
-                        escaped = true
-                    elseif ch == '"' then
-                        break
-                    end
-                    j = j + 1
-                end
-                if j > n then break end
-                local advanced = false
-                if depth == 0 and text:sub(start + 1, j - 1) == key then
-                    local k = j + 1
-                    while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
-                    if text:sub(k, k) == ":" then
-                        k = k + 1
-                        while k <= n and text:sub(k, k):match("%s") do k = k + 1 end
-                        if k <= n then
-                            local valueStart = k
-                            local valueEnd = nil
-                            if text:sub(k, k) == '"' then
-                                local vj = k + 1
-                                local vEscape = false
-                                while vj <= n do
-                                    local ch = text:sub(vj, vj)
-                                    if vEscape then
-                                        vEscape = false
-                                    elseif ch == "\\" then
-                                        vEscape = true
-                                    elseif ch == '"' then
-                                        break
-                                    end
-                                    vj = vj + 1
-                                end
-                                if vj <= n then valueEnd = vj end
-                            else
-                                local vj = k
-                                while vj <= n do
-                                    local ch = text:sub(vj, vj)
-                                    if ch == "," or ch == "}" or ch == "]" or ch:match("%s") then break end
-                                    vj = vj + 1
-                                end
-                                valueEnd = vj - 1
-                            end
-                            if valueEnd and valueEnd >= valueStart then
-                                out[#out + 1] = text:sub(last, valueStart - 1)
-                                out[#out + 1] = literal
-                                last = valueEnd + 1
-                                i = valueEnd + 1
-                                advanced = true
-                            end
-                        end
-                    end
-                end
-                if not advanced then i = j + 1 end
-            elseif c == "{" or c == "[" then
-                depth = depth + 1
-                i = i + 1
-            elseif c == "}" or c == "]" then
-                depth = depth - 1
-                i = i + 1
-            else
-                i = i + 1
-            end
-        end
-        out[#out + 1] = text:sub(last)
-        return table.concat(out)
-    end
-
-    local function patchObject(text, objectKey, fields)
-        local spans = findObjectSpans(text, objectKey)
-        for index = #spans, 1, -1 do
-            local span = spans[index]
-            local body = text:sub(span.contentStart, span.contentEnd)
-            local updated = body
-            for _, field in ipairs(fields) do
-                updated = patchTopLevelField(updated, field[1], field[2])
-            end
-            if updated ~= body then
-                text = text:sub(1, span.contentStart - 1) .. updated .. text:sub(span.contentEnd + 1)
-            end
-        end
-        return text
-    end
-
-    local patched = content
-    if targetField and targetField ~= "" and targetField ~= "Idle" and targetField ~= "Unchanged" then
-        local fields = {
-            { "field1", targetField },
-            { "field2", "None" },
-            { "field3", "None" },
-        }
-        patched = patchObject(patched, "autofarm", fields)
-        patched = patchObject(patched, "farming", fields)
-    end
-    if enableVicious ~= nil then
-        patched = patchObject(patched, "combat", {
-            { "killvicious", enableVicious == true },
-            { "vicious", enableVicious == true },
-        })
-    end
-    return patched
-end
-
--- sua truc tiep text trong file config (khong decode/encode lai JSON,
--- vi JSONEncode doi {} thanh [] va lam hong config cua Atlas)
 local function syncFieldAndViciousToActiveFile(targetField, enableVicious)
     if not (readfile and writefile and configState.path and isfile and isfile(configState.path)) then return false end
     local wantField = targetField and targetField ~= "" and targetField ~= "Idle" and targetField ~= "Unchanged"
@@ -8538,6 +8547,7 @@ _G.AutoProgDebug = printDebug
         setAutoProgression = function(v) autoProgressionEnabled = v end,
         setAutoFieldSwitch = function(v) autoFieldSwitchEnabled = v end,
         setAutoHuntVicious = function(v) autoHuntViciousEnabled = v end,
+        restoreViciousKill = function(force) return disableViciousKill(force) end,
         setWebhookUrl = function(url) WebhookState.url = url or "" end,
         setWebhookInterval = function(seconds) WebhookState.interval = tonumber(seconds) end,
         setNotifyBuy = function(v) WebhookState.notifyBuy = v and true or false end,
@@ -13439,7 +13449,9 @@ if getgenv then
                 bridge.stopLoops()
             end
         end)
-        pcall(disableViciousKill, true)
+        if Progression and Progression.restoreViciousKill then
+            pcall(Progression.restoreViciousKill, true)
+        end
         if restoreRollSettings then pcall(restoreRollSettings) end
         Progression.cleanupProgression()
         local hold = getgenv and getgenv().IvyisAtlasHold
